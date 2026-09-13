@@ -190,7 +190,7 @@ export async function testGoogleDriveConnection(clientId: string): Promise<Drive
   if (!clientId) return { success: false, message: 'No Client ID configured.' };
   try {
     const token = await getValidToken(clientId);
-    const res = await fetch('https://www.googleapis.com/drive/v3/about', {
+    const res = await fetch('https://www.googleapis.com/drive/v3/about'?fields=user, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return { success: false, message: `Drive API error: ${res.status}` };
