@@ -9,7 +9,7 @@ import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './q
 import { printResult } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
-import { buildDriveResultPayload } from './qrService';
+import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
