@@ -484,12 +484,18 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       }
 
       let slideshowVideo: string | null = null;
-      if (allSettings.storage.saveVideos && slotPhotos.length > 0) {
-        try {
-          const ordered = [...slotPhotos].sort((a, b) => a.index - b.index);
-          slideshowVideo = await generateSlideshowVideo(ordered, 1000);
-        } catch {
-          slideshowVideo = null;
+      if (allSettings.storage.saveVideos) {
+        const rawSlotPhotos: { index: number; dataUrl: string }[] = [];
+        for (let i = 0; i < allSlots.length; i++) {
+          const cap = captureMap.get(allSlots[i].captureId);
+          if (cap) rawSlotPhotos.push({ index: i + 1, dataUrl: cap });
+        }
+        if (rawSlotPhotos.length > 0) {
+          try {
+            slideshowVideo = await generateSlideshowVideo(rawSlotPhotos, 500);
+          } catch {
+            slideshowVideo = null;
+          }
         }
       }
 
