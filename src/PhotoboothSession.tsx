@@ -204,15 +204,30 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   const frameImg = frame.image ? await loadImage(frame.image) : null;
   const fw = frameImg?.naturalWidth || 1800;
   const fh = frameImg?.naturalHeight || 1200;
-  const sx = (slot.x / 100) * fw;
-  const sy = (slot.y / 100) * fh;
-  const sw = (slot.w / 100) * fw;
-  const sh = (slot.h / 100) * fh;
+  // Slot dimensions relative to the frame template are only used to derive the
+  // TARGET ASPECT RATIO of the crop — not the output pixel size, so the exported
+  // photo keeps the camera's native resolution instead of the (often much smaller)
+  // frame template's resolution.
+  const slotAspect = ((slot.w / 100) * fw) / ((slot.h / 100) * fh);
 
   const photo = await loadImage(captureDataUrl);
+  const photoAspect = photo.naturalWidth / photo.naturalHeight;
+
+  let cropWidth: number;
+  let cropHeight: number;
+  if (slotAspect > photoAspect) {
+    cropWidth = photo.naturalWidth;
+    cropHeight = cropWidth / slotAspect;
+  } else {
+    cropHeight = photo.naturalHeight;
+    cropWidth = cropHeight * slotAspect;
+  }
+  const cropX = (photo.naturalWidth - cropWidth) / 2;
+  const cropY = (photo.naturalHeight - cropHeight) / 2;
+
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(sw);
-  canvas.height = Math.round(sh);
+  canvas.width = Math.round(cropWidth);
+  canvas.height = Math.round(cropHeight);
   const ctx = canvas.getContext('2d')!;
 
   const glow = isGlowFilter(filterId);
@@ -220,10 +235,11 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
 
   ctx.save();
   ctx.filter = baseCss;
-  drawPhotoCovered(ctx, photo, 0, 0, sw, sh);
+  // 1:1 pixel crop from the source photo — no scale-down, so full camera quality is kept.
+  ctx.drawImage(photo, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
   ctx.filter = 'none';
   if (glow) {
-    applyGlowToCanvas(ctx, photo, 0, 0, sw, sh);
+    applyGlowToCanvas(ctx, photo, 0, 0, canvas.width, canvas.height);
   }
   ctx.restore();
 
