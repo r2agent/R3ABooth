@@ -406,11 +406,11 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);
 
   const handleShowQr = useCallback(async () => {
-    if (!resultId) return;
+    if (!currentGuest) return;
     setQrError(false);
     setQrDataUrl(null);
     setPhase('qr');
-    const payload = buildResultPayload(resultId, event.id);
+    const payload = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
     try {
       const qr = await generateQrCode(payload);
       if (qr.qrDataUrl) {
@@ -421,14 +421,14 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     } catch {
       setQrError(true);
     }
-  }, [resultId, event.id]);
+  }, [currentGuest, event.name]);
 
   const handleShowDriveQr = useCallback(async () => {
     if (!currentGuest) return;
     setDriveQrError(false);
     setDriveQrDataUrl(null);
     setPhase('drive-qr');
-    const url = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
+    const url = buildDriveFolderUrl(currentGuest.guestFolderId);
     try {
       const qr = await generateQrCode(url);
       if (qr.qrDataUrl) {
