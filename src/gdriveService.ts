@@ -213,11 +213,11 @@ export async function pickDriveFolder(clientId: string): Promise<DriveFolder | n
     const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(true)
-      .setMode(google.picker.DocsViewMode.LIST)
-      .setTitle('Select MAIN folder');
+      .setMode(google.picker.DocsViewMode.LIST);
 
     const builder = new google.picker.PickerBuilder()
       .addView(view)
+      .setTitle('Select MAIN folder')
       .setOAuthToken(token)
       .setDeveloperKey('')
       .setCallback((data: { action: string; docs?: Array<{ id: string; name: string }> }) => {
