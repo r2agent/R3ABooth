@@ -520,6 +520,24 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                   <option>LOGO</option>
                 </select>
               </div>
+              <div className="setting-control">
+                <span>SHOW PRINT BUTTON</span>
+                <button className={`toggle-row ${settings.display.showPrintButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showPrintButton: !settings.display.showPrintButton })}>
+                  <i />{settings.display.showPrintButton ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              <div className="setting-control">
+                <span>SHOW QR CODE BUTTON</span>
+                <button className={`toggle-row ${settings.display.showQrButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showQrButton: !settings.display.showQrButton })}>
+                  <i />{settings.display.showQrButton ? 'ON' : 'OFF'}
+                </button>
+              </div>
+              <div className="setting-control">
+                <span>SHOW DRIVE QR BUTTON</span>
+                <button className={`toggle-row ${settings.display.showDriveQrButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showDriveQrButton: !settings.display.showDriveQrButton })}>
+                  <i />{settings.display.showDriveQrButton ? 'ON' : 'OFF'}
+                </button>
+              </div>
             </div>
           </div>
         ) : null}

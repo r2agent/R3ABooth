@@ -36,6 +36,9 @@ export type DisplaySettings = {
   brightness: number;
   touchInput: boolean;
   idleScreen: string;
+  showPrintButton: boolean;
+  showQrButton: boolean;
+  showDriveQrButton: boolean;
 };
 
 export type SecuritySettings = {
@@ -98,6 +101,9 @@ const defaultDisplay: DisplaySettings = {
   brightness: 100,
   touchInput: true,
   idleScreen: 'HOME SCREEN',
+  showPrintButton: true,
+  showQrButton: true,
+  showDriveQrButton: true,
 };
 
 const defaultSecurity: SecuritySettings = {

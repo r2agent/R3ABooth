@@ -741,13 +741,17 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             <button className="result-save" onClick={handleSave} disabled={saved} type="button">
               {saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
             </button>
-            <button className="result-print" onClick={handlePrint} disabled={!saved || printing || printed} type="button">
-              <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
-            </button>
-            <button className="result-qr" onClick={handleShowQr} disabled={!saved} type="button">
-              <QrCode size={18} /> QR CODE
-            </button>
-            {currentGuest ? (
+            {allSettings.display.showPrintButton ? (
+              <button className="result-print" onClick={handlePrint} disabled={!saved || printing || printed} type="button">
+                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
+              </button>
+            ) : null}
+            {allSettings.display.showQrButton ? (
+              <button className="result-qr" onClick={handleShowQr} disabled={!saved} type="button">
+                <QrCode size={18} /> QR CODE
+              </button>
+            ) : null}
+            {currentGuest && allSettings.display.showDriveQrButton ? (
               <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved} type="button">
                 <QrCode size={18} /> DRIVE QR
               </button>
