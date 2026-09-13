@@ -47,7 +47,13 @@ function captureFromVideo(video: HTMLVideoElement, mirror: boolean): string {
 
 function pickVideoMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return '';
-  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  const candidates = [
+    'video/mp4;codecs=h264',
+    'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ];
   for (const type of candidates) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
