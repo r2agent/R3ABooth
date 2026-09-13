@@ -5,7 +5,7 @@ import { CameraPreview, CameraStatusBadge, errorMessages } from './cameraUi';
 import { getAspectRatioValue } from './cameraStore';
 import { FILTERS, getFilterCss, isGlowFilter, applyGlowToCanvas } from './filters';
 import { saveCapture, saveResult, type StoredCapture, type StoredResult } from './storage';
-import { generateQrCode, buildResultPayload } from './qrService';
+import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
 import { printResult } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
@@ -428,7 +428,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     setDriveQrError(false);
     setDriveQrDataUrl(null);
     setPhase('drive-qr');
-    const url = buildDriveFolderUrl(currentGuest.guestFolderId);
+    const url = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
     try {
       const qr = await generateQrCode(url);
       if (qr.qrDataUrl) {
