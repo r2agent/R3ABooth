@@ -60,6 +60,85 @@ function guessVideoExtension(dataUrl: string): string {
   return match[1].includes('mp4') ? 'mp4' : 'webm';
 }
 
+function loadImageEl(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image for video'));
+    img.src = src;
+  });
+}
+
+/**
+ * Builds a single video file by showing each photo in sequence for `durationPerPhotoMs`,
+ * using a hidden canvas as the recording source. Returns a data URL, or null if the
+ * browser doesn't support MediaRecorder/canvas.captureStream.
+ */
+async function generateSlideshowVideo(
+  photos: { dataUrl: string }[],
+  durationPerPhotoMs: number,
+): Promise<string | null> {
+  if (photos.length === 0) return null;
+  const mimeType = pickVideoMimeType();
+  type CaptureCanvas = HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream };
+  const canvas = document.createElement('canvas') as CaptureCanvas;
+  if (!mimeType || typeof MediaRecorder === 'undefined' || typeof canvas.captureStream !== 'function') {
+    return null;
+  }
+
+  let images: HTMLImageElement[];
+  try {
+    images = await Promise.all(photos.map((p) => loadImageEl(p.dataUrl)));
+  } catch {
+    return null;
+  }
+
+  const width = images[0].naturalWidth || 1280;
+  const height = images[0].naturalHeight || 720;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const stream = canvas.captureStream(10);
+
+  return new Promise<string | null>((resolve) => {
+    const chunks: Blob[] = [];
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType });
+    } catch {
+      resolve(null);
+      return;
+    }
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    };
+
+    ctx.drawImage(images[0], 0, 0, width, height);
+    recorder.start();
+
+    let i = 1;
+    const drawNext = () => {
+      if (i < images.length) {
+        ctx.drawImage(images[i], 0, 0, width, height);
+        i++;
+        setTimeout(drawNext, durationPerPhotoMs);
+      } else {
+        setTimeout(() => recorder.stop(), durationPerPhotoMs);
+      }
+    };
+    setTimeout(drawNext, durationPerPhotoMs);
+  });
+}
+
 function drawPhotoCovered(ctx: CanvasRenderingContext2D, photo: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): void {
   const scale = Math.max(sw / photo.naturalWidth, sh / photo.naturalHeight);
   const dw = photo.naturalWidth * scale;
@@ -185,10 +264,6 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
   const [guestAssigning, setGuestAssigning] = useState(false);
-  const [captureVideos, setCaptureVideos] = useState<Map<string, string>>(new Map());
-  const [isRecordingClip, setIsRecordingClip] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
   const logoClickCount = useRef(0);
   const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -248,13 +323,6 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   }, []);
 
   const resetSession = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    mediaRecorderRef.current = null;
-    recordedChunksRef.current = [];
-    setIsRecordingClip(false);
-    setCaptureVideos(new Map());
     setFlash(false);
     setCaptures([]);
     setCurrentCaptureIndex(0);
@@ -310,28 +378,9 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       return;
     }
     setCaptureError(null);
-
-    if (allSettings.storage.saveVideos && stream) {
-      const mimeType = pickVideoMimeType();
-      if (mimeType) {
-        try {
-          recordedChunksRef.current = [];
-          const recorder = new MediaRecorder(stream, { mimeType });
-          recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
-          };
-          mediaRecorderRef.current = recorder;
-          recorder.start();
-          setIsRecordingClip(true);
-        } catch {
-          mediaRecorderRef.current = null;
-        }
-      }
-    }
-
     setPhase('countdown');
     setCountdown(5);
-  }, [phase, isVideoReady, allSettings.storage.saveVideos, stream]);
+  }, [phase, isVideoReady]);
 
   useEffect(() => {
     if (phase !== 'countdown' || countdown === 0) return;
@@ -344,9 +393,9 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     const timer = setTimeout(() => {
       if (countdown <= 1) {
         const video = videoRef.current;
-        const capId = uniqueCaptureIds[currentCaptureIndex];
         if (video && isVideoReady(video)) {
           const dataUrl = captureFromVideo(video, cameraSettings.mirror);
+          const capId = uniqueCaptureIds[currentCaptureIndex];
           const newCapture: CaptureData = { captureId: capId, dataUrl };
           setCaptures((prev) => [...prev, newCapture]);
           void saveCapture({
@@ -361,29 +410,6 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
           setCaptureError({ message: 'Camera not ready at capture time. Please retry.' });
           setTimeout(() => setCaptureError(null), 3000);
         }
-        const recorder = mediaRecorderRef.current;
-        if (recorder && recorder.state !== 'inactive') {
-          recorder.onstop = () => {
-            const mimeType = recorder.mimeType || 'video/webm';
-            const blob = new Blob(recordedChunksRef.current, { type: mimeType });
-            recordedChunksRef.current = [];
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result;
-              if (typeof result === 'string') {
-                setCaptureVideos((prev) => {
-                  const next = new Map(prev);
-                  next.set(capId, result);
-                  return next;
-                });
-              }
-            };
-            reader.readAsDataURL(blob);
-          };
-          recorder.stop();
-        }
-        mediaRecorderRef.current = null;
-        setIsRecordingClip(false);
         if (currentCaptureIndex + 1 >= totalCapturesNeeded) {
           setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
           setPhase('filter');
@@ -451,11 +477,13 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
         } catch { /* skip failed slot */ }
       }
 
-      const slotVideos: { index: number; dataUrl: string }[] = [];
-      if (allSettings.storage.saveVideos) {
-        for (let i = 0; i < allSlots.length; i++) {
-          const videoDataUrl = captureVideos.get(allSlots[i].captureId);
-          if (videoDataUrl) slotVideos.push({ index: i + 1, dataUrl: videoDataUrl });
+      let slideshowVideo: string | null = null;
+      if (allSettings.storage.saveVideos && slotPhotos.length > 0) {
+        try {
+          const ordered = [...slotPhotos].sort((a, b) => a.index - b.index);
+          slideshowVideo = await generateSlideshowVideo(ordered, 1000);
+        } catch {
+          slideshowVideo = null;
         }
       }
 
@@ -464,9 +492,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
           const slotName = `slot-${String(sp.index).padStart(2, '0')}.jpg`;
           downloadDataUrl(sp.dataUrl, slotName);
         }
-        for (const sv of slotVideos) {
-          const ext = guessVideoExtension(sv.dataUrl);
-          downloadDataUrl(sv.dataUrl, `slot-${String(sv.index).padStart(2, '0')}.${ext}`);
+        if (slideshowVideo) {
+          downloadDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
         }
         downloadDataUrl(compositeUrl, 'final-result.jpg');
       }
@@ -479,15 +506,14 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`,
             dataUrl: sp.dataUrl,
           })),
-          ...slotVideos.map((sv) => ({
-            fileName: `slot-${String(sv.index).padStart(2, '0')}.${guessVideoExtension(sv.dataUrl)}`,
-            dataUrl: sv.dataUrl,
-          })),
+          ...(slideshowVideo
+            ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
+            : []),
         ];
         void autoUploadToGuestFolder(currentGuest, gd.clientId, uploadFiles);
       }
     } catch { /* ignore */ }
-  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, captureVideos]);
+  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);
 
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
@@ -667,11 +693,6 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
                     <div className="countdown-overlay">
                       <span className="countdown-number">{countdown}</span>
                     </div>
-                  ) : null}
-                  {isRecordingClip ? (
-                    <span style={{ position: 'absolute', top: 12, right: 12, color: '#fff', background: 'rgba(220,38,38,0.85)', padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', zIndex: 5 }}>
-                      ● REC
-                    </span>
                   ) : null}
                 </div>
                 <HiddenVideoCapture videoRef={videoRef} stream={stream} />
