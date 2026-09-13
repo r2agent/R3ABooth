@@ -32,12 +32,17 @@ export async function generateQrCode(payload: string): Promise<QrResult> {
 }
 
 export function buildResultPayload(resultId: string, eventId: string): string {
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  if (base && base !== 'null' && base !== 'file://') {
+    return `${base}/#result/${resultId}`;
+  }
+  return `r3a-booth://result/${resultId}?event=${eventId}`;
+}
+
 const RESULT_GALLERY_BASE_URL = 'https://result-r3abooth.vercel.app';
 
 export function buildDriveResultPayload(guestFolderId: string, eventName: string): string {
   const params = new URLSearchParams({ folder: guestFolderId });
   if (eventName) params.set('event', eventName);
   return `${RESULT_GALLERY_BASE_URL}/?${params.toString()}`;
-  }
-  return `r3a-booth://result/${resultId}?event=${eventId}`;
 }
