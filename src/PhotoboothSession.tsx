@@ -285,7 +285,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     }
     setCaptureError(null);
     setPhase('countdown');
-    setCountdown(3);
+    setCountdown(5);
   }, [phase, isVideoReady]);
 
   useEffect(() => {
