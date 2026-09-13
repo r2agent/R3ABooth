@@ -96,7 +96,7 @@ declare const google: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const gapi: any;
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
 
 function initTokenClient(clientId: string): Promise<void> {
   return loadGis().then(() => {
@@ -213,11 +213,11 @@ export async function pickDriveFolder(clientId: string): Promise<DriveFolder | n
     const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(true)
-      .setMode(google.picker.DocsViewMode.LIST)
-      .setTitle('Select MAIN folder');
+      .setMode(google.picker.DocsViewMode.LIST);
 
     const builder = new google.picker.PickerBuilder()
       .addView(view)
+      .setTitle('Select MAIN folder')
       .setOAuthToken(token)
       .setDeveloperKey('')
       .setCallback((data: { action: string; docs?: Array<{ id: string; name: string }> }) => {
