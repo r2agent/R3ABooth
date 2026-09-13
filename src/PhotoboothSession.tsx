@@ -45,6 +45,21 @@ function captureFromVideo(video: HTMLVideoElement, mirror: boolean): string {
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
+function pickVideoMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+  for (const type of candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return '';
+}
+
+function guessVideoExtension(dataUrl: string): string {
+  const match = dataUrl.match(/^data:video\/([a-zA-Z0-9]+)/);
+  if (!match) return 'webm';
+  return match[1].includes('mp4') ? 'mp4' : 'webm';
+}
+
 function drawPhotoCovered(ctx: CanvasRenderingContext2D, photo: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): void {
   const scale = Math.max(sw / photo.naturalWidth, sh / photo.naturalHeight);
   const dw = photo.naturalWidth * scale;
@@ -170,6 +185,10 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
   const [guestAssigning, setGuestAssigning] = useState(false);
+  const [captureVideos, setCaptureVideos] = useState<Map<string, string>>(new Map());
+  const [isRecordingClip, setIsRecordingClip] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const logoClickCount = useRef(0);
   const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -229,6 +248,13 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   }, []);
 
   const resetSession = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+    setIsRecordingClip(false);
+    setCaptureVideos(new Map());
     setFlash(false);
     setCaptures([]);
     setCurrentCaptureIndex(0);
@@ -284,9 +310,28 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       return;
     }
     setCaptureError(null);
+
+    if (allSettings.storage.saveVideos && stream) {
+      const mimeType = pickVideoMimeType();
+      if (mimeType) {
+        try {
+          recordedChunksRef.current = [];
+          const recorder = new MediaRecorder(stream, { mimeType });
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data);
+          };
+          mediaRecorderRef.current = recorder;
+          recorder.start();
+          setIsRecordingClip(true);
+        } catch {
+          mediaRecorderRef.current = null;
+        }
+      }
+    }
+
     setPhase('countdown');
     setCountdown(5);
-  }, [phase, isVideoReady]);
+  }, [phase, isVideoReady, allSettings.storage.saveVideos, stream]);
 
   useEffect(() => {
     if (phase !== 'countdown' || countdown === 0) return;
@@ -299,9 +344,9 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     const timer = setTimeout(() => {
       if (countdown <= 1) {
         const video = videoRef.current;
+        const capId = uniqueCaptureIds[currentCaptureIndex];
         if (video && isVideoReady(video)) {
           const dataUrl = captureFromVideo(video, cameraSettings.mirror);
-          const capId = uniqueCaptureIds[currentCaptureIndex];
           const newCapture: CaptureData = { captureId: capId, dataUrl };
           setCaptures((prev) => [...prev, newCapture]);
           void saveCapture({
@@ -316,6 +361,29 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
           setCaptureError({ message: 'Camera not ready at capture time. Please retry.' });
           setTimeout(() => setCaptureError(null), 3000);
         }
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state !== 'inactive') {
+          recorder.onstop = () => {
+            const mimeType = recorder.mimeType || 'video/webm';
+            const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+            recordedChunksRef.current = [];
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result;
+              if (typeof result === 'string') {
+                setCaptureVideos((prev) => {
+                  const next = new Map(prev);
+                  next.set(capId, result);
+                  return next;
+                });
+              }
+            };
+            reader.readAsDataURL(blob);
+          };
+          recorder.stop();
+        }
+        mediaRecorderRef.current = null;
+        setIsRecordingClip(false);
         if (currentCaptureIndex + 1 >= totalCapturesNeeded) {
           setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
           setPhase('filter');
@@ -383,10 +451,22 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
         } catch { /* skip failed slot */ }
       }
 
+      const slotVideos: { index: number; dataUrl: string }[] = [];
+      if (allSettings.storage.saveVideos) {
+        for (let i = 0; i < allSlots.length; i++) {
+          const videoDataUrl = captureVideos.get(allSlots[i].captureId);
+          if (videoDataUrl) slotVideos.push({ index: i + 1, dataUrl: videoDataUrl });
+        }
+      }
+
       if (allSettings.storage.autoDownloadResult) {
         for (const sp of slotPhotos) {
           const slotName = `slot-${String(sp.index).padStart(2, '0')}.jpg`;
           downloadDataUrl(sp.dataUrl, slotName);
+        }
+        for (const sv of slotVideos) {
+          const ext = guessVideoExtension(sv.dataUrl);
+          downloadDataUrl(sv.dataUrl, `slot-${String(sv.index).padStart(2, '0')}.${ext}`);
         }
         downloadDataUrl(compositeUrl, 'final-result.jpg');
       }
@@ -399,11 +479,15 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`,
             dataUrl: sp.dataUrl,
           })),
+          ...slotVideos.map((sv) => ({
+            fileName: `slot-${String(sv.index).padStart(2, '0')}.${guessVideoExtension(sv.dataUrl)}`,
+            dataUrl: sv.dataUrl,
+          })),
         ];
         void autoUploadToGuestFolder(currentGuest, gd.clientId, uploadFiles);
       }
     } catch { /* ignore */ }
-  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);
+  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, captureVideos]);
 
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
@@ -583,6 +667,11 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
                     <div className="countdown-overlay">
                       <span className="countdown-number">{countdown}</span>
                     </div>
+                  ) : null}
+                  {isRecordingClip ? (
+                    <span style={{ position: 'absolute', top: 12, right: 12, color: '#fff', background: 'rgba(220,38,38,0.85)', padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: '0.05em', zIndex: 5 }}>
+                      ● REC
+                    </span>
                   ) : null}
                 </div>
                 <HiddenVideoCapture videoRef={videoRef} stream={stream} />
