@@ -9,7 +9,7 @@ import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './q
 import { printResult } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
-import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
+import { buildDriveFolderUrl } from './gdriveService';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
@@ -428,8 +428,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     setDriveQrError(false);
     setDriveQrDataUrl(null);
     setPhase('drive-qr');
-    const url = buildDriveFolderUrl(currentGuest.guestFolderId);
     try {
+      const url = buildDriveFolderUrl(currentGuest.guestFolderId);
       const qr = await generateQrCode(url);
       if (qr.qrDataUrl) {
         setDriveQrDataUrl(qr.qrDataUrl);
