@@ -96,7 +96,7 @@ declare const google: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const gapi: any;
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
 function initTokenClient(clientId: string): Promise<void> {
   return loadGis().then(() => {
@@ -190,7 +190,7 @@ export async function testGoogleDriveConnection(clientId: string): Promise<Drive
   if (!clientId) return { success: false, message: 'No Client ID configured.' };
   try {
     const token = await getValidToken(clientId);
-    const res = await fetch('https://www.googleapis.com/drive/v3/about'?fields=user, {
+    const res = await fetch('https://www.googleapis.com/drive/v3/about', {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return { success: false, message: `Drive API error: ${res.status}` };
@@ -213,11 +213,11 @@ export async function pickDriveFolder(clientId: string): Promise<DriveFolder | n
     const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(true)
-      .setMode(google.picker.DocsViewMode.LIST);
+      .setMode(google.picker.DocsViewMode.LIST)
+      .setTitle('Select MAIN folder');
 
     const builder = new google.picker.PickerBuilder()
       .addView(view)
-      .setTitle('Select MAIN folder')
       .setOAuthToken(token)
       .setDeveloperKey('')
       .setCallback((data: { action: string; docs?: Array<{ id: string; name: string }> }) => {
