@@ -505,9 +505,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
         }
         if (rawSlotPhotos.length > 0) {
           try {
-            const TOTAL_VIDEO_DURATION_MS = 6000; // <- ubah angka ini buat atur total durasi video (dalam milidetik)
-            const perPhotoMs = TOTAL_VIDEO_DURATION_MS / rawSlotPhotos.length;
-            slideshowVideo = await generateSlideshowVideo(rawSlotPhotos, perPhotoMs);
+            const DURATION_PER_SLIDE_MS = 300; // <- ubah angka ini buat atur berapa lama 1 foto/slide muncul (dalam milidetik)
+            slideshowVideo = await generateSlideshowVideo(rawSlotPhotos, DURATION_PER_SLIDE_MS);
           } catch {
             slideshowVideo = null;
           }
