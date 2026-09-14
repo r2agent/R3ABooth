@@ -112,7 +112,7 @@ async function generateSlideshowVideo(
     const chunks: Blob[] = [];
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(stream, { mimeType });
+      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
     } catch {
       resolve(null);
       return;
@@ -201,26 +201,23 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
 }
 
 async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
-  const frameImg = frame.image ? await loadImage(frame.image) : null;
-  const fw = frameImg?.naturalWidth || 1800;
-  const fh = frameImg?.naturalHeight || 1200;
-  // Slot dimensions relative to the frame template are only used to derive the
-  // TARGET ASPECT RATIO of the crop — not the output pixel size, so the exported
-  // photo keeps the camera's native resolution instead of the (often much smaller)
-  // frame template's resolution.
-  const slotAspect = ((slot.w / 100) * fw) / ((slot.h / 100) * fh);
+  void frame; // frame template shape no longer determines the exported slot photo's crop
+  void slot; // slot position/size in the template is no longer used for the standalone export
+  // Standalone slot-XX.jpg exports are always 16:9 at the camera's native resolution,
+  // independent of the slot's shape inside the frame template.
+  const TARGET_ASPECT = 16 / 9;
 
   const photo = await loadImage(captureDataUrl);
   const photoAspect = photo.naturalWidth / photo.naturalHeight;
 
   let cropWidth: number;
   let cropHeight: number;
-  if (slotAspect > photoAspect) {
+  if (TARGET_ASPECT > photoAspect) {
     cropWidth = photo.naturalWidth;
-    cropHeight = cropWidth / slotAspect;
+    cropHeight = cropWidth / TARGET_ASPECT;
   } else {
     cropHeight = photo.naturalHeight;
-    cropWidth = cropHeight * slotAspect;
+    cropWidth = cropHeight * TARGET_ASPECT;
   }
   const cropX = (photo.naturalWidth - cropWidth) / 2;
   const cropY = (photo.naturalHeight - cropHeight) / 2;
