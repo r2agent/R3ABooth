@@ -7,6 +7,7 @@ import { CameraTestModal, CameraStatusBadge } from './cameraUi';
 import { useCamera } from './useCamera';
 import { PhotoboothSession } from './PhotoboothSession';
 import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
+import { OperatorDashboard } from './operator/OperatorDashboard';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -165,7 +166,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
     const result = await connectGoogleDrive(clientId);
     setGdriveConnecting(false);
     if (result.success) {
-      update('googleDrive', { connected: true, account: result.account || 'Connected' });
+      const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
+      setSettings(next);
+      saveAllSettings(next); // auto-save setelah connect
     } else {
       setGdriveTestState({ status: 'error', message: result.error || 'Connection failed' });
     }
@@ -173,7 +176,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
 
   const handleDisconnectGdrive = async () => {
     await disconnectGoogleDrive();
-    update('googleDrive', { connected: false, account: '', mainFolderId: '', mainFolderName: '', autoUpload: false });
+    const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: false, account: '', mainFolderId: '', mainFolderName: '', autoUpload: false } };
+    setSettings(next);
+    saveAllSettings(next); // auto-save setelah disconnect
     setGdriveTestState({ status: 'idle', message: '' });
     setGdriveUploadTestState({ status: 'idle', message: '' });
   };
@@ -189,7 +194,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
     const result = await connectGoogleDrive(clientId);
     setGdriveConnecting(false);
     if (result.success) {
-      update('googleDrive', { connected: true, account: result.account || 'Connected' });
+      const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
+      setSettings(next);
+      saveAllSettings(next);
     } else {
       setGdriveTestState({ status: 'error', message: result.error || 'Reconnect failed' });
     }
@@ -206,7 +213,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
     try {
       const folder = await pickDriveFolder(clientId);
       if (folder) {
-        update('googleDrive', { mainFolderId: folder.id, mainFolderName: folder.name });
+        const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: folder.id, mainFolderName: folder.name } };
+        setSettings(next);
+        saveAllSettings(next); // auto-save setelah pilih MAIN folder
       }
     } catch (err) {
       setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to open folder picker' });
@@ -632,9 +641,31 @@ function App() {
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
   const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
+  const [isOperator, setIsOperator] = useState(
+    typeof window !== 'undefined' && window.location.hash === '#operator'
+  );
 
   const refreshEvents = async () => { setEvents(await getAllEvents()); };
   useEffect(() => { void refreshEvents(); }, []);
+
+  // Operator dashboard routing (hash-based)
+  useEffect(() => {
+    const onHash = () => setIsOperator(window.location.hash === '#operator');
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  if (isOperator) {
+    return (
+      <OperatorDashboard
+        allSettings={settings}
+        onClose={() => {
+          window.location.hash = '';
+          setIsOperator(false);
+        }}
+      />
+    );
+  }
 
   if (screen === 'project-list') {
     return <ProjectList events={events} onHome={() => setScreen('home')} onOpen={(event) => { setActiveEvent(event); setScreen('photobooth-session'); }} onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }} onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }} />;

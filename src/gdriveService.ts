@@ -29,6 +29,7 @@ let accessToken: string | null = null;
 let tokenExpiry = 0;
 let tokenClient: TokenClient | null = null;
 let currentClientId = '';
+let lastKnownAccount: string | null = null;
 
 type TokenClient = {
   requestAccessToken: (opts?: {
@@ -96,7 +97,8 @@ declare const google: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const gapi: any;
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+const SCOPES =
+  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
 
 function initTokenClient(clientId: string): Promise<void> {
   return loadGis().then(() => {
@@ -121,7 +123,6 @@ function requestToken(clientId: string, promptMode: '' | 'consent' | 'select_acc
           reject(new Error('Token client not initialized'));
           return;
         }
-        // Override callback for this request
         tokenClient.callback = (resp: { access_token?: string; expires_in?: number; error?: string; error_description?: string }) => {
           if (resp.error) {
             reject(new Error(resp.error_description || resp.error));
@@ -164,6 +165,7 @@ export async function connectGoogleDrive(clientId: string): Promise<DriveConnect
   try {
     const token = await requestToken(clientId, 'consent');
     const email = await fetchUserEmail(token);
+    lastKnownAccount = email;
     return { success: true, account: email };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Connection failed';
@@ -183,6 +185,7 @@ export async function disconnectGoogleDrive(): Promise<boolean> {
   tokenExpiry = 0;
   tokenClient = null;
   currentClientId = '';
+  lastKnownAccount = null;
   return true;
 }
 
@@ -193,7 +196,16 @@ export async function testGoogleDriveConnection(clientId: string): Promise<Drive
     const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return { success: false, message: `Drive API error: ${res.status}` };
+    if (!res.ok) {
+      let message = `Drive API error (HTTP ${res.status})`;
+      try {
+        const err = await res.json();
+        if (err?.error?.message) message = err.error.message;
+      } catch {
+        // keep default
+      }
+      return { success: false, message };
+    }
     return { success: true, message: 'Google Drive connection is active.' };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : 'Connection failed' };
@@ -294,4 +306,24 @@ export async function runDiagnostics(): Promise<{ label: string; status: string;
   }
 
   return results;
+}
+
+// --- Operator dashboard helpers ----------------------------------------------
+
+export type TokenStatus = {
+  hasToken: boolean;
+  expiresAt: number | null;
+  expiresInMs: number | null;
+  account: string | null;
+};
+
+export function getTokenStatus(): TokenStatus {
+  const now = Date.now();
+  const hasToken = !!accessToken && now < tokenExpiry;
+  return {
+    hasToken,
+    expiresAt: accessToken ? tokenExpiry : null,
+    expiresInMs: hasToken ? tokenExpiry - now : null,
+    account: lastKnownAccount,
+  };
 }

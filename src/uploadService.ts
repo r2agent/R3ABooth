@@ -56,7 +56,7 @@ function openDB(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-type UploadRecord = {
+export type UploadRecord = {
   id: string;
   guestFolderId: string;
   fileName: string;
@@ -95,7 +95,7 @@ async function savePendingUpload(rec: PendingUpload): Promise<void> {
   });
 }
 
-async function deletePendingUpload(id: string): Promise<void> {
+export async function deletePendingUpload(id: string): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(PENDING_STORE, 'readwrite');
@@ -105,7 +105,7 @@ async function deletePendingUpload(id: string): Promise<void> {
   });
 }
 
-async function getAllPendingUploads(): Promise<PendingUpload[]> {
+export async function getAllPendingUploads(): Promise<PendingUpload[]> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(PENDING_STORE, 'readonly');
@@ -270,4 +270,39 @@ export async function retryFailedUploads(clientId: string): Promise<void> {
       // will retry again next time
     }
   }
+}
+
+// --- Operator dashboard helpers ----------------------------------------------
+
+export async function getAllUploads(): Promise<UploadRecord[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(UPLOADS_STORE, 'readonly');
+    const req = tx.objectStore(UPLOADS_STORE).getAll();
+    req.onsuccess = () => resolve(req.result as UploadRecord[]);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function getUploadStats(): Promise<{
+  uploaded: number;
+  pending: number;
+  failed: number;
+}> {
+  const [uploads, pending] = await Promise.all([
+    getAllUploads().catch(() => []),
+    getAllPendingUploads().catch(() => []),
+  ]);
+  return {
+    uploaded: uploads.length,
+    pending: pending.length,
+    failed: 0,
+  };
+}
+
+export async function retryAllPending(clientId: string): Promise<number> {
+  const before = (await getAllPendingUploads().catch(() => [])).length;
+  await retryFailedUploads(clientId);
+  const after = (await getAllPendingUploads().catch(() => [])).length;
+  return before - after;
 }
