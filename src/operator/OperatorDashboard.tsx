@@ -25,6 +25,7 @@ export const OperatorDashboard = ({
     expiresAt: null,
     expiresInMs: null,
     account: null,
+    hasRefreshToken: false,
   });
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [retrying, setRetrying] = useState(false);
@@ -33,13 +34,20 @@ export const OperatorDashboard = ({
 
   const refresh = useCallback(async () => {
     try {
-      const [s, p] = await Promise.all([
+      const [s, p, t] = await Promise.all([
         getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 })),
         getAllPendingUploads().catch(() => []),
+        getTokenStatus().catch(() => ({
+          hasToken: false,
+          expiresAt: null,
+          expiresInMs: null,
+          account: null,
+          hasRefreshToken: false,
+        })),
       ]);
       setStats(s);
       setPending(p);
-      setToken(getTokenStatus());
+      setToken(t);
       setLastUpdate(new Date());
     } catch {
       /* ignore */
@@ -149,6 +157,10 @@ export const OperatorDashboard = ({
               <>
                 <CheckCircle2 size={14} color="#4ade80" /> Connected
               </>
+            ) : token.hasRefreshToken ? (
+              <>
+                <AlertCircle size={14} color="#facc15" /> Token expired — auto-refresh available
+              </>
             ) : (
               <>
                 <AlertCircle size={14} color="#ef4444" /> Not connected
@@ -160,6 +172,9 @@ export const OperatorDashboard = ({
           </p>
           <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)' }}>
             Token expires in: {token.hasToken ? `${tokenExpiresIn} min` : '—'}
+          </p>
+          <p style={{ margin: 4, fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
+            Refresh token: {token.hasRefreshToken ? '✓ stored' : '✗ not stored'}
           </p>
         </div>
 

@@ -1,9 +1,13 @@
-// Google Drive integration via Google Identity Services (GIS) OAuth token client
+// Google Drive integration via Google Identity Services (GIS) Authorization Code flow
 // and Google Picker API for folder selection.
 //
 // Security model:
-// - OAuth uses implicit flow (token client, not authorization code) — no client secret needed.
-// - Access token is kept in memory only (never persisted to localStorage/IndexedDB).
+// - OAuth uses authorization code flow (server-side token exchange) — client_secret stays on server.
+// - Access token kept in memory + sessionStorage (per-tab).
+// - Refresh token kept in IndexedDB (survives refresh, cleared on disconnect).
+// - Backend endpoints:
+//     POST /api/auth/exchange  { code, redirect_uri }  -> tokens
+//     POST /api/auth/refresh   { refresh_token }       -> new access_token
 // - Admin enters their own Google OAuth Client ID in Settings; it is stored in localStorage
 //   alongside other non-sensitive settings (a Client ID is public by design).
 
@@ -23,22 +27,139 @@ export type DriveFolder = {
   name: string;
 };
 
-// --- Token management (in-memory only) --------------------------------------
+// --- Constants ---------------------------------------------------------------
+
+const SCOPES =
+  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+
+const REDIRECT_URI =
+  typeof window !== 'undefined'
+    ? `${window.location.origin}/api/auth/callback`
+    : '/api/auth/callback';
+
+const TOKEN_SS_KEY = 'r3a.gdrive.accessToken';
+const EXPIRY_SS_KEY = 'r3a.gdrive.tokenExpiry';
+const ACCOUNT_SS_KEY = 'r3a.gdrive.account';
+
+// --- Token state -------------------------------------------------------------
 
 let accessToken: string | null = null;
 let tokenExpiry = 0;
-let tokenClient: TokenClient | null = null;
-let currentClientId = '';
 let lastKnownAccount: string | null = null;
+let codeClient: CodeClient | null = null;
+let currentClientId = '';
+let refreshInFlight: Promise<string> | null = null;
 
-type TokenClient = {
-  requestAccessToken: (opts?: {
-    prompt?: '' | 'consent' | 'select_account';
-  }) => void;
-  callback?: (resp: { access_token?: string; expires_in?: number; error?: string; error_description?: string }) => void;
+type CodeClient = {
+  requestCode: () => void;
+  callback?: (resp: { code?: string; scope?: string; error?: string; error_description?: string }) => void;
 };
 
-// Google Identity Services script loader
+// --- sessionStorage helpers --------------------------------------------------
+
+function ssGet(key: string): string | null {
+  try {
+    return typeof window !== 'undefined' ? window.sessionStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function ssSet(key: string, value: string | null): void {
+  try {
+    if (typeof window === 'undefined') return;
+    if (value === null) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Restore access token from sessionStorage on module load (per-tab)
+accessToken = ssGet(TOKEN_SS_KEY);
+tokenExpiry = Number(ssGet(EXPIRY_SS_KEY) || 0) || 0;
+lastKnownAccount = ssGet(ACCOUNT_SS_KEY);
+
+function setAccessToken(token: string | null, expiry: number): void {
+  accessToken = token;
+  tokenExpiry = expiry;
+  ssSet(TOKEN_SS_KEY, token);
+  ssSet(EXPIRY_SS_KEY, expiry ? String(expiry) : null);
+}
+
+function setAccount(account: string | null): void {
+  lastKnownAccount = account;
+  ssSet(ACCOUNT_SS_KEY, account);
+}
+
+// --- IndexedDB for refresh token --------------------------------------------
+
+const IDB_NAME = 'r3a-booth';
+const IDB_STORE = 'gdriveAuth';
+const IDB_VERSION = 3;
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function openDB(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => { dbPromise = null; reject(req.error); };
+  });
+  return dbPromise;
+}
+
+async function idbSet(key: string, value: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ key, value });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGet(key: string): Promise<string | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result ? (req.result.value as string) : null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbDelete(key: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function saveRefreshToken(token: string): Promise<void> {
+  await idbSet('refresh_token', token);
+}
+
+async function getRefreshToken(): Promise<string | null> {
+  return idbGet('refresh_token').catch(() => null);
+}
+
+async function clearRefreshToken(): Promise<void> {
+  await idbDelete('refresh_token').catch(() => {});
+}
+
+// --- Google Identity Services loader ----------------------------------------
+
 let gisLoaded = false;
 let gisLoadPromise: Promise<void> | null = null;
 
@@ -64,7 +185,8 @@ function loadGis(): Promise<void> {
   return gisLoadPromise;
 }
 
-// Google Picker script loader
+// --- Google Picker loader ---------------------------------------------------
+
 let pickerLoaded = false;
 let pickerLoadPromise: Promise<void> | null = null;
 
@@ -97,75 +219,184 @@ declare const google: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const gapi: any;
 
-const SCOPES =
-  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+// --- Authorization Code flow -------------------------------------------------
 
-function initTokenClient(clientId: string): Promise<void> {
+function initCodeClient(clientId: string): Promise<void> {
   return loadGis().then(() => {
     currentClientId = clientId;
-    tokenClient = google.accounts.oauth2.initTokenClient({
+    codeClient = google.accounts.oauth2.initCodeClient({
       client_id: clientId,
       scope: SCOPES,
-      callback: () => { /* handled per-request via callback override */ },
+      ux_mode: 'popup',
+      redirect_uri: REDIRECT_URI,
+      callback: () => { /* set per-request */ },
     });
   });
 }
 
 /**
- * Request an access token via GIS. Returns the token string or throws.
- * The token is kept in memory only.
+ * Request an authorization code via GIS, then exchange it server-side
+ * for access_token + refresh_token.
  */
-function requestToken(clientId: string, promptMode: '' | 'consent' | 'select_account' = ''): Promise<string> {
-  return initTokenClient(clientId).then(
-    () =>
-      new Promise<string>((resolve, reject) => {
-        if (!tokenClient) {
-          reject(new Error('Token client not initialized'));
-          return;
-        }
-        tokenClient.callback = (resp: { access_token?: string; expires_in?: number; error?: string; error_description?: string }) => {
-          if (resp.error) {
-            reject(new Error(resp.error_description || resp.error));
-            return;
-          }
-          accessToken = resp.access_token || null;
-          tokenExpiry = Date.now() + (resp.expires_in ? resp.expires_in * 1000 : 3600 * 1000);
-          resolve(accessToken!);
-        };
-        tokenClient.requestAccessToken({ prompt: promptMode });
-      }),
-  );
+async function requestTokens(clientId: string): Promise<{ accessToken: string; expiresIn: number; refreshToken: string | null }> {
+  await initCodeClient(clientId);
+
+  const code = await new Promise<string>((resolve, reject) => {
+    if (!codeClient) {
+      reject(new Error('Code client not initialized'));
+      return;
+    }
+    codeClient.callback = (resp) => {
+      if (resp.error) {
+        reject(new Error(resp.error_description || resp.error));
+        return;
+      }
+      if (!resp.code) {
+        reject(new Error('No authorization code returned'));
+        return;
+      }
+      resolve(resp.code);
+    };
+    codeClient.requestCode();
+  });
+
+  // Exchange code -> tokens via our backend
+  const res = await fetch('/api/auth/exchange', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, redirect_uri: REDIRECT_URI }),
+  });
+
+  if (!res.ok) {
+    let msg = `Token exchange failed (HTTP ${res.status})`;
+    try {
+      const err = await res.json();
+      if (err?.error_description) msg = err.error_description;
+      else if (err?.error) msg = err.error;
+    } catch { /* keep default */ }
+    throw new Error(msg);
+  }
+
+  const data = await res.json() as {
+    access_token?: string;
+    expires_in?: number;
+    refresh_token?: string;
+  };
+
+  if (!data.access_token) {
+    throw new Error('No access_token in exchange response');
+  }
+
+  const expiresIn = data.expires_in ?? 3600;
+  const refreshToken = data.refresh_token ?? null;
+
+  setAccessToken(data.access_token, Date.now() + expiresIn * 1000);
+  if (refreshToken) {
+    await saveRefreshToken(refreshToken);
+  }
+
+  return { accessToken: data.access_token, expiresIn, refreshToken };
 }
 
+/**
+ * Refresh access token via backend using stored refresh_token.
+ */
+async function refreshAccessToken(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) {
+      throw new Error('No refresh token available. Please reconnect Google Drive.');
+    }
+
+    const res = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) {
+      let msg = `Token refresh failed (HTTP ${res.status})`;
+      try {
+        const err = await res.json();
+        if (err?.error_description) msg = err.error_description;
+        else if (err?.error) msg = err.error;
+      } catch { /* keep default */ }
+      // If refresh_token is revoked/invalid, clear it so user knows to reconnect
+      if (msg.includes('invalid_grant') || msg.includes('revoked')) {
+        await clearRefreshToken();
+        setAccessToken(null, 0);
+        setAccount(null);
+      }
+      throw new Error(msg);
+    }
+
+    const data = await res.json() as {
+      access_token?: string;
+      expires_in?: number;
+    };
+
+    if (!data.access_token) {
+      throw new Error('No access_token in refresh response');
+    }
+
+    const expiresIn = data.expires_in ?? 3600;
+    setAccessToken(data.access_token, Date.now() + expiresIn * 1000);
+    return data.access_token;
+  })();
+
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+// --- Public API --------------------------------------------------------------
+
 export function getValidToken(clientId: string): Promise<string> {
+  // 1. Token masih valid, pakai langsung
   if (accessToken && Date.now() < tokenExpiry - 60000) {
     return Promise.resolve(accessToken);
   }
-  return requestToken(clientId, '');
+
+  // 2. Token expired, coba refresh via refresh_token (tanpa user gesture)
+  return refreshAccessToken().catch(async (err) => {
+    // 3. Refresh gagal (misal refresh token di-revoke)
+    //    Fallback: minta user login ulang
+    if (err instanceof Error && err.message.includes('No refresh token')) {
+      // fallback ke interactive
+      const tokens = await requestTokens(clientId);
+      return tokens.accessToken;
+    }
+    // Kalau refresh token invalid, minta user login ulang juga
+    if (err instanceof Error && (err.message.includes('invalid_grant') || err.message.includes('revoked'))) {
+      const tokens = await requestTokens(clientId);
+      return tokens.accessToken;
+    }
+    throw err;
+  });
 }
 
 /** Fetch the user's email from the userinfo endpoint. */
-function fetchUserEmail(token: string): Promise<string> {
-  return fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+async function fetchUserEmail(token: string): Promise<string> {
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${token}` },
-  })
-    .then((res) => {
-      if (!res.ok) throw new Error('Failed to fetch user info');
-      return res.json();
-    })
-    .then((data: { email?: string }) => data.email || 'Unknown account');
+  });
+  if (!res.ok) throw new Error('Failed to fetch user info');
+  const data = await res.json() as { email?: string };
+  return data.email || 'Unknown account';
 }
-
-// --- Public API ---------------------------------------------------------------
 
 export async function connectGoogleDrive(clientId: string): Promise<DriveConnectResult> {
   if (!clientId || clientId.trim().length < 10) {
     return { success: false, error: 'Please enter a valid Google OAuth Client ID in the field above.' };
   }
   try {
-    const token = await requestToken(clientId, 'consent');
-    const email = await fetchUserEmail(token);
-    lastKnownAccount = email;
+    const tokens = await requestTokens(clientId);
+    const email = await fetchUserEmail(tokens.accessToken);
+    setAccount(email);
     return { success: true, account: email };
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Connection failed';
@@ -177,15 +408,13 @@ export async function disconnectGoogleDrive(): Promise<boolean> {
   if (accessToken) {
     try {
       await fetch(`https://oauth2.googleapis.com/revoke?token=${accessToken}`, { method: 'POST' });
-    } catch {
-      // best-effort revoke
-    }
+    } catch { /* best-effort revoke */ }
   }
-  accessToken = null;
-  tokenExpiry = 0;
-  tokenClient = null;
+  setAccessToken(null, 0);
+  setAccount(null);
+  await clearRefreshToken();
+  codeClient = null;
   currentClientId = '';
-  lastKnownAccount = null;
   return true;
 }
 
@@ -201,9 +430,7 @@ export async function testGoogleDriveConnection(clientId: string): Promise<Drive
       try {
         const err = await res.json();
         if (err?.error?.message) message = err.error.message;
-      } catch {
-        // keep default
-      }
+      } catch { /* keep default */ }
       return { success: false, message };
     }
     return { success: true, message: 'Google Drive connection is active.' };
@@ -255,10 +482,7 @@ export async function shareFolderWithAnyone(folderId: string, clientId: string):
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        role: 'reader',
-        type: 'anyone',
-      }),
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
     });
     return res.ok;
   } catch {
@@ -308,22 +532,25 @@ export async function runDiagnostics(): Promise<{ label: string; status: string;
   return results;
 }
 
-// --- Operator dashboard helpers ----------------------------------------------
+// --- Operator dashboard helpers ---------------------------------------------
 
 export type TokenStatus = {
   hasToken: boolean;
   expiresAt: number | null;
   expiresInMs: number | null;
   account: string | null;
+  hasRefreshToken: boolean;
 };
 
-export function getTokenStatus(): TokenStatus {
+export async function getTokenStatus(): Promise<TokenStatus> {
   const now = Date.now();
   const hasToken = !!accessToken && now < tokenExpiry;
+  const refreshToken = await getRefreshToken().catch(() => null);
   return {
     hasToken,
     expiresAt: accessToken ? tokenExpiry : null,
     expiresInMs: hasToken ? tokenExpiry - now : null,
     account: lastKnownAccount,
+    hasRefreshToken: !!refreshToken,
   };
 }
