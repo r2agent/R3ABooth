@@ -267,7 +267,7 @@ export async function pickDriveFolder(clientId: string): Promise<DriveFolder | n
       .addView(view)
       .setTitle('Select MAIN folder')
       .setOAuthToken(token)
-      .setDeveloperKey('AIzaSyAY150oVAn6lJvd407ZWyWb1Fuz1Y5fPq4')
+      .setDeveloperKey('AIzaSyAvDacMeOVb10NnlZXOr4a7_QtaZzNNpVU')
       .setCallback((data: { action: string; docs?: Array<{ id: string; name: string }> }) => {
         if (data.action === google.picker.Action.PICKED && data.docs && data.docs.length > 0) {
           resolve({ id: data.docs[0].id, name: data.docs[0].name });
