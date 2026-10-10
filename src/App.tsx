@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
 import { createEmptyEvent, deleteEvent, getAllEvents, type R3aEvent } from './eventStore';
@@ -8,6 +8,7 @@ import { useCamera } from './useCamera';
 import { PhotoboothSession } from './PhotoboothSession';
 import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
 import { OperatorDashboard } from './operator/OperatorDashboard';
+import { ReminderPopup } from './ReminderPopup';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -15,6 +16,7 @@ import {
   testGoogleDriveUpload,
   pickDriveFolder,
   getValidToken,
+  getTokenStatus,
   getPrinters,
   testPrinter,
   runDiagnostics,
@@ -32,13 +34,10 @@ function statusToAccent(status: string): string {
 function parseFolderId(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return '';
-  // Format: https://drive.google.com/drive/folders/XXXX
   const m1 = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
   if (m1) return m1[1];
-  // Format: https://drive.google.com/open?id=XXXX  or ?id=XXXX
   const m2 = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (m2) return m2[1];
-  // Already plain ID
   if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
   return '';
 }
@@ -239,7 +238,6 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
     setGdrivePicking(false);
   };
 
-  // === NEW: Apply folder from manual input ===
   const handleApplyManualFolder = async () => {
     const raw = settings.googleDrive.manualFolderInput;
     const folderId = parseFolderId(raw);
@@ -255,7 +253,6 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
     setGdrivePicking(true);
     setGdriveTestState({ status: 'running', message: 'Checking folder...' });
     try {
-      // Fetch folder name from Drive API
       const token = await getValidToken(clientId);
       const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,mimeType`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -482,7 +479,29 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                     <button type="button" className="gdrive-account-btn">{settings.googleDrive.account || 'Connected'}</button>
                   </div>
 
-                  {/* === MAIN FOLDER: dua opsi === */}
+                  {/* REMINDER SETTINGS */}
+                  <div className="setting-control">
+                    <span>TOKEN REMINDER (50 MIN)</span>
+                    <button
+                      className={`toggle-row ${settings.googleDrive.reminderEnabled ? 'is-on' : ''}`}
+                      type="button"
+                      onClick={() => update('googleDrive', { reminderEnabled: !settings.googleDrive.reminderEnabled })}
+                    >
+                      <i />{settings.googleDrive.reminderEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                  <div className="setting-control">
+                    <span>REMINDER INTERVAL (MIN)</span>
+                    <input
+                      type="number"
+                      min={10}
+                      max={55}
+                      value={settings.googleDrive.reminderIntervalMin}
+                      onChange={(e) => update('googleDrive', { reminderIntervalMin: parseInt(e.target.value, 10) || 50 })}
+                    />
+                  </div>
+
+                  {/* MAIN FOLDER */}
                   <div className="setting-control">
                     <span>MAIN FOLDER (CURRENT)</span>
                     <button type="button" className="gdrive-folder-display">
@@ -726,6 +745,13 @@ function App() {
     typeof window !== 'undefined' ? window.location.hash : ''
   );
 
+  // === Reminder state ===
+  const [reminderVisible, setReminderVisible] = useState(false);
+  const [reminderMinutes, setReminderMinutes] = useState(0);
+  const [reminderRefreshing, setReminderRefreshing] = useState(false);
+  const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastReminderAtRef = useRef<number>(0);
+
   const refreshEvents = async () => { setEvents(await getAllEvents()); };
   useEffect(() => { void refreshEvents(); }, []);
 
@@ -735,6 +761,70 @@ function App() {
     onHash();
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+
+  // === Reminder timer ===
+  useEffect(() => {
+    if (reminderTimerRef.current) {
+      clearInterval(reminderTimerRef.current);
+      reminderTimerRef.current = null;
+    }
+
+    const gd = settings.googleDrive;
+    if (!gd.reminderEnabled || !gd.connected || !gd.clientId) {
+      setReminderVisible(false);
+      return;
+    }
+
+    const intervalMin = Math.max(10, Math.min(55, gd.reminderIntervalMin || 50));
+    const intervalMs = intervalMin * 60 * 1000;
+
+    // Cek setiap 30 detik: apakah waktunya reminder?
+    reminderTimerRef.current = setInterval(() => {
+      const now = Date.now();
+      if (now - lastReminderAtRef.current < intervalMs) return;
+
+      const status = getTokenStatus();
+      if (!status.hasToken) {
+        // Token expired → reminder lebih urgent
+        const minutesAgo = status.expiresAt ? Math.floor((now - status.expiresAt) / 60000) : 0;
+        setReminderMinutes(-Math.max(1, minutesAgo));
+        setReminderVisible(true);
+        lastReminderAtRef.current = now;
+        return;
+      }
+
+      const msLeft = status.expiresAt ? status.expiresAt - now : 0;
+      const minutesLeft = Math.floor(msLeft / 60000);
+      if (minutesLeft <= 15) {
+        setReminderMinutes(minutesLeft);
+        setReminderVisible(true);
+        lastReminderAtRef.current = now;
+      }
+    }, 30 * 1000);
+
+    return () => {
+      if (reminderTimerRef.current) clearInterval(reminderTimerRef.current);
+    };
+  }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.clientId, settings.googleDrive.reminderIntervalMin]);
+
+  const handleReminderRefresh = async () => {
+    const clientId = settings.googleDrive.clientId;
+    if (!clientId) {
+      setReminderVisible(false);
+      return;
+    }
+    setReminderRefreshing(true);
+    try {
+      const result = await connectGoogleDrive(clientId);
+      if (result.success) {
+        const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
+        setSettings(next);
+        saveAllSettings(next);
+        setReminderVisible(false);
+      }
+    } catch { /* ignore */ }
+    setReminderRefreshing(false);
+  };
 
   if (hash === '#operator') {
     return (
@@ -757,7 +847,20 @@ function App() {
   }
 
   if (screen === 'photobooth-session' && activeEvent) {
-    return <PhotoboothSession event={activeEvent} cameraSettings={settings.camera} allSettings={settings} onExit={() => setScreen('project-list')} />;
+    return (
+      <>
+        <PhotoboothSession event={activeEvent} cameraSettings={settings.camera} allSettings={settings} onExit={() => setScreen('project-list')} />
+        {reminderVisible ? (
+          <ReminderPopup
+            minutesUntilExpiry={reminderMinutes}
+            hasRefreshToken={false}
+            refreshing={reminderRefreshing}
+            onRefresh={handleReminderRefresh}
+            onDismiss={() => setReminderVisible(false)}
+          />
+        ) : null}
+      </>
+    );
   }
 
   if (screen === 'photobooth-session' && !activeEvent) {

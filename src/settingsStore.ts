@@ -33,8 +33,10 @@ export type GoogleDriveSettingsShape = {
   mainFolderId: string;
   mainFolderName: string;
   autoUpload: boolean;
-  useManualFolder: boolean;   // NEW: pakai input manual
-  manualFolderInput: string;  // NEW: URL/ID folder manual
+  useManualFolder: boolean;
+  manualFolderInput: string;
+  reminderEnabled: boolean;      // NEW
+  reminderIntervalMin: number;   // NEW
 };
 
 export type ApplicationSettingsShape = {
@@ -111,6 +113,8 @@ const DEFAULT_SETTINGS: AllSettings = {
     autoUpload: true,
     useManualFolder: false,
     manualFolderInput: '',
+    reminderEnabled: true,
+    reminderIntervalMin: 50,
   },
   application: {
     startupMode: 'HOME SCREEN',
