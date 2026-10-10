@@ -52,7 +52,8 @@ const WithReminder = ({
   refreshing,
   onRefresh,
   onDismiss,
-  waitingForOAuth,
+  needsFullscreen,
+  onGoFullscreen,
   children,
 }: {
   visible: boolean;
@@ -60,7 +61,8 @@ const WithReminder = ({
   refreshing: boolean;
   onRefresh: () => void;
   onDismiss: () => void;
-  waitingForOAuth: boolean;
+  needsFullscreen: boolean;
+  onGoFullscreen: () => void;
   children: React.ReactNode;
 }) => (
   <>
@@ -72,7 +74,8 @@ const WithReminder = ({
         refreshing={refreshing}
         onRefresh={onRefresh}
         onDismiss={onDismiss}
-        waitingForOAuth={waitingForOAuth}
+        needsFullscreen={needsFullscreen}
+        onGoFullscreen={onGoFullscreen}
       />
     ) : null}
   </>
@@ -784,10 +787,11 @@ function App() {
     typeof window !== 'undefined' ? window.location.hash : ''
   );
 
+  // === Reminder state ===
   const [reminderVisible, setReminderVisible] = useState(false);
   const [reminderMinutes, setReminderMinutes] = useState(0);
   const [reminderRefreshing, setReminderRefreshing] = useState(false);
-  const [waitingForOAuth, setWaitingForOAuth] = useState(false);
+  const [needsFullscreen, setNeedsFullscreen] = useState(false);
   const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastReminderAtRef = useRef<number>(Date.now());
 
@@ -833,6 +837,7 @@ function App() {
 
       setReminderMinutes(minutesLeft);
       setReminderVisible(true);
+      setNeedsFullscreen(false);
       lastReminderAtRef.current = now;
     }, 5 * 1000);
   }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.reminderIntervalMin]);
@@ -844,20 +849,28 @@ function App() {
       return;
     }
     setReminderRefreshing(true);
-    setWaitingForOAuth(true);   // ← popup jadi fullscreen
     try {
       const result = await connectGoogleDrive(clientId);
       if (result.success) {
         const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
         setSettings(next);
         saveAllSettings(next);
-        setReminderVisible(false);
         lastReminderAtRef.current = Date.now();
+        // Token sukses → ubah popup jadi mode "FULLSCREEN NOW"
+        setNeedsFullscreen(true);
       }
-      // kalau gagal, biarkan popup tetap terbuka (waitingForOAuth=false lagi)
     } catch { /* ignore */ }
     setReminderRefreshing(false);
-    setWaitingForOAuth(false);  // ← selesai (sukses / gagal), kembali normal
+  };
+
+  const handleGoFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      }
+    } catch { /* ignore */ }
+    setNeedsFullscreen(false);
+    setReminderVisible(false);
   };
 
   const reminderProps = {
@@ -866,7 +879,8 @@ function App() {
     refreshing: reminderRefreshing,
     onRefresh: handleReminderRefresh,
     onDismiss: () => setReminderVisible(false),
-    waitingForOAuth,
+    needsFullscreen,
+    onGoFullscreen: handleGoFullscreen,
   };
 
   if (hash === '#operator') {

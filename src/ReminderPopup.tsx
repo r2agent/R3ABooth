@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { AlertCircle, RefreshCw, X, Loader2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, X, Maximize2 } from 'lucide-react';
 
 type Props = {
   minutesUntilExpiry: number;
@@ -8,8 +8,10 @@ type Props = {
   onRefresh: () => void;
   onDismiss: () => void;
   soundEnabled?: boolean;
-  /** Kalau true → popup jadi fullscreen overlay (untuk mode booth/kiosk) */
-  waitingForOAuth?: boolean;
+  /** Setelah OAuth sukses: popup minta operator klik FULLSCREEN NOW */
+  needsFullscreen?: boolean;
+  /** Klik FULLSCREEN NOW */
+  onGoFullscreen?: () => void;
 };
 
 function playBeep() {
@@ -40,64 +42,21 @@ export const ReminderPopup = ({
   onRefresh,
   onDismiss,
   soundEnabled = true,
-  waitingForOAuth = false,
+  needsFullscreen = false,
+  onGoFullscreen,
 }: Props) => {
   const playedRef = useRef(false);
 
   useEffect(() => {
     if (playedRef.current) return;
     playedRef.current = true;
-    if (soundEnabled && !waitingForOAuth) {
+    if (soundEnabled && !needsFullscreen) {
       playBeep();
     }
-  }, [soundEnabled, waitingForOAuth]);
+  }, [soundEnabled, needsFullscreen]);
 
   const expired = minutesUntilExpiry <= 0;
 
-  // === FULLSCREEN WAITING MODE ===
-  if (waitingForOAuth) {
-    return (
-      <div
-        role="dialog"
-        aria-modal="true"
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 99999,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#0a0a0a',
-          color: '#fff',
-          padding: 24,
-          textAlign: 'center',
-        }}
-      >
-        <Loader2
-          size={64}
-          color="#ef3f25"
-          style={{ animation: 'spin 1.2s linear infinite', marginBottom: 24 }}
-        />
-        <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '.05em', marginBottom: 12 }}>
-          WAITING FOR GOOGLE LOGIN
-        </div>
-        <div style={{ fontSize: 15, color: 'rgba(255,255,255,.65)', maxWidth: 480, lineHeight: 1.6 }}>
-          Selesaikan login di jendela Google yang baru terbuka.
-          <br />
-          Setelah selesai, halaman ini akan kembali otomatis.
-        </div>
-        <style>{`
-          @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-  // === NORMAL POPUP MODE (tengah) ===
   return (
     <div
       role="dialog"
@@ -111,7 +70,7 @@ export const ReminderPopup = ({
         justifyContent: 'center',
         background: 'rgba(0, 0, 0, 0.55)',
       }}
-      onClick={onDismiss}
+      onClick={needsFullscreen ? undefined : onDismiss}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -128,72 +87,110 @@ export const ReminderPopup = ({
           position: 'relative',
         }}
       >
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="Close"
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 12,
-            background: 'transparent',
-            border: 'none',
-            color: 'rgba(255,255,255,.5)',
-            cursor: 'pointer',
-            padding: 4,
-          }}
-        >
-          <X size={22} />
-        </button>
+        {!needsFullscreen ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Close"
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(255,255,255,.5)',
+              cursor: 'pointer',
+              padding: 4,
+            }}
+          >
+            <X size={22} />
+          </button>
+        ) : null}
 
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-          <AlertCircle size={36} color="#ef3f25" style={{ flexShrink: 0, marginTop: 2 }} />
+          {needsFullscreen
+            ? <Maximize2 size={36} color="#4ade80" style={{ flexShrink: 0, marginTop: 2 }} />
+            : <AlertCircle size={36} color="#ef3f25" style={{ flexShrink: 0, marginTop: 2 }} />}
+
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8, letterSpacing: '.05em' }}>
-              {expired ? 'GOOGLE DRIVE TOKEN EXPIRED' : 'GOOGLE DRIVE TOKEN EXPIRING'}
+              {needsFullscreen
+                ? 'TOKEN REFRESHED'
+                : expired
+                  ? 'GOOGLE DRIVE TOKEN EXPIRED'
+                  : 'GOOGLE DRIVE TOKEN EXPIRING'}
             </div>
             <div style={{ fontSize: 14, color: 'rgba(255,255,255,.75)', marginBottom: 20, lineHeight: 1.5 }}>
-              {expired
-                ? 'Token sudah habis. Upload ke Drive berhenti. Klik REFRESH NOW untuk login ulang.'
-                : `Token akan habis dalam ${minutesUntilExpiry} menit. Klik REFRESH NOW untuk memperbarui.`}
+              {needsFullscreen
+                ? 'Token berhasil diperbarui. Klik FULLSCREEN NOW untuk kembali ke mode booth (layar penuh).'
+                : expired
+                  ? 'Token sudah habis. Upload ke Drive berhenti. Klik REFRESH NOW untuk login ulang.'
+                  : `Token akan habis dalam ${minutesUntilExpiry} menit. Klik REFRESH NOW untuk memperbarui.`}
             </div>
+
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                type="button"
-                onClick={onRefresh}
-                disabled={refreshing}
-                style={{
-                  flex: 1,
-                  padding: '12px 18px',
-                  background: refreshing ? '#555' : '#ef3f25',
-                  color: '#fff',
-                  border: 'none',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: refreshing ? 'wait' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                }}
-              >
-                <RefreshCw size={16} />
-                {refreshing ? 'REFRESHING...' : 'REFRESH NOW'}
-              </button>
-              <button
-                type="button"
-                onClick={onDismiss}
-                style={{
-                  padding: '12px 20px',
-                  background: 'transparent',
-                  color: 'rgba(255,255,255,.7)',
-                  border: '1px solid rgba(255,255,255,.25)',
-                  fontSize: 14,
-                  cursor: 'pointer',
-                }}
-              >
-                LATER
-              </button>
+              {needsFullscreen ? (
+                <button
+                  type="button"
+                  onClick={onGoFullscreen}
+                  style={{
+                    flex: 1,
+                    padding: '12px 18px',
+                    background: '#4ade80',
+                    color: '#000',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: 14,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Maximize2 size={16} />
+                  FULLSCREEN NOW
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onRefresh}
+                    disabled={refreshing}
+                    style={{
+                      flex: 1,
+                      padding: '12px 18px',
+                      background: refreshing ? '#555' : '#ef3f25',
+                      color: '#fff',
+                      border: 'none',
+                      fontWeight: 700,
+                      fontSize: 14,
+                      cursor: refreshing ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <RefreshCw size={16} />
+                    {refreshing ? 'REFRESHING...' : 'REFRESH NOW'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onDismiss}
+                    style={{
+                      padding: '12px 20px',
+                      background: 'transparent',
+                      color: 'rgba(255,255,255,.7)',
+                      border: '1px solid rgba(255,255,255,.25)',
+                      fontSize: 14,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    LATER
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
