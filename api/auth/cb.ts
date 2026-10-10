@@ -1,101 +1,613 @@
-export const config = {
-  runtime: 'edge',
+// Google Drive integration via Google Identity Services (GIS) Authorization Code flow
+// and Google Picker API for folder selection.
+//
+// Security model:
+// - OAuth uses authorization code flow with popup mode (redirect_uri = 'postmessage').
+// - Client ID comes from VITE_GOOGLE_CLIENT_ID env var (public by design).
+// - Access token kept in memory + sessionStorage (per-tab).
+// - Refresh token kept in IndexedDB (survives refresh, cleared on disconnect).
+// - Backend endpoints:
+//     POST /api/auth/exchange  { code, redirect_uri: 'postmessage' }  -> tokens
+//     POST /api/auth/refresh   { refresh_token }                      -> new access_token
+
+export type DriveConnectResult = {
+  success: boolean;
+  account?: string;
+  error?: string;
 };
 
-export default async function handler(req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const code = url.searchParams.get('code');
-  const error = url.searchParams.get('error');
-  const errorDescription = url.searchParams.get('error_description');
+export type DriveTestResult = {
+  success: boolean;
+  message: string;
+};
 
-  const APP_BASE = 'https://r3abooth-zeta.vercel.app';
-  const REDIRECT_URI = 'https://r3abooth-zeta.vercel.app/api/auth/cb';
+export type DriveFolder = {
+  id: string;
+  name: string;
+};
 
-  if (error) {
-    const p = new URLSearchParams({ oauth_error: error, oauth_error_description: errorDescription || '' });
-    return Response.redirect(`${APP_BASE}/?${p.toString()}#settings`, 302);
-  }
-  if (!code) {
-    const p = new URLSearchParams({ oauth_error: 'missing_code' });
-    return Response.redirect(`${APP_BASE}/?${p.toString()}#settings`, 302);
-  }
+// --- Constants ---------------------------------------------------------------
 
-  let tokens: { access_token?: string; expires_in?: number; refresh_token?: string; error?: string; error_description?: string } = {};
+const SCOPES =
+  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+
+// Popup mode uses 'postmessage' — no redirect URI registration needed in GCP Console.
+const POPUP_REDIRECT_URI = 'postmessage';
+
+const TOKEN_SS_KEY = 'r3a.gdrive.accessToken';
+const EXPIRY_SS_KEY = 'r3a.gdrive.tokenExpiry';
+const ACCOUNT_SS_KEY = 'r3a.gdrive.account';
+
+// Refresh access token when less than this many ms remain
+const REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+const ENV_CLIENT_ID =
+  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
+
+function getClientId(): string {
+  return (ENV_CLIENT_ID || '').trim();
+}
+
+// --- Token state -------------------------------------------------------------
+
+let accessToken: string | null = null;
+let tokenExpiry = 0;
+let lastKnownAccount: string | null = null;
+let codeClient: CodeClient | null = null;
+let refreshInFlight: Promise<string> | null = null;
+let proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+type CodeClient = {
+  requestCode: () => void;
+  callback?: (resp: { code?: string; scope?: string; error?: string; error_description?: string }) => void;
+  error_callback?: (err: { type?: string; message?: string }) => void;
+};
+
+// --- sessionStorage helpers --------------------------------------------------
+
+function ssGet(key: string): string | null {
   try {
-    const res = await fetch(`${APP_BASE}/api/auth/exchange`, {
+    return typeof window !== 'undefined' ? window.sessionStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+}
+
+function ssSet(key: string, value: string | null): void {
+  try {
+    if (typeof window === 'undefined') return;
+    if (value === null) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, value);
+  } catch { /* ignore */ }
+}
+
+accessToken = ssGet(TOKEN_SS_KEY);
+tokenExpiry = Number(ssGet(EXPIRY_SS_KEY) || 0) || 0;
+lastKnownAccount = ssGet(ACCOUNT_SS_KEY);
+
+function setAccessToken(token: string | null, expiry: number): void {
+  accessToken = token;
+  tokenExpiry = expiry;
+  ssSet(TOKEN_SS_KEY, token);
+  ssSet(EXPIRY_SS_KEY, expiry ? String(expiry) : null);
+  scheduleProactiveRefresh();
+}
+
+function setAccount(account: string | null): void {
+  lastKnownAccount = account;
+  ssSet(ACCOUNT_SS_KEY, account);
+}
+
+// --- Proactive refresh -------------------------------------------------------
+// Refresh the access token BEFORE it expires (5 min before), so that an ongoing
+// upload session never hits a 401 in the middle of a burst.
+
+function scheduleProactiveRefresh(): void {
+  if (proactiveRefreshTimer) {
+    clearTimeout(proactiveRefreshTimer);
+    proactiveRefreshTimer = null;
+  }
+  if (!accessToken || !tokenExpiry) return;
+
+  const msUntilRefresh = tokenExpiry - Date.now() - REFRESH_THRESHOLD_MS;
+  if (msUntilRefresh <= 0) return;
+
+  proactiveRefreshTimer = setTimeout(() => {
+    // Fire-and-forget. If it fails, getValidToken will retry on demand.
+    void refreshAccessToken().catch(() => { /* ignore */ });
+  }, msUntilRefresh);
+}
+
+if (typeof window !== 'undefined') {
+  // Resume scheduling on load if we already have a token
+  scheduleProactiveRefresh();
+}
+
+// --- IndexedDB for refresh token --------------------------------------------
+
+const IDB_NAME = 'r3a-booth';
+const IDB_STORE = 'gdriveAuth';
+const IDB_VERSION = 3;
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function openDB(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => { dbPromise = null; reject(req.error); };
+  });
+  return dbPromise;
+}
+
+async function idbSet(key: string, value: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ key, value });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbGet(key: string): Promise<string | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result ? (req.result.value as string) : null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbDelete(key: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function saveRefreshToken(token: string): Promise<void> {
+  await idbSet('refresh_token', token);
+}
+
+async function getRefreshToken(): Promise<string | null> {
+  return idbGet('refresh_token').catch(() => null);
+}
+
+async function clearRefreshToken(): Promise<void> {
+  await idbDelete('refresh_token').catch(() => {});
+}
+
+// --- GIS loader --------------------------------------------------------------
+
+let gisLoaded = false;
+let gisLoadPromise: Promise<void> | null = null;
+
+function loadGis(): Promise<void> {
+  if (gisLoaded) return Promise.resolve();
+  if (gisLoadPromise) return gisLoadPromise;
+  gisLoadPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-gis]') as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', () => { gisLoaded = true; resolve(); });
+      existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity Services')));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.setAttribute('data-gis', 'true');
+    script.onload = () => { gisLoaded = true; resolve(); };
+    script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+    document.head.appendChild(script);
+  });
+  return gisLoadPromise;
+}
+
+// --- Picker loader -----------------------------------------------------------
+
+let pickerLoaded = false;
+let pickerLoadPromise: Promise<void> | null = null;
+
+function loadPicker(): Promise<void> {
+  if (pickerLoaded) return Promise.resolve();
+  if (pickerLoadPromise) return pickerLoadPromise;
+  pickerLoadPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-picker]') as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener('load', () => { pickerLoaded = true; resolve(); });
+      existing.addEventListener('error', () => reject(new Error('Failed to load Google Picker')));
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://apis.google.com/js/api.js';
+    script.async = true;
+    script.defer = true;
+    script.setAttribute('data-picker', 'true');
+    script.onload = () => {
+      gapi.load('picker', { callback: () => { pickerLoaded = true; resolve(); } });
+    };
+    script.onerror = () => reject(new Error('Failed to load Google Picker'));
+    document.head.appendChild(script);
+  });
+  return pickerLoadPromise;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const google: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const gapi: any;
+
+// --- Authorization Code flow -------------------------------------------------
+
+function initCodeClient(clientId: string): Promise<void> {
+  return loadGis().then(() => {
+    codeClient = google.accounts.oauth2.initCodeClient({
+      client_id: clientId,
+      scope: SCOPES,
+      ux_mode: 'popup',
+      redirect_uri: POPUP_REDIRECT_URI, // 'postmessage' — no GCP registration needed
+      callback: () => { /* set per-request */ },
+      error_callback: (err: { type?: string; message?: string }) => {
+        // Capture popup-blocked / closed / other GIS errors
+        const msg = err?.message || err?.type || 'Unknown GIS error';
+        console.error('[gdrive] code client error:', msg);
+      },
+    });
+  });
+}
+
+async function requestTokens(): Promise<{ accessToken: string; expiresIn: number; refreshToken: string | null }> {
+  const clientId = getClientId();
+  if (!clientId) {
+    throw new Error(
+      'Google Client ID not configured. Set VITE_GOOGLE_CLIENT_ID in Vercel and redeploy.',
+    );
+  }
+
+  await initCodeClient(clientId);
+
+  const code = await new Promise<string>((resolve, reject) => {
+    if (!codeClient) {
+      reject(new Error('Code client not initialized'));
+      return;
+    }
+    codeClient.callback = (resp) => {
+      if (resp.error) {
+        reject(new Error(resp.error_description || resp.error));
+        return;
+      }
+      if (!resp.code) {
+        reject(new Error('No authorization code returned'));
+        return;
+      }
+      resolve(resp.code);
+    };
+    codeClient.error_callback = (err) => {
+      if (err?.type === 'popup_failed_to_open' || err?.type === 'popup_closed') {
+        reject(new Error('Popup diblokir atau ditutup. Izinkan popup untuk situs ini lalu coba lagi.'));
+        return;
+      }
+      reject(new Error(err?.message || err?.type || 'OAuth popup error'));
+    };
+    codeClient.requestCode();
+  });
+
+  const res = await fetch('/api/auth/exchange', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // Use 'postmessage' so Google accepts the exchange for popup mode.
+    body: JSON.stringify({ code, redirect_uri: POPUP_REDIRECT_URI }),
+  });
+
+  if (!res.ok) {
+    let msg = `Token exchange failed (HTTP ${res.status})`;
+    try {
+      const err = await res.json();
+      // Surface the real Google error
+      if (err?.error || err?.error_description) {
+        msg = [err.error, err.error_description].filter(Boolean).join(': ');
+      }
+    } catch { /* keep default */ }
+    throw new Error(msg);
+  }
+
+  const data = await res.json() as {
+    access_token?: string;
+    expires_in?: number;
+    refresh_token?: string;
+  };
+
+  if (!data.access_token) {
+    throw new Error('No access_token in exchange response');
+  }
+
+  const expiresIn = data.expires_in ?? 3600;
+  const refreshToken = data.refresh_token ?? null;
+
+  setAccessToken(data.access_token, Date.now() + expiresIn * 1000);
+  if (refreshToken) {
+    await saveRefreshToken(refreshToken);
+  }
+
+  return { accessToken: data.access_token, expiresIn, refreshToken };
+}
+
+async function refreshAccessToken(): Promise<string> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) {
+      throw new Error('No refresh token available. Please reconnect Google Drive.');
+    }
+
+    const res = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, redirect_uri: REDIRECT_URI }),
+      body: JSON.stringify({ refresh_token: refreshToken }),
     });
-    tokens = await res.json();
+
     if (!res.ok) {
-      const p = new URLSearchParams({
-        oauth_error: tokens.error || 'exchange_failed',
-        oauth_error_description: tokens.error_description || `HTTP ${res.status}`,
-      });
-      return Response.redirect(`${APP_BASE}/?${p.toString()}#settings`, 302);
-    }
-  } catch (err) {
-    const p = new URLSearchParams({
-      oauth_error: 'network_error',
-      oauth_error_description: err instanceof Error ? err.message : 'unknown',
-    });
-    return Response.redirect(`${APP_BASE}/?${p.toString()}#settings`, 302);
-  }
-
-  const accessToken = tokens.access_token || '';
-  const expiresIn = tokens.expires_in || 3600;
-  const refreshToken = tokens.refresh_token || '';
-
-  let email = 'Unknown account';
-  try {
-    const uRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (uRes.ok) {
-      const u = await uRes.json() as { email?: string };
-      email = u.email || 'Unknown account';
-    }
-  } catch { /* ignore */ }
-
-  const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Connecting...</title></head>
-<body>
-<script>
-(async function() {
-  try {
-    sessionStorage.setItem('r3a.gdrive.accessToken', ${JSON.stringify(accessToken)});
-    sessionStorage.setItem('r3a.gdrive.tokenExpiry', String(${Date.now() + expiresIn * 1000}));
-    sessionStorage.setItem('r3a.gdrive.account', ${JSON.stringify(email)});
-    ${refreshToken ? `
-    await new Promise((resolve) => {
-      const req = indexedDB.open('r3a-booth', 3);
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains('gdriveAuth')) {
-          db.createObjectStore('gdriveAuth', { keyPath: 'key' });
+      let msg = `Token refresh failed (HTTP ${res.status})`;
+      try {
+        const err = await res.json();
+        if (err?.error || err?.error_description) {
+          msg = [err.error, err.error_description].filter(Boolean).join(': ');
         }
-      };
-      req.onsuccess = () => {
-        const db = req.result;
-        const tx = db.transaction('gdriveAuth', 'readwrite');
-        tx.objectStore('gdriveAuth').put({ key: 'refresh_token', value: ${JSON.stringify(refreshToken)} });
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => resolve();
-      };
-      req.onerror = () => resolve();
-    });
-    ` : ''}
-    window.location.href = '/?oauth_success=1#settings';
-  } catch (e) {
-    window.location.href = '/?oauth_error=storage_failed#settings';
-  }
-})();
-</script>
-</body></html>`;
+      } catch { /* keep default */ }
+      if (msg.includes('invalid_grant') || msg.includes('revoked')) {
+        await clearRefreshToken();
+        setAccessToken(null, 0);
+        setAccount(null);
+      }
+      throw new Error(msg);
+    }
 
-  return new Response(html, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    const data = await res.json() as {
+      access_token?: string;
+      expires_in?: number;
+    };
+
+    if (!data.access_token) {
+      throw new Error('No access_token in refresh response');
+    }
+
+    const expiresIn = data.expires_in ?? 3600;
+    setAccessToken(data.access_token, Date.now() + expiresIn * 1000);
+    return data.access_token;
+  })();
+
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+// --- Public API --------------------------------------------------------------
+
+export function getValidToken(): Promise<string> {
+  // Still valid (with 1-minute safety margin)
+  if (accessToken && Date.now() < tokenExpiry - 60000) {
+    return Promise.resolve(accessToken);
+  }
+  // Try refresh first
+  return refreshAccessToken().catch(async (err) => {
+    if (err instanceof Error && (
+      err.message.includes('No refresh token') ||
+      err.message.includes('invalid_grant') ||
+      err.message.includes('revoked')
+    )) {
+      const tokens = await requestTokens();
+      return tokens.accessToken;
+    }
+    throw err;
   });
+}
+
+/**
+ * Force refresh token (used after a 401 to retry with a fresh token).
+ */
+export async function forceRefresh(): Promise<string> {
+  setAccessToken(null, 0);
+  return getValidToken();
+}
+
+async function fetchUserEmail(token: string): Promise<string> {
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error('Failed to fetch user info');
+  const data = await res.json() as { email?: string };
+  return data.email || 'Unknown account';
+}
+
+export async function connectGoogleDrive(): Promise<DriveConnectResult> {
+  const clientId = getClientId();
+  if (!clientId) {
+    return {
+      success: false,
+      error: 'Google Client ID not configured. Contact admin.',
+    };
+  }
+  try {
+    const tokens = await requestTokens();
+    const email = await fetchUserEmail(tokens.accessToken);
+    setAccount(email);
+    return { success: true, account: email };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Connection failed';
+    return { success: false, error: msg };
+  }
+}
+
+export async function disconnectGoogleDrive(): Promise<boolean> {
+  if (accessToken) {
+    try {
+      await fetch(`https://oauth2.googleapis.com/revoke?token=${accessToken}`, { method: 'POST' });
+    } catch { /* best-effort */ }
+  }
+  if (proactiveRefreshTimer) {
+    clearTimeout(proactiveRefreshTimer);
+    proactiveRefreshTimer = null;
+  }
+  setAccessToken(null, 0);
+  setAccount(null);
+  await clearRefreshToken();
+  codeClient = null;
+  return true;
+}
+
+export async function testGoogleDriveConnection(): Promise<DriveTestResult> {
+  const clientId = getClientId();
+  if (!clientId) return { success: false, message: 'Google Client ID not configured.' };
+  try {
+    const token = await getValidToken();
+    const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      let message = `Drive API error (HTTP ${res.status})`;
+      try {
+        const err = await res.json();
+        if (err?.error?.message) message = err.error.message;
+      } catch { /* keep default */ }
+      return { success: false, message };
+    }
+    return { success: true, message: 'Google Drive connection is active.' };
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : 'Connection failed' };
+  }
+}
+
+export async function testGoogleDriveUpload(): Promise<DriveTestResult> {
+  return { success: false, message: 'Upload test is not part of Phase 1.' };
+}
+
+export async function pickDriveFolder(): Promise<DriveFolder | null> {
+  const clientId = getClientId();
+  if (!clientId) throw new Error('Google Client ID not configured.');
+  const token = await getValidToken();
+  await loadPicker();
+
+  return new Promise<DriveFolder | null>((resolve, reject) => {
+    const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(true)
+      .setMode(google.picker.DocsViewMode.LIST);
+
+    const builder = new google.picker.PickerBuilder()
+      .addView(view)
+      .setTitle('Select MAIN folder')
+      .setOAuthToken(token)
+      .setDeveloperKey('')
+      .setCallback((data: { action: string; docs?: Array<{ id: string; name: string }> }) => {
+        if (data.action === google.picker.Action.PICKED && data.docs && data.docs.length > 0) {
+          resolve({ id: data.docs[0].id, name: data.docs[0].name });
+        } else if (data.action === google.picker.Action.CANCEL) {
+          resolve(null);
+        }
+      });
+
+    builder.build().setVisible(true);
+  }).catch((err) => {
+    throw err instanceof Error ? err : new Error('Picker failed');
+  });
+}
+
+export async function shareFolderWithAnyone(folderId: string): Promise<boolean> {
+  try {
+    const token = await getValidToken();
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export function buildDriveFolderUrl(folderId: string): string {
+  return `https://drive.google.com/drive/folders/${folderId}`;
+}
+
+export async function getPrinters(): Promise<string[]> {
+  return [];
+}
+
+export async function testPrinter(_printerName: string): Promise<DriveTestResult> {
+  return { success: false, message: 'Printer test is not available in web mode.' };
+}
+
+export async function runDiagnostics(): Promise<{ label: string; status: string; healthy: boolean }[]> {
+  const results: { label: string; status: string; healthy: boolean }[] = [];
+
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+    results.push({ label: 'CAMERA API', status: 'AVAILABLE', healthy: true });
+  } else {
+    results.push({ label: 'CAMERA API', status: 'UNAVAILABLE', healthy: false });
+  }
+
+  if (window.indexedDB) {
+    results.push({ label: 'LOCAL STORAGE', status: 'READY', healthy: true });
+  } else {
+    results.push({ label: 'LOCAL STORAGE', status: 'UNAVAILABLE', healthy: false });
+  }
+
+  if (navigator.onLine) {
+    results.push({ label: 'NETWORK', status: 'ONLINE', healthy: true });
+  } else {
+    results.push({ label: 'NETWORK', status: 'OFFLINE', healthy: false });
+  }
+
+  if (accessToken && Date.now() < tokenExpiry) {
+    results.push({ label: 'GOOGLE DRIVE', status: 'CONNECTED', healthy: true });
+  } else {
+    results.push({ label: 'GOOGLE DRIVE', status: 'NOT CONNECTED', healthy: false });
+  }
+
+  return results;
+}
+
+// --- Operator dashboard helpers ---------------------------------------------
+
+export type TokenStatus = {
+  hasToken: boolean;
+  expiresAt: number | null;
+  expiresInMs: number | null;
+  account: string | null;
+  hasRefreshToken: boolean;
+  hasClientId: boolean;
+};
+
+export async function getTokenStatus(): Promise<TokenStatus> {
+  const now = Date.now();
+  const hasToken = !!accessToken && now < tokenExpiry;
+  const refreshToken = await getRefreshToken().catch(() => null);
+  return {
+    hasToken,
+    expiresAt: accessToken ? tokenExpiry : null,
+    expiresInMs: hasToken ? tokenExpiry - now : null,
+    account: lastKnownAccount,
+    hasRefreshToken: !!refreshToken,
+    hasClientId: !!getClientId(),
+  };
 }

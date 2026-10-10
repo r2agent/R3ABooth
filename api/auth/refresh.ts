@@ -38,7 +38,10 @@ export default async function handler(req: Request): Promise<Response> {
   const { refresh_token } = body;
   if (!refresh_token) {
     return new Response(
-      JSON.stringify({ error: 'missing_params', error_description: 'refresh_token is required' }),
+      JSON.stringify({
+        error: 'missing_params',
+        error_description: 'refresh_token is required',
+      }),
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     );
   }
@@ -47,7 +50,10 @@ export default async function handler(req: Request): Promise<Response> {
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     return new Response(
-      JSON.stringify({ error: 'server_misconfigured', error_description: 'GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set' }),
+      JSON.stringify({
+        error: 'server_misconfigured',
+        error_description: 'GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set',
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } },
     );
   }
@@ -68,14 +74,30 @@ export default async function handler(req: Request): Promise<Response> {
     });
   } catch {
     return new Response(
-      JSON.stringify({ error: 'network_error', error_description: 'Failed to reach Google token endpoint' }),
+      JSON.stringify({
+        error: 'network_error',
+        error_description: 'Failed to reach Google token endpoint',
+      }),
       { status: 502, headers: { 'Content-Type': 'application/json' } },
     );
   }
 
   const text = await googleRes.text();
-  return new Response(text, {
-    status: googleRes.status,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  // Pastikan response selalu JSON-parseable.
+  try {
+    JSON.parse(text);
+    return new Response(text, {
+      status: googleRes.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch {
+    // Google kembalikan non-JSON (HTML error page). Bungkus jadi JSON.
+    return new Response(
+      JSON.stringify({
+        error: 'google_error',
+        error_description: text.slice(0, 300) || 'Unknown Google error',
+      }),
+      { status: googleRes.status, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
 }
