@@ -481,7 +481,7 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
 
                   {/* REMINDER SETTINGS */}
                   <div className="setting-control">
-                    <span>TOKEN REMINDER (50 MIN)</span>
+                    <span>TOKEN REMINDER ({settings.googleDrive.reminderIntervalMin || 50} MIN)</span>
                     <button
                       className={`toggle-row ${settings.googleDrive.reminderEnabled ? 'is-on' : ''}`}
                       type="button"
@@ -493,11 +493,24 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                   <div className="setting-control">
                     <span>REMINDER INTERVAL (MIN)</span>
                     <input
-                      type="number"
-                      min={10}
-                      max={55}
-                      value={settings.googleDrive.reminderIntervalMin}
-                      onChange={(e) => update('googleDrive', { reminderIntervalMin: parseInt(e.target.value, 10) || 50 })}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={String(settings.googleDrive.reminderIntervalMin ?? 50)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        const num = raw === '' ? 0 : parseInt(raw, 10);
+                        update('googleDrive', { reminderIntervalMin: num });
+                      }}
+                      onBlur={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        const num = raw === '' ? 50 : parseInt(raw, 10);
+                        if (!num || num < 10 || num > 55) {
+                        update('googleDrive', { reminderIntervalMin: 50 });
+                      }
+                    }}
+                    placeholder="50"
+                    style={{ padding: 8, fontSize: 14 }}
                     />
                   </div>
 
@@ -775,7 +788,11 @@ function App() {
       return;
     }
 
-    const intervalMin = Math.max(10, Math.min(55, gd.reminderIntervalMin || 50));
+    const rawInterval = Number(gd.reminderIntervalMin);
+    const intervalMin =
+      Number.isFinite(rawInterval) && rawInterval >= 10 && rawInterval <= 55
+        ? rawInterval
+        : 50;
     const intervalMs = intervalMin * 60 * 1000;
 
     // Cek setiap 30 detik: apakah waktunya reminder?

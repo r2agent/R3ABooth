@@ -42,7 +42,6 @@ function playBeep() {
 
 export const ReminderPopup = ({
   minutesUntilExpiry,
-  hasRefreshToken,
   refreshing,
   onRefresh,
   onDismiss,
@@ -66,83 +65,99 @@ export const ReminderPopup = ({
       aria-modal="true"
       style={{
         position: 'fixed',
-        bottom: 24,
-        right: 24,
+        inset: 0,
         zIndex: 9999,
-        maxWidth: 420,
-        background: 'rgba(20, 20, 20, 0.95)',
-        border: '2px solid #ef3f25',
-        borderRadius: 6,
-        padding: 16,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
-        color: '#fff',
-        fontFamily: 'inherit',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0, 0, 0, 0.55)',
       }}
+      onClick={onDismiss}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <AlertCircle size={22} color="#ef3f25" style={{ flexShrink: 0, marginTop: 2 }} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4, letterSpacing: '.05em' }}>
-            {expired ? 'GOOGLE DRIVE TOKEN EXPIRED' : 'GOOGLE DRIVE TOKEN EXPIRING'}
-          </div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,.75)', marginBottom: 12 }}>
-            {expired
-              ? 'Token sudah habis. Upload ke Drive berhenti. Klik REFRESH NOW untuk login ulang.'
-              : `Token akan habis dalam ${minutesUntilExpiry} menit. Klik REFRESH NOW untuk memperbarui.`}
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={refreshing}
-              style={{
-                flex: 1,
-                padding: '8px 14px',
-                background: refreshing ? '#555' : '#ef3f25',
-                color: '#fff',
-                border: 'none',
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: refreshing ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-              }}
-            >
-              <RefreshCw size={14} />
-              {refreshing ? 'REFRESHING...' : 'REFRESH NOW'}
-            </button>
-            <button
-              type="button"
-              onClick={onDismiss}
-              style={{
-                padding: '8px 12px',
-                background: 'transparent',
-                color: 'rgba(255,255,255,.6)',
-                border: '1px solid rgba(255,255,255,.2)',
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              LATER
-            </button>
-          </div>
-        </div>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '90%',
+          maxWidth: 520,
+          background: '#1a1a1a',
+          border: '2px solid #ef3f25',
+          borderRadius: 8,
+          padding: '24px 24px 20px',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.8)',
+          color: '#fff',
+          fontFamily: 'inherit',
+          position: 'relative',
+        }}
+      >
         <button
           type="button"
           onClick={onDismiss}
           aria-label="Close"
           style={{
+            position: 'absolute',
+            top: 12,
+            right: 12,
             background: 'transparent',
             border: 'none',
             color: 'rgba(255,255,255,.5)',
             cursor: 'pointer',
-            padding: 0,
+            padding: 4,
           }}
         >
-          <X size={18} />
+          <X size={22} />
         </button>
+
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+          <AlertCircle size={36} color="#ef3f25" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8, letterSpacing: '.05em' }}>
+              {expired ? 'GOOGLE DRIVE TOKEN EXPIRED' : 'GOOGLE DRIVE TOKEN EXPIRING'}
+            </div>
+            <div style={{ fontSize: 14, color: 'rgba(255,255,255,.75)', marginBottom: 20, lineHeight: 1.5 }}>
+              {expired
+                ? 'Token sudah habis. Upload ke Drive berhenti. Klik REFRESH NOW untuk login ulang.'
+                : `Token akan habis dalam ${minutesUntilExpiry} menit. Klik REFRESH NOW untuk memperbarui.`}
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+                style={{
+                  flex: 1,
+                  padding: '12px 18px',
+                  background: refreshing ? '#555' : '#ef3f25',
+                  color: '#fff',
+                  border: 'none',
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: refreshing ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                <RefreshCw size={16} />
+                {refreshing ? 'REFRESHING...' : 'REFRESH NOW'}
+              </button>
+              <button
+                type="button"
+                onClick={onDismiss}
+                style={{
+                  padding: '12px 20px',
+                  background: 'transparent',
+                  color: 'rgba(255,255,255,.7)',
+                  border: '1px solid rgba(255,255,255,.25)',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                }}
+              >
+                LATER
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
