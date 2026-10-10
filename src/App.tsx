@@ -22,6 +22,10 @@ import {
   runDiagnostics,
 } from './gdriveService';
 
+// === Client ID dari env Vercel ===
+const VITE_CLIENT_ID =
+  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
+
 type Screen = 'home' | 'project-list' | 'new-event' | 'event-file' | 'photobooth-session' | 'settings';
 
 function statusToAccent(status: string): string {
@@ -40,6 +44,36 @@ function parseFolderId(input: string): string {
   if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
   return '';
 }
+
+// === Wrapper popup untuk semua screen ===
+const WithReminder = ({
+  visible,
+  minutes,
+  refreshing,
+  onRefresh,
+  onDismiss,
+  children,
+}: {
+  visible: boolean;
+  minutes: number;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onDismiss: () => void;
+  children: React.ReactNode;
+}) => (
+  <>
+    {children}
+    {visible ? (
+      <ReminderPopup
+        minutesUntilExpiry={minutes}
+        hasRefreshToken={false}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onDismiss={onDismiss}
+      />
+    ) : null}
+  </>
+);
 
 const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R3aEvent[]; onHome: () => void; onOpen: (event: R3aEvent) => void; onNew: () => void; onEditEvent: (event: R3aEvent) => void }) => {
   const [activeIndex, setActiveIndex] = useState(0);
@@ -170,9 +204,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleConnectGdrive = async () => {
-    const clientId = settings.googleDrive.clientId;
+    const clientId = VITE_CLIENT_ID;
     if (!clientId || clientId.trim().length < 10) {
-      setGdriveTestState({ status: 'error', message: 'Please enter a Google OAuth Client ID first.' });
+      setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
       return;
     }
     setGdriveConnecting(true);
@@ -198,9 +232,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleReconnectGdrive = async () => {
-    const clientId = settings.googleDrive.clientId;
+    const clientId = VITE_CLIENT_ID;
     if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'No Client ID configured.' });
+      setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
       return;
     }
     setGdriveConnecting(true);
@@ -217,9 +251,9 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleChangeFolder = async () => {
-    const clientId = settings.googleDrive.clientId;
+    const clientId = VITE_CLIENT_ID;
     if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'No Client ID configured.' });
+      setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
       return;
     }
     setGdrivePicking(true);
@@ -244,7 +278,7 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
       setGdriveTestState({ status: 'error', message: 'Invalid folder URL or ID. Paste a Google Drive folder link.' });
       return;
     }
-    const clientId = settings.googleDrive.clientId;
+    const clientId = VITE_CLIENT_ID;
     if (!clientId) {
       setGdriveTestState({ status: 'error', message: 'Connect Google Drive first.' });
       return;
@@ -276,13 +310,13 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
 
   const handleTestGdrive = async () => {
     setGdriveTestState({ status: 'running', message: 'Testing...' });
-    const result = await testGoogleDriveConnection(settings.googleDrive.clientId);
+    const result = await testGoogleDriveConnection(VITE_CLIENT_ID);
     setGdriveTestState({ status: result.success ? 'success' : 'error', message: result.message });
   };
 
   const handleTestGdriveUpload = async () => {
     setGdriveUploadTestState({ status: 'running', message: 'Uploading test file...' });
-    const result = await testGoogleDriveUpload(settings.googleDrive.clientId);
+    const result = await testGoogleDriveUpload(VITE_CLIENT_ID);
     setGdriveUploadTestState({ status: result.success ? 'success' : 'error', message: result.message });
   };
 
@@ -450,16 +484,7 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
               {!settings.googleDrive.connected ? (
                 <div className="hub-message">
                   <strong>Connect to Google Drive</strong>
-                  <p>Connect your Google account to select a main folder for photo storage. You will need a Google OAuth Client ID from the Google Cloud Console.</p>
-                  <div className="setting-control gdrive-client-id-row">
-                    <span>OAUTH CLIENT ID</span>
-                    <input
-                      value={settings.googleDrive.clientId}
-                      onChange={(e) => update('googleDrive', { clientId: e.target.value })}
-                      placeholder="xxxxxx.apps.googleusercontent.com"
-                      type="text"
-                    />
-                  </div>
+                  <p>Connect your Google account to select a main folder for photo storage.</p>
                   <button type="button" onClick={handleConnectGdrive} disabled={gdriveConnecting}>
                     {gdriveConnecting ? 'CONNECTING...' : 'CONNECT GOOGLE DRIVE'} <ChevronRight size={19} />
                   </button>
@@ -756,7 +781,6 @@ function App() {
     typeof window !== 'undefined' ? window.location.hash : ''
   );
 
-  // === Reminder state ===
   const [reminderVisible, setReminderVisible] = useState(false);
   const [reminderMinutes, setReminderMinutes] = useState(0);
   const [reminderRefreshing, setReminderRefreshing] = useState(false);
@@ -781,7 +805,7 @@ function App() {
     }
 
     const gd = settings.googleDrive;
-    if (!gd.reminderEnabled || !gd.connected || !gd.clientId) {
+    if (!gd.reminderEnabled || !gd.connected || !VITE_CLIENT_ID) {
       setReminderVisible(false);
       return;
     }
@@ -793,7 +817,6 @@ function App() {
         : 50;
     const intervalMs = intervalMin * 60 * 1000;
 
-    // Reset timer anchor saat interval berubah (biar hitungan mulai dari 0)
     lastReminderAtRef.current = Date.now();
 
     reminderTimerRef.current = setInterval(() => {
@@ -804,15 +827,14 @@ function App() {
       const msLeft = status.hasToken && status.expiresAt ? status.expiresAt - now : 0;
       const minutesLeft = Math.max(0, Math.floor(msLeft / 60000));
 
-      // Popup muncul MURNI berdasarkan interval — bukan sisa token
       setReminderMinutes(minutesLeft);
       setReminderVisible(true);
       lastReminderAtRef.current = now;
     }, 5 * 1000);
-  }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.clientId, settings.googleDrive.reminderIntervalMin]);
+  }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.reminderIntervalMin]);
 
   const handleReminderRefresh = async () => {
-    const clientId = settings.googleDrive.clientId;
+    const clientId = VITE_CLIENT_ID;
     if (!clientId) {
       setReminderVisible(false);
       return;
@@ -831,6 +853,14 @@ function App() {
     setReminderRefreshing(false);
   };
 
+  const reminderProps = {
+    visible: reminderVisible,
+    minutes: reminderMinutes,
+    refreshing: reminderRefreshing,
+    onRefresh: handleReminderRefresh,
+    onDismiss: () => setReminderVisible(false),
+  };
+
   if (hash === '#operator') {
     return (
       <OperatorDashboard
@@ -844,63 +874,70 @@ function App() {
   }
 
   if (screen === 'project-list') {
-    return <ProjectList events={events} onHome={() => setScreen('home')} onOpen={(event) => { setActiveEvent(event); setScreen('photobooth-session'); }} onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }} onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }} />;
+    return (
+      <WithReminder {...reminderProps}>
+        <ProjectList events={events} onHome={() => setScreen('home')} onOpen={(event) => { setActiveEvent(event); setScreen('photobooth-session'); }} onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }} onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }} />
+      </WithReminder>
+    );
   }
 
   if (screen === 'event-file' && editingEvent) {
-    return <EventFile event={editingEvent} onSaved={async (saved) => { await refreshEvents(); setEditingEvent(saved); setScreen('project-list'); }} onHome={() => setScreen('project-list')} />;
+    return (
+      <WithReminder {...reminderProps}>
+        <EventFile event={editingEvent} onSaved={async (saved) => { await refreshEvents(); setEditingEvent(saved); setScreen('project-list'); }} onHome={() => setScreen('project-list')} />
+      </WithReminder>
+    );
   }
 
   if (screen === 'photobooth-session' && activeEvent) {
     return (
-      <>
+      <WithReminder {...reminderProps}>
         <PhotoboothSession event={activeEvent} cameraSettings={settings.camera} allSettings={settings} onExit={() => setScreen('project-list')} />
-        {reminderVisible ? (
-          <ReminderPopup
-            minutesUntilExpiry={reminderMinutes}
-            hasRefreshToken={false}
-            refreshing={reminderRefreshing}
-            onRefresh={handleReminderRefresh}
-            onDismiss={() => setReminderVisible(false)}
-          />
-        ) : null}
-      </>
+      </WithReminder>
     );
   }
 
   if (screen === 'photobooth-session' && !activeEvent) {
     return (
-      <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-        <AlertCircle size={48} strokeWidth={1} />
-        <h2 style={{ fontSize: 24, margin: 0 }}>Event not found</h2>
-        <p style={{ color: 'rgba(255,255,255,.5)', margin: 0 }}>The event data is missing or malformed.</p>
-        <button onClick={() => setScreen('project-list')} type="button" style={{ marginTop: 8, padding: '10px 24px', background: '#ef3f25', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>BACK</button>
-      </main>
+      <WithReminder {...reminderProps}>
+        <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          <AlertCircle size={48} strokeWidth={1} />
+          <h2 style={{ fontSize: 24, margin: 0 }}>Event not found</h2>
+          <p style={{ color: 'rgba(255,255,255,.5)', margin: 0 }}>The event data is missing or malformed.</p>
+          <button onClick={() => setScreen('project-list')} type="button" style={{ marginTop: 8, padding: '10px 24px', background: '#ef3f25', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>BACK</button>
+        </main>
+      </WithReminder>
     );
   }
 
   if (screen === 'settings') {
-    return <Settings onHome={() => { setSettings(loadAllSettings()); setScreen('home'); }} />;
+    return (
+      <WithReminder {...reminderProps}>
+        <Settings onHome={() => { setSettings(loadAllSettings()); setScreen('home'); }} />
+      </WithReminder>
+    );
   }
 
   return (
-    <main className="home-screen">
-      <div className="grain" aria-hidden="true" />
-      <div className="corner-shape corner-shape-left" aria-hidden="true"><i /><i /><i /><i /></div>
-      <div className="corner-shape corner-shape-right" aria-hidden="true"><i /><i /><i /><i /></div>
-      <div className="pattern pattern-top" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div>
-      <div className="pattern pattern-bottom" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div>
-      <button className="fullscreen-button" type="button" title="Toggle fullscreen" onClick={() => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); }}><Maximize2 size={19} /></button>
-      <section className="home-content">
-        <div className="brand-lockup"><span className="brand-r3a">R3A</span><span className="brand-booth">BOOTH</span></div>
-        <p className="home-kicker">EVENT PHOTO EXPERIENCE</p>
-        <div className="home-actions">
-          <button className="primary-button" onClick={() => setScreen('project-list')} type="button"><span>PROJECT</span><ChevronRight size={26} /></button>
-          <button className="primary-button" onClick={() => setScreen('settings')} type="button"><span>SETTINGS</span><ChevronRight size={26} /></button>
-        </div>
-      </section>
-      <div className="home-footer"><span>R3A BOOTH</span><span>READY TO CREATE</span></div>
-    </main>
+    <WithReminder {...reminderProps}>
+      <main className="home-screen">
+        <div className="grain" aria-hidden="true" />
+        <div className="corner-shape corner-shape-left" aria-hidden="true"><i /><i /><i /><i /></div>
+        <div className="corner-shape corner-shape-right" aria-hidden="true"><i /><i /><i /><i /></div>
+        <div className="pattern pattern-top" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        <div className="pattern pattern-bottom" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div>
+        <button className="fullscreen-button" type="button" title="Toggle fullscreen" onClick={() => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); }}><Maximize2 size={19} /></button>
+        <section className="home-content">
+          <div className="brand-lockup"><span className="brand-r3a">R3A</span><span className="brand-booth">BOOTH</span></div>
+          <p className="home-kicker">EVENT PHOTO EXPERIENCE</p>
+          <div className="home-actions">
+            <button className="primary-button" onClick={() => setScreen('project-list')} type="button"><span>PROJECT</span><ChevronRight size={26} /></button>
+            <button className="primary-button" onClick={() => setScreen('settings')} type="button"><span>SETTINGS</span><ChevronRight size={26} /></button>
+          </div>
+        </section>
+        <div className="home-footer"><span>R3A BOOTH</span><span>READY TO CREATE</span></div>
+      </main>
+    </WithReminder>
   );
 }
 
