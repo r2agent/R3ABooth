@@ -1,19 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { AlertCircle, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, RefreshCw, X, Loader2 } from 'lucide-react';
 
 type Props = {
-  /** Menit sampai token expired (bisa negatif kalau sudah expired) */
   minutesUntilExpiry: number;
-  /** Ada refresh token? Kalau tidak ada, harus reconnect manual */
   hasRefreshToken: boolean;
-  /** Sedang refresh? */
   refreshing: boolean;
-  /** Klik REFRESH */
   onRefresh: () => void;
-  /** Klik DISMISS / X */
   onDismiss: () => void;
-  /** Kalau true, tampilkan bunyi */
   soundEnabled?: boolean;
+  /** Kalau true → popup jadi fullscreen overlay (untuk mode booth/kiosk) */
+  waitingForOAuth?: boolean;
 };
 
 function playBeep() {
@@ -35,9 +31,7 @@ function playBeep() {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.5);
-  } catch {
-    /* ignore */
-  }
+  } catch { /* ignore */ }
 }
 
 export const ReminderPopup = ({
@@ -46,19 +40,64 @@ export const ReminderPopup = ({
   onRefresh,
   onDismiss,
   soundEnabled = true,
+  waitingForOAuth = false,
 }: Props) => {
   const playedRef = useRef(false);
 
   useEffect(() => {
     if (playedRef.current) return;
     playedRef.current = true;
-    if (soundEnabled) {
+    if (soundEnabled && !waitingForOAuth) {
       playBeep();
     }
-  }, [soundEnabled]);
+  }, [soundEnabled, waitingForOAuth]);
 
   const expired = minutesUntilExpiry <= 0;
 
+  // === FULLSCREEN WAITING MODE ===
+  if (waitingForOAuth) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 99999,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#0a0a0a',
+          color: '#fff',
+          padding: 24,
+          textAlign: 'center',
+        }}
+      >
+        <Loader2
+          size={64}
+          color="#ef3f25"
+          style={{ animation: 'spin 1.2s linear infinite', marginBottom: 24 }}
+        />
+        <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '.05em', marginBottom: 12 }}>
+          WAITING FOR GOOGLE LOGIN
+        </div>
+        <div style={{ fontSize: 15, color: 'rgba(255,255,255,.65)', maxWidth: 480, lineHeight: 1.6 }}>
+          Selesaikan login di jendela Google yang baru terbuka.
+          <br />
+          Setelah selesai, halaman ini akan kembali otomatis.
+        </div>
+        <style>{`
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  // === NORMAL POPUP MODE (tengah) ===
   return (
     <div
       role="dialog"

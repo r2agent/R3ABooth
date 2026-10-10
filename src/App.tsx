@@ -52,6 +52,7 @@ const WithReminder = ({
   refreshing,
   onRefresh,
   onDismiss,
+  waitingForOAuth,
   children,
 }: {
   visible: boolean;
@@ -59,6 +60,7 @@ const WithReminder = ({
   refreshing: boolean;
   onRefresh: () => void;
   onDismiss: () => void;
+  waitingForOAuth: boolean;
   children: React.ReactNode;
 }) => (
   <>
@@ -70,6 +72,7 @@ const WithReminder = ({
         refreshing={refreshing}
         onRefresh={onRefresh}
         onDismiss={onDismiss}
+        waitingForOAuth={waitingForOAuth}
       />
     ) : null}
   </>
@@ -784,6 +787,7 @@ function App() {
   const [reminderVisible, setReminderVisible] = useState(false);
   const [reminderMinutes, setReminderMinutes] = useState(0);
   const [reminderRefreshing, setReminderRefreshing] = useState(false);
+  const [waitingForOAuth, setWaitingForOAuth] = useState(false);
   const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastReminderAtRef = useRef<number>(Date.now());
 
@@ -840,6 +844,7 @@ function App() {
       return;
     }
     setReminderRefreshing(true);
+    setWaitingForOAuth(true);   // ← popup jadi fullscreen
     try {
       const result = await connectGoogleDrive(clientId);
       if (result.success) {
@@ -849,8 +854,10 @@ function App() {
         setReminderVisible(false);
         lastReminderAtRef.current = Date.now();
       }
+      // kalau gagal, biarkan popup tetap terbuka (waitingForOAuth=false lagi)
     } catch { /* ignore */ }
     setReminderRefreshing(false);
+    setWaitingForOAuth(false);  // ← selesai (sukses / gagal), kembali normal
   };
 
   const reminderProps = {
@@ -859,6 +866,7 @@ function App() {
     refreshing: reminderRefreshing,
     onRefresh: handleReminderRefresh,
     onDismiss: () => setReminderVisible(false),
+    waitingForOAuth,
   };
 
   if (hash === '#operator') {
