@@ -478,7 +478,6 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                     <button type="button" className="gdrive-account-btn">{settings.googleDrive.account || 'Connected'}</button>
                   </div>
 
-                  {/* TOKEN REMINDER — label dinamis sesuai interval */}
                   <div className="setting-control">
                     <span>TOKEN REMINDER ({settings.googleDrive.reminderIntervalMin || 50} MIN)</span>
                     <button
@@ -490,7 +489,6 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                     </button>
                   </div>
 
-                  {/* REMINDER INTERVAL — bisa diketik, range 1-60 */}
                   <div className="setting-control">
                     <span>REMINDER INTERVAL (MIN)</span>
                     <input
@@ -763,7 +761,7 @@ function App() {
   const [reminderMinutes, setReminderMinutes] = useState(0);
   const [reminderRefreshing, setReminderRefreshing] = useState(false);
   const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastReminderAtRef = useRef<number>(0);
+  const lastReminderAtRef = useRef<number>(Date.now());
 
   const refreshEvents = async () => { setEvents(await getAllEvents()); };
   useEffect(() => { void refreshEvents(); }, []);
@@ -775,7 +773,7 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // === Reminder timer (validasi 1-60 menit) ===
+  // === Reminder timer — MURNI BY INTERVAL ===
   useEffect(() => {
     if (reminderTimerRef.current) {
       clearInterval(reminderTimerRef.current);
@@ -795,31 +793,22 @@ function App() {
         : 50;
     const intervalMs = intervalMin * 60 * 1000;
 
+    // Reset timer anchor saat interval berubah (biar hitungan mulai dari 0)
+    lastReminderAtRef.current = Date.now();
+
     reminderTimerRef.current = setInterval(() => {
       const now = Date.now();
       if (now - lastReminderAtRef.current < intervalMs) return;
 
       const status = getTokenStatus();
-      if (!status.hasToken) {
-        const minutesAgo = status.expiresAt ? Math.floor((now - status.expiresAt) / 60000) : 0;
-        setReminderMinutes(-Math.max(1, minutesAgo));
-        setReminderVisible(true);
-        lastReminderAtRef.current = now;
-        return;
-      }
+      const msLeft = status.hasToken && status.expiresAt ? status.expiresAt - now : 0;
+      const minutesLeft = Math.max(0, Math.floor(msLeft / 60000));
 
-      const msLeft = status.expiresAt ? status.expiresAt - now : 0;
-      const minutesLeft = Math.floor(msLeft / 60000);
-      if (minutesLeft <= 15) {
-        setReminderMinutes(minutesLeft);
-        setReminderVisible(true);
-        lastReminderAtRef.current = now;
-      }
-    }, 30 * 1000);
-
-    return () => {
-      if (reminderTimerRef.current) clearInterval(reminderTimerRef.current);
-    };
+      // Popup muncul MURNI berdasarkan interval — bukan sisa token
+      setReminderMinutes(minutesLeft);
+      setReminderVisible(true);
+      lastReminderAtRef.current = now;
+    }, 5 * 1000);
   }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.clientId, settings.googleDrive.reminderIntervalMin]);
 
   const handleReminderRefresh = async () => {
@@ -836,6 +825,7 @@ function App() {
         setSettings(next);
         saveAllSettings(next);
         setReminderVisible(false);
+        lastReminderAtRef.current = Date.now();
       }
     } catch { /* ignore */ }
     setReminderRefreshing(false);
