@@ -30,7 +30,6 @@ function statusToAccent(status: string): string {
   return '#f56a2d';
 }
 
-// Helper: extract folder ID from Google Drive URL or plain ID
 function parseFolderId(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return '';
@@ -479,7 +478,7 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                     <button type="button" className="gdrive-account-btn">{settings.googleDrive.account || 'Connected'}</button>
                   </div>
 
-                  {/* REMINDER SETTINGS */}
+                  {/* TOKEN REMINDER — label dinamis sesuai interval */}
                   <div className="setting-control">
                     <span>TOKEN REMINDER ({settings.googleDrive.reminderIntervalMin || 50} MIN)</span>
                     <button
@@ -490,6 +489,8 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                       <i />{settings.googleDrive.reminderEnabled ? 'ON' : 'OFF'}
                     </button>
                   </div>
+
+                  {/* REMINDER INTERVAL — bisa diketik, range 1-60 */}
                   <div className="setting-control">
                     <span>REMINDER INTERVAL (MIN)</span>
                     <input
@@ -505,16 +506,15 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                       onBlur={(e) => {
                         const raw = e.target.value.replace(/[^0-9]/g, '');
                         const num = raw === '' ? 50 : parseInt(raw, 10);
-                        if (!num || num < 10 || num > 55) {
-                        update('googleDrive', { reminderIntervalMin: 50 });
-                      }
-                    }}
-                    placeholder="50"
-                    style={{ padding: 8, fontSize: 14 }}
+                        if (!num || num < 1 || num > 60) {
+                          update('googleDrive', { reminderIntervalMin: 50 });
+                        }
+                      }}
+                      placeholder="50"
+                      style={{ padding: 8, fontSize: 14 }}
                     />
                   </div>
 
-                  {/* MAIN FOLDER */}
                   <div className="setting-control">
                     <span>MAIN FOLDER (CURRENT)</span>
                     <button type="button" className="gdrive-folder-display">
@@ -775,7 +775,7 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  // === Reminder timer ===
+  // === Reminder timer (validasi 1-60 menit) ===
   useEffect(() => {
     if (reminderTimerRef.current) {
       clearInterval(reminderTimerRef.current);
@@ -790,19 +790,17 @@ function App() {
 
     const rawInterval = Number(gd.reminderIntervalMin);
     const intervalMin =
-      Number.isFinite(rawInterval) && rawInterval >= 10 && rawInterval <= 55
+      Number.isFinite(rawInterval) && rawInterval >= 1 && rawInterval <= 60
         ? rawInterval
         : 50;
     const intervalMs = intervalMin * 60 * 1000;
 
-    // Cek setiap 30 detik: apakah waktunya reminder?
     reminderTimerRef.current = setInterval(() => {
       const now = Date.now();
       if (now - lastReminderAtRef.current < intervalMs) return;
 
       const status = getTokenStatus();
       if (!status.hasToken) {
-        // Token expired → reminder lebih urgent
         const minutesAgo = status.expiresAt ? Math.floor((now - status.expiresAt) / 60000) : 0;
         setReminderMinutes(-Math.max(1, minutesAgo));
         setReminderVisible(true);
