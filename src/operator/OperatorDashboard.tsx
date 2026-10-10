@@ -26,6 +26,7 @@ export const OperatorDashboard = ({
     expiresInMs: null,
     account: null,
     hasRefreshToken: false,
+    hasClientId: false,
   });
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [retrying, setRetrying] = useState(false);
@@ -43,6 +44,7 @@ export const OperatorDashboard = ({
           expiresInMs: null,
           account: null,
           hasRefreshToken: false,
+          hasClientId: false,
         })),
       ]);
       setStats(s);
@@ -67,9 +69,8 @@ export const OperatorDashboard = ({
   }, [actionMessage]);
 
   const handleRetryAll = useCallback(async () => {
-    const clientId = allSettings.googleDrive.clientId;
-    if (!clientId) {
-      setActionMessage('No Client ID configured.');
+    if (!token.hasClientId) {
+      setActionMessage('Google Client ID not configured. Contact admin.');
       return;
     }
     if (pending.length === 0) {
@@ -78,7 +79,7 @@ export const OperatorDashboard = ({
     }
     setRetrying(true);
     try {
-      const succeeded = await retryAllPending(clientId);
+      const succeeded = await retryAllPending();
       await refresh();
       setActionMessage(`Retried: ${succeeded} file(s) uploaded successfully.`);
     } catch {
@@ -86,17 +87,16 @@ export const OperatorDashboard = ({
     } finally {
       setRetrying(false);
     }
-  }, [allSettings.googleDrive.clientId, pending.length, refresh]);
+  }, [token.hasClientId, pending.length, refresh]);
 
   const handleReconnect = useCallback(async () => {
-    const clientId = allSettings.googleDrive.clientId;
-    if (!clientId) {
-      setActionMessage('No Client ID configured.');
+    if (!token.hasClientId) {
+      setActionMessage('Google Client ID not configured. Contact admin.');
       return;
     }
     setReconnecting(true);
     try {
-      const result = await connectGoogleDrive(clientId);
+      const result = await connectGoogleDrive();
       await refresh();
       if (result.success) {
         setActionMessage(`Reconnected as ${result.account || 'unknown account'}.`);
@@ -108,7 +108,7 @@ export const OperatorDashboard = ({
     } finally {
       setReconnecting(false);
     }
-  }, [allSettings.googleDrive.clientId, refresh]);
+  }, [token.hasClientId, refresh]);
 
   const tokenExpiresIn = token.expiresInMs
     ? Math.max(0, Math.floor(token.expiresInMs / 60000))
@@ -153,7 +153,11 @@ export const OperatorDashboard = ({
             DRIVE STATUS
           </h3>
           <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            {token.hasToken ? (
+            {!token.hasClientId ? (
+              <>
+                <AlertCircle size={14} color="#ef4444" /> Client ID not configured
+              </>
+            ) : token.hasToken ? (
               <>
                 <CheckCircle2 size={14} color="#4ade80" /> Connected
               </>

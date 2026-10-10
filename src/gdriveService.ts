@@ -3,13 +3,12 @@
 //
 // Security model:
 // - OAuth uses authorization code flow (server-side token exchange) — client_secret stays on server.
+// - Client ID comes from VITE_GOOGLE_CLIENT_ID env var (public by design).
 // - Access token kept in memory + sessionStorage (per-tab).
 // - Refresh token kept in IndexedDB (survives refresh, cleared on disconnect).
 // - Backend endpoints:
 //     POST /api/auth/exchange  { code, redirect_uri }  -> tokens
 //     POST /api/auth/refresh   { refresh_token }       -> new access_token
-// - Admin enters their own Google OAuth Client ID in Settings; it is stored in localStorage
-//   alongside other non-sensitive settings (a Client ID is public by design).
 
 export type DriveConnectResult = {
   success: boolean;
@@ -41,13 +40,20 @@ const TOKEN_SS_KEY = 'r3a.gdrive.accessToken';
 const EXPIRY_SS_KEY = 'r3a.gdrive.tokenExpiry';
 const ACCOUNT_SS_KEY = 'r3a.gdrive.account';
 
+// Client ID dari env var (Vite)
+const ENV_CLIENT_ID =
+  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
+
+function getClientId(): string {
+  return (ENV_CLIENT_ID || '').trim();
+}
+
 // --- Token state -------------------------------------------------------------
 
 let accessToken: string | null = null;
 let tokenExpiry = 0;
 let lastKnownAccount: string | null = null;
 let codeClient: CodeClient | null = null;
-let currentClientId = '';
 let refreshInFlight: Promise<string> | null = null;
 
 type CodeClient = {
@@ -70,12 +76,9 @@ function ssSet(key: string, value: string | null): void {
     if (typeof window === 'undefined') return;
     if (value === null) window.sessionStorage.removeItem(key);
     else window.sessionStorage.setItem(key, value);
-  } catch {
-    /* ignore */
-  }
+  } catch { /* ignore */ }
 }
 
-// Restore access token from sessionStorage on module load (per-tab)
 accessToken = ssGet(TOKEN_SS_KEY);
 tokenExpiry = Number(ssGet(EXPIRY_SS_KEY) || 0) || 0;
 lastKnownAccount = ssGet(ACCOUNT_SS_KEY);
@@ -158,7 +161,7 @@ async function clearRefreshToken(): Promise<void> {
   await idbDelete('refresh_token').catch(() => {});
 }
 
-// --- Google Identity Services loader ----------------------------------------
+// --- GIS loader --------------------------------------------------------------
 
 let gisLoaded = false;
 let gisLoadPromise: Promise<void> | null = null;
@@ -185,7 +188,7 @@ function loadGis(): Promise<void> {
   return gisLoadPromise;
 }
 
-// --- Google Picker loader ---------------------------------------------------
+// --- Picker loader -----------------------------------------------------------
 
 let pickerLoaded = false;
 let pickerLoadPromise: Promise<void> | null = null;
@@ -223,7 +226,6 @@ declare const gapi: any;
 
 function initCodeClient(clientId: string): Promise<void> {
   return loadGis().then(() => {
-    currentClientId = clientId;
     codeClient = google.accounts.oauth2.initCodeClient({
       client_id: clientId,
       scope: SCOPES,
@@ -234,11 +236,14 @@ function initCodeClient(clientId: string): Promise<void> {
   });
 }
 
-/**
- * Request an authorization code via GIS, then exchange it server-side
- * for access_token + refresh_token.
- */
-async function requestTokens(clientId: string): Promise<{ accessToken: string; expiresIn: number; refreshToken: string | null }> {
+async function requestTokens(): Promise<{ accessToken: string; expiresIn: number; refreshToken: string | null }> {
+  const clientId = getClientId();
+  if (!clientId) {
+    throw new Error(
+      'Google Client ID not configured. Set VITE_GOOGLE_CLIENT_ID in Vercel and redeploy.',
+    );
+  }
+
   await initCodeClient(clientId);
 
   const code = await new Promise<string>((resolve, reject) => {
@@ -260,7 +265,6 @@ async function requestTokens(clientId: string): Promise<{ accessToken: string; e
     codeClient.requestCode();
   });
 
-  // Exchange code -> tokens via our backend
   const res = await fetch('/api/auth/exchange', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -298,9 +302,6 @@ async function requestTokens(clientId: string): Promise<{ accessToken: string; e
   return { accessToken: data.access_token, expiresIn, refreshToken };
 }
 
-/**
- * Refresh access token via backend using stored refresh_token.
- */
 async function refreshAccessToken(): Promise<string> {
   if (refreshInFlight) return refreshInFlight;
 
@@ -323,7 +324,6 @@ async function refreshAccessToken(): Promise<string> {
         if (err?.error_description) msg = err.error_description;
         else if (err?.error) msg = err.error;
       } catch { /* keep default */ }
-      // If refresh_token is revoked/invalid, clear it so user knows to reconnect
       if (msg.includes('invalid_grant') || msg.includes('revoked')) {
         await clearRefreshToken();
         setAccessToken(null, 0);
@@ -355,31 +355,23 @@ async function refreshAccessToken(): Promise<string> {
 
 // --- Public API --------------------------------------------------------------
 
-export function getValidToken(clientId: string): Promise<string> {
-  // 1. Token masih valid, pakai langsung
+export function getValidToken(): Promise<string> {
   if (accessToken && Date.now() < tokenExpiry - 60000) {
     return Promise.resolve(accessToken);
   }
-
-  // 2. Token expired, coba refresh via refresh_token (tanpa user gesture)
   return refreshAccessToken().catch(async (err) => {
-    // 3. Refresh gagal (misal refresh token di-revoke)
-    //    Fallback: minta user login ulang
-    if (err instanceof Error && err.message.includes('No refresh token')) {
-      // fallback ke interactive
-      const tokens = await requestTokens(clientId);
-      return tokens.accessToken;
-    }
-    // Kalau refresh token invalid, minta user login ulang juga
-    if (err instanceof Error && (err.message.includes('invalid_grant') || err.message.includes('revoked'))) {
-      const tokens = await requestTokens(clientId);
+    if (err instanceof Error && (
+      err.message.includes('No refresh token') ||
+      err.message.includes('invalid_grant') ||
+      err.message.includes('revoked')
+    )) {
+      const tokens = await requestTokens();
       return tokens.accessToken;
     }
     throw err;
   });
 }
 
-/** Fetch the user's email from the userinfo endpoint. */
 async function fetchUserEmail(token: string): Promise<string> {
   const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${token}` },
@@ -389,12 +381,16 @@ async function fetchUserEmail(token: string): Promise<string> {
   return data.email || 'Unknown account';
 }
 
-export async function connectGoogleDrive(clientId: string): Promise<DriveConnectResult> {
-  if (!clientId || clientId.trim().length < 10) {
-    return { success: false, error: 'Please enter a valid Google OAuth Client ID in the field above.' };
+export async function connectGoogleDrive(): Promise<DriveConnectResult> {
+  const clientId = getClientId();
+  if (!clientId) {
+    return {
+      success: false,
+      error: 'Google Client ID not configured. Contact admin.',
+    };
   }
   try {
-    const tokens = await requestTokens(clientId);
+    const tokens = await requestTokens();
     const email = await fetchUserEmail(tokens.accessToken);
     setAccount(email);
     return { success: true, account: email };
@@ -408,20 +404,20 @@ export async function disconnectGoogleDrive(): Promise<boolean> {
   if (accessToken) {
     try {
       await fetch(`https://oauth2.googleapis.com/revoke?token=${accessToken}`, { method: 'POST' });
-    } catch { /* best-effort revoke */ }
+    } catch { /* best-effort */ }
   }
   setAccessToken(null, 0);
   setAccount(null);
   await clearRefreshToken();
   codeClient = null;
-  currentClientId = '';
   return true;
 }
 
-export async function testGoogleDriveConnection(clientId: string): Promise<DriveTestResult> {
-  if (!clientId) return { success: false, message: 'No Client ID configured.' };
+export async function testGoogleDriveConnection(): Promise<DriveTestResult> {
+  const clientId = getClientId();
+  if (!clientId) return { success: false, message: 'Google Client ID not configured.' };
   try {
-    const token = await getValidToken(clientId);
+    const token = await getValidToken();
     const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -439,13 +435,14 @@ export async function testGoogleDriveConnection(clientId: string): Promise<Drive
   }
 }
 
-export async function testGoogleDriveUpload(_clientId: string): Promise<DriveTestResult> {
+export async function testGoogleDriveUpload(): Promise<DriveTestResult> {
   return { success: false, message: 'Upload test is not part of Phase 1.' };
 }
 
-export async function pickDriveFolder(clientId: string): Promise<DriveFolder | null> {
-  if (!clientId) throw new Error('No Client ID configured.');
-  const token = await getValidToken(clientId);
+export async function pickDriveFolder(): Promise<DriveFolder | null> {
+  const clientId = getClientId();
+  if (!clientId) throw new Error('Google Client ID not configured.');
+  const token = await getValidToken();
   await loadPicker();
 
   return new Promise<DriveFolder | null>((resolve, reject) => {
@@ -473,9 +470,9 @@ export async function pickDriveFolder(clientId: string): Promise<DriveFolder | n
   });
 }
 
-export async function shareFolderWithAnyone(folderId: string, clientId: string): Promise<boolean> {
+export async function shareFolderWithAnyone(folderId: string): Promise<boolean> {
   try {
-    const token = await getValidToken(clientId);
+    const token = await getValidToken();
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
       method: 'POST',
       headers: {
@@ -540,6 +537,7 @@ export type TokenStatus = {
   expiresInMs: number | null;
   account: string | null;
   hasRefreshToken: boolean;
+  hasClientId: boolean;
 };
 
 export async function getTokenStatus(): Promise<TokenStatus> {
@@ -552,5 +550,6 @@ export async function getTokenStatus(): Promise<TokenStatus> {
     expiresInMs: hasToken ? tokenExpiry - now : null,
     account: lastKnownAccount,
     hasRefreshToken: !!refreshToken,
+    hasClientId: !!getClientId(),
   };
 }

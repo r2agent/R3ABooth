@@ -156,19 +156,14 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleConnectGdrive = async () => {
-    const clientId = settings.googleDrive.clientId;
-    if (!clientId || clientId.trim().length < 10) {
-      setGdriveTestState({ status: 'error', message: 'Please enter a Google OAuth Client ID first.' });
-      return;
-    }
     setGdriveConnecting(true);
     setGdriveTestState({ status: 'idle', message: '' });
-    const result = await connectGoogleDrive(clientId);
+    const result = await connectGoogleDrive();
     setGdriveConnecting(false);
     if (result.success) {
       const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
       setSettings(next);
-      saveAllSettings(next); // auto-save setelah connect
+      saveAllSettings(next);
     } else {
       setGdriveTestState({ status: 'error', message: result.error || 'Connection failed' });
     }
@@ -178,20 +173,15 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
     await disconnectGoogleDrive();
     const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: false, account: '', mainFolderId: '', mainFolderName: '', autoUpload: false } };
     setSettings(next);
-    saveAllSettings(next); // auto-save setelah disconnect
+    saveAllSettings(next);
     setGdriveTestState({ status: 'idle', message: '' });
     setGdriveUploadTestState({ status: 'idle', message: '' });
   };
 
   const handleReconnectGdrive = async () => {
-    const clientId = settings.googleDrive.clientId;
-    if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'No Client ID configured.' });
-      return;
-    }
     setGdriveConnecting(true);
     setGdriveTestState({ status: 'idle', message: '' });
-    const result = await connectGoogleDrive(clientId);
+    const result = await connectGoogleDrive();
     setGdriveConnecting(false);
     if (result.success) {
       const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
@@ -203,19 +193,14 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleChangeFolder = async () => {
-    const clientId = settings.googleDrive.clientId;
-    if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'No Client ID configured.' });
-      return;
-    }
     setGdrivePicking(true);
     setGdriveTestState({ status: 'idle', message: '' });
     try {
-      const folder = await pickDriveFolder(clientId);
+      const folder = await pickDriveFolder();
       if (folder) {
         const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: folder.id, mainFolderName: folder.name } };
         setSettings(next);
-        saveAllSettings(next); // auto-save setelah pilih MAIN folder
+        saveAllSettings(next);
       }
     } catch (err) {
       setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to open folder picker' });
@@ -225,13 +210,13 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
 
   const handleTestGdrive = async () => {
     setGdriveTestState({ status: 'running', message: 'Testing...' });
-    const result = await testGoogleDriveConnection(settings.googleDrive.clientId);
+    const result = await testGoogleDriveConnection();
     setGdriveTestState({ status: result.success ? 'success' : 'error', message: result.message });
   };
 
   const handleTestGdriveUpload = async () => {
     setGdriveUploadTestState({ status: 'running', message: 'Uploading test file...' });
-    const result = await testGoogleDriveUpload(settings.googleDrive.clientId);
+    const result = await testGoogleDriveUpload();
     setGdriveUploadTestState({ status: result.success ? 'success' : 'error', message: result.message });
   };
 
@@ -399,16 +384,7 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
               {!settings.googleDrive.connected ? (
                 <div className="hub-message">
                   <strong>Connect to Google Drive</strong>
-                  <p>Connect your Google account to select a main folder for photo storage. You will need a Google OAuth Client ID from the Google Cloud Console.</p>
-                  <div className="setting-control gdrive-client-id-row">
-                    <span>OAUTH CLIENT ID</span>
-                    <input
-                      value={settings.googleDrive.clientId}
-                      onChange={(e) => update('googleDrive', { clientId: e.target.value })}
-                      placeholder="xxxxxx.apps.googleusercontent.com"
-                      type="text"
-                    />
-                  </div>
+                  <p>Connect your Google account to select a main folder for photo storage.</p>
                   <button type="button" onClick={handleConnectGdrive} disabled={gdriveConnecting}>
                     {gdriveConnecting ? 'CONNECTING...' : 'CONNECT GOOGLE DRIVE'} <ChevronRight size={19} />
                   </button>
@@ -641,8 +617,8 @@ function App() {
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
   const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
-  const [isOperator, setIsOperator] = useState(
-    typeof window !== 'undefined' && window.location.hash === '#operator'
+  const [hash, setHash] = useState(() =>
+    typeof window !== 'undefined' ? window.location.hash : ''
   );
 
   const refreshEvents = async () => { setEvents(await getAllEvents()); };
@@ -650,18 +626,19 @@ function App() {
 
   // Operator dashboard routing (hash-based)
   useEffect(() => {
-    const onHash = () => setIsOperator(window.location.hash === '#operator');
+    const onHash = () => setHash(window.location.hash);
     window.addEventListener('hashchange', onHash);
+    onHash();
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
-  if (isOperator) {
+  if (hash === '#operator') {
     return (
       <OperatorDashboard
         allSettings={settings}
         onClose={() => {
           window.location.hash = '';
-          setIsOperator(false);
+          setHash('');
         }}
       />
     );

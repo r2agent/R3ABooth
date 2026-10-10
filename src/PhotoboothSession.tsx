@@ -75,11 +75,6 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/**
- * Builds a single video file by showing each photo in sequence for `durationPerPhotoMs`,
- * using a hidden canvas as the recording source. Returns a data URL, or null if the
- * browser doesn't support MediaRecorder/canvas.captureStream.
- */
 async function generateSlideshowVideo(
   photos: { dataUrl: string }[],
   durationPerPhotoMs: number,
@@ -201,10 +196,8 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
 }
 
 async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
-  void frame; // frame template shape no longer determines the exported slot photo's crop
-  void slot; // slot position/size in the template is no longer used for the standalone export
-  // Standalone slot-XX.jpg exports are always 16:9 at the camera's native resolution,
-  // independent of the slot's shape inside the frame template.
+  void frame;
+  void slot;
   const TARGET_ASPECT = 16 / 9;
 
   const photo = await loadImage(captureDataUrl);
@@ -232,7 +225,6 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
 
   ctx.save();
   ctx.filter = baseCss;
-  // 1:1 pixel crop from the source photo — no scale-down, so full camera quality is kept.
   ctx.drawImage(photo, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
   ctx.filter = 'none';
   if (glow) {
@@ -299,16 +291,18 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
 
   useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
 
+  // Retry failed uploads when network comes back online
   useEffect(() => {
     const handleOnline = () => {
       const gd = allSettings.googleDrive;
-      if (gd.connected && gd.clientId) {
-        void retryFailedUploads(gd.clientId);
+      if (gd.connected) {
+        void retryFailedUploads();
       }
     };
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
   }, [allSettings.googleDrive]);
+
   const [captureError, setCaptureError] = useState<CaptureError>(null);
   const [qrError, setQrError] = useState(false);
   const [driveQrDataUrl, setDriveQrDataUrl] = useState<string | null>(null);
@@ -370,9 +364,9 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     setGuestError(null);
 
     const gd = allSettings.googleDrive;
-    if (gd.connected && gd.clientId && gd.mainFolderId) {
+    if (gd.connected && gd.mainFolderId) {
       setGuestAssigning(true);
-      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId, gd.clientId);
+      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId);
       setGuestAssigning(false);
       if (result.success && result.guest) {
         setCurrentGuest(result.guest);
@@ -505,7 +499,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
         }
         if (rawSlotPhotos.length > 0) {
           try {
-            const DURATION_PER_SLIDE_MS = 300; // <- ubah angka ini buat atur berapa lama 1 foto/slide muncul (dalam milidetik)
+            const DURATION_PER_SLIDE_MS = 300;
             slideshowVideo = await generateSlideshowVideo(rawSlotPhotos, DURATION_PER_SLIDE_MS);
           } catch {
             slideshowVideo = null;
@@ -525,7 +519,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       }
 
       const gd = allSettings.googleDrive;
-      if (gd.connected && gd.clientId && currentGuest) {
+      if (gd.connected && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
           ...slotPhotos.map((sp) => ({
@@ -536,7 +530,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
             : []),
         ];
-        void autoUploadToGuestFolder(currentGuest, gd.clientId, uploadFiles);
+        void autoUploadToGuestFolder(currentGuest, uploadFiles);
       }
     } catch { /* ignore */ }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);

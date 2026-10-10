@@ -143,17 +143,23 @@ export type CreateGuestFolderResult = {
  * - Creates "Guest N" folder inside mainFolderId.
  * - If the folder already exists (e.g. after a page refresh), reuses it.
  * - Prevents duplicates by checking IndexedDB first.
+ *
+ * Client ID is now read from env (VITE_GOOGLE_CLIENT_ID) inside gdriveService,
+ * so this function no longer needs clientId as a parameter.
  */
 export async function getOrCreateNextGuestFolder(
   eventId: string,
   mainFolderId: string,
-  clientId: string,
 ): Promise<CreateGuestFolderResult> {
-  if (!clientId) return { success: false, error: 'Google Drive not configured. Connect and select a MAIN folder in Settings first.' };
-  if (!mainFolderId) return { success: false, error: 'No MAIN folder selected. Select a folder in Settings > Storage & Upload first.' };
+  if (!mainFolderId) {
+    return {
+      success: false,
+      error: 'No MAIN folder selected. Select a folder in Settings > Storage & Upload first.',
+    };
+  }
 
   try {
-    const token = await getValidToken(clientId);
+    const token = await getValidToken();
     const existingGuests = await getGuestsForEvent(eventId);
     const nextNumber = existingGuests.length + 1;
     const guestName = `Guest ${nextNumber}`;
@@ -165,7 +171,7 @@ export async function getOrCreateNextGuestFolder(
       return { success: true, guest: existingRecord };
     }
 
-    void shareFolderWithAnyone(folderId, clientId);
+    void shareFolderWithAnyone(folderId);
 
     const guest: GuestRecord = {
       id: `gst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -180,6 +186,9 @@ export async function getOrCreateNextGuestFolder(
 
     return { success: true, guest };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : 'Failed to create guest folder' };
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to create guest folder',
+    };
   }
 }
