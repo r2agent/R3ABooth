@@ -25,8 +25,6 @@ export const OperatorDashboard = ({
     expiresAt: null,
     expiresInMs: null,
     account: null,
-    hasRefreshToken: false,
-    hasClientId: false,
   });
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [retrying, setRetrying] = useState(false);
@@ -35,21 +33,13 @@ export const OperatorDashboard = ({
 
   const refresh = useCallback(async () => {
     try {
-      const [s, p, t] = await Promise.all([
+      const [s, p] = await Promise.all([
         getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 })),
         getAllPendingUploads().catch(() => []),
-        getTokenStatus().catch(() => ({
-          hasToken: false,
-          expiresAt: null,
-          expiresInMs: null,
-          account: null,
-          hasRefreshToken: false,
-          hasClientId: false,
-        })),
       ]);
       setStats(s);
       setPending(p);
-      setToken(t);
+      setToken(getTokenStatus());
       setLastUpdate(new Date());
     } catch {
       /* ignore */
@@ -69,8 +59,9 @@ export const OperatorDashboard = ({
   }, [actionMessage]);
 
   const handleRetryAll = useCallback(async () => {
-    if (!token.hasClientId) {
-      setActionMessage('Google Client ID not configured. Contact admin.');
+    const clientId = allSettings.googleDrive.clientId;
+    if (!clientId) {
+      setActionMessage('No Client ID configured.');
       return;
     }
     if (pending.length === 0) {
@@ -79,7 +70,7 @@ export const OperatorDashboard = ({
     }
     setRetrying(true);
     try {
-      const succeeded = await retryAllPending();
+      const succeeded = await retryAllPending(clientId);
       await refresh();
       setActionMessage(`Retried: ${succeeded} file(s) uploaded successfully.`);
     } catch {
@@ -87,16 +78,17 @@ export const OperatorDashboard = ({
     } finally {
       setRetrying(false);
     }
-  }, [token.hasClientId, pending.length, refresh]);
+  }, [allSettings.googleDrive.clientId, pending.length, refresh]);
 
   const handleReconnect = useCallback(async () => {
-    if (!token.hasClientId) {
-      setActionMessage('Google Client ID not configured. Contact admin.');
+    const clientId = allSettings.googleDrive.clientId;
+    if (!clientId) {
+      setActionMessage('No Client ID configured.');
       return;
     }
     setReconnecting(true);
     try {
-      const result = await connectGoogleDrive();
+      const result = await connectGoogleDrive(clientId);
       await refresh();
       if (result.success) {
         setActionMessage(`Reconnected as ${result.account || 'unknown account'}.`);
@@ -108,7 +100,7 @@ export const OperatorDashboard = ({
     } finally {
       setReconnecting(false);
     }
-  }, [token.hasClientId, refresh]);
+  }, [allSettings.googleDrive.clientId, refresh]);
 
   const tokenExpiresIn = token.expiresInMs
     ? Math.max(0, Math.floor(token.expiresInMs / 60000))
@@ -153,17 +145,9 @@ export const OperatorDashboard = ({
             DRIVE STATUS
           </h3>
           <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            {!token.hasClientId ? (
-              <>
-                <AlertCircle size={14} color="#ef4444" /> Client ID not configured
-              </>
-            ) : token.hasToken ? (
+            {token.hasToken ? (
               <>
                 <CheckCircle2 size={14} color="#4ade80" /> Connected
-              </>
-            ) : token.hasRefreshToken ? (
-              <>
-                <AlertCircle size={14} color="#facc15" /> Token expired — auto-refresh available
               </>
             ) : (
               <>
@@ -176,9 +160,6 @@ export const OperatorDashboard = ({
           </p>
           <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)' }}>
             Token expires in: {token.hasToken ? `${tokenExpiresIn} min` : '—'}
-          </p>
-          <p style={{ margin: 4, fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
-            Refresh token: {token.hasRefreshToken ? '✓ stored' : '✗ not stored'}
           </p>
         </div>
 

@@ -156,9 +156,14 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleConnectGdrive = async () => {
+    const clientId = settings.googleDrive.clientId;
+    if (!clientId || clientId.trim().length < 10) {
+      setGdriveTestState({ status: 'error', message: 'Please enter a Google OAuth Client ID first.' });
+      return;
+    }
     setGdriveConnecting(true);
     setGdriveTestState({ status: 'idle', message: '' });
-    const result = await connectGoogleDrive();
+    const result = await connectGoogleDrive(clientId);
     setGdriveConnecting(false);
     if (result.success) {
       const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
@@ -179,9 +184,14 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleReconnectGdrive = async () => {
+    const clientId = settings.googleDrive.clientId;
+    if (!clientId) {
+      setGdriveTestState({ status: 'error', message: 'No Client ID configured.' });
+      return;
+    }
     setGdriveConnecting(true);
     setGdriveTestState({ status: 'idle', message: '' });
-    const result = await connectGoogleDrive();
+    const result = await connectGoogleDrive(clientId);
     setGdriveConnecting(false);
     if (result.success) {
       const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
@@ -193,10 +203,15 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
   };
 
   const handleChangeFolder = async () => {
+    const clientId = settings.googleDrive.clientId;
+    if (!clientId) {
+      setGdriveTestState({ status: 'error', message: 'No Client ID configured.' });
+      return;
+    }
     setGdrivePicking(true);
     setGdriveTestState({ status: 'idle', message: '' });
     try {
-      const folder = await pickDriveFolder();
+      const folder = await pickDriveFolder(clientId);
       if (folder) {
         const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: folder.id, mainFolderName: folder.name } };
         setSettings(next);
@@ -210,13 +225,13 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
 
   const handleTestGdrive = async () => {
     setGdriveTestState({ status: 'running', message: 'Testing...' });
-    const result = await testGoogleDriveConnection();
+    const result = await testGoogleDriveConnection(settings.googleDrive.clientId);
     setGdriveTestState({ status: result.success ? 'success' : 'error', message: result.message });
   };
 
   const handleTestGdriveUpload = async () => {
     setGdriveUploadTestState({ status: 'running', message: 'Uploading test file...' });
-    const result = await testGoogleDriveUpload();
+    const result = await testGoogleDriveUpload(settings.googleDrive.clientId);
     setGdriveUploadTestState({ status: result.success ? 'success' : 'error', message: result.message });
   };
 
@@ -384,7 +399,16 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
               {!settings.googleDrive.connected ? (
                 <div className="hub-message">
                   <strong>Connect to Google Drive</strong>
-                  <p>Connect your Google account to select a main folder for photo storage.</p>
+                  <p>Connect your Google account to select a main folder for photo storage. You will need a Google OAuth Client ID from the Google Cloud Console.</p>
+                  <div className="setting-control gdrive-client-id-row">
+                    <span>OAUTH CLIENT ID</span>
+                    <input
+                      value={settings.googleDrive.clientId}
+                      onChange={(e) => update('googleDrive', { clientId: e.target.value })}
+                      placeholder="xxxxxx.apps.googleusercontent.com"
+                      type="text"
+                    />
+                  </div>
                   <button type="button" onClick={handleConnectGdrive} disabled={gdriveConnecting}>
                     {gdriveConnecting ? 'CONNECTING...' : 'CONNECT GOOGLE DRIVE'} <ChevronRight size={19} />
                   </button>
@@ -624,7 +648,6 @@ function App() {
   const refreshEvents = async () => { setEvents(await getAllEvents()); };
   useEffect(() => { void refreshEvents(); }, []);
 
-  // Operator dashboard routing (hash-based)
   useEffect(() => {
     const onHash = () => setHash(window.location.hash);
     window.addEventListener('hashchange', onHash);

@@ -295,8 +295,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   useEffect(() => {
     const handleOnline = () => {
       const gd = allSettings.googleDrive;
-      if (gd.connected) {
-        void retryFailedUploads();
+      if (gd.connected && gd.clientId) {
+        void retryFailedUploads(gd.clientId);
       }
     };
     window.addEventListener('online', handleOnline);
@@ -364,9 +364,9 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     setGuestError(null);
 
     const gd = allSettings.googleDrive;
-    if (gd.connected && gd.mainFolderId) {
+    if (gd.connected && gd.clientId && gd.mainFolderId) {
       setGuestAssigning(true);
-      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId);
+      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId, gd.clientId);
       setGuestAssigning(false);
       if (result.success && result.guest) {
         setCurrentGuest(result.guest);
@@ -519,7 +519,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       }
 
       const gd = allSettings.googleDrive;
-      if (gd.connected && currentGuest) {
+      if (gd.connected && gd.clientId && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
           ...slotPhotos.map((sp) => ({
@@ -530,7 +530,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
             : []),
         ];
-        void autoUploadToGuestFolder(currentGuest, uploadFiles);
+        void autoUploadToGuestFolder(currentGuest, gd.clientId, uploadFiles);
       }
     } catch { /* ignore */ }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);

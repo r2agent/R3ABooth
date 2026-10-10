@@ -176,25 +176,18 @@ export type AutoUploadResult = {
   results: UploadResult[];
 };
 
-/**
- * Upload final.jpg and slot photos to the guest's Google Drive folder.
- * - Silently skips if Drive not connected or no guest folder.
- * - Prevents duplicates by checking existing files and IndexedDB records.
- * - Never throws — returns a result object.
- *
- * Client ID now comes from env (VITE_GOOGLE_CLIENT_ID) — no need to pass it.
- */
 export async function autoUploadToGuestFolder(
   guest: GuestRecord,
+  clientId: string,
   files: UploadFileEntry[],
 ): Promise<AutoUploadResult> {
   const result: AutoUploadResult = { uploaded: 0, skipped: 0, failed: 0, results: [] };
 
-  if (!guest.guestFolderId) return result;
+  if (!clientId || !guest.guestFolderId) return result;
 
   let token: string;
   try {
-    token = await getValidToken();
+    token = await getValidToken(clientId);
   } catch {
     return result;
   }
@@ -237,12 +230,12 @@ export async function autoUploadToGuestFolder(
   return result;
 }
 
-export async function retryFailedUploads(): Promise<void> {
-  if (!navigator.onLine) return;
+export async function retryFailedUploads(clientId: string): Promise<void> {
+  if (!clientId || !navigator.onLine) return;
 
   let token: string;
   try {
-    token = await getValidToken();
+    token = await getValidToken(clientId);
   } catch {
     return;
   }
@@ -301,9 +294,9 @@ export async function getUploadStats(): Promise<{
   };
 }
 
-export async function retryAllPending(): Promise<number> {
+export async function retryAllPending(clientId: string): Promise<number> {
   const before = (await getAllPendingUploads().catch(() => [])).length;
-  await retryFailedUploads();
+  await retryFailedUploads(clientId);
   const after = (await getAllPendingUploads().catch(() => [])).length;
   return before - after;
 }

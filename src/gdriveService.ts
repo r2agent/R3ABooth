@@ -1,14 +1,8 @@
-// Google Drive integration via Google Identity Services (GIS) Authorization Code flow
+// Google Drive integration via Google Identity Services (GIS) implicit flow
 // and Google Picker API for folder selection.
 //
-// Security model:
-// - OAuth uses authorization code flow (server-side token exchange) — client_secret stays on server.
-// - Client ID comes from VITE_GOOGLE_CLIENT_ID env var (public by design).
-// - Access token kept in memory + sessionStorage (per-tab).
-// - Refresh token kept in IndexedDB (survives refresh, cleared on disconnect).
-// - Backend endpoints:
-//     POST /api/auth/exchange  { code, redirect_uri }  -> tokens
-//     POST /api/auth/refresh   { refresh_token }       -> new access_token
+// Implicit flow: no backend, no refresh token, access token lives ~1 hour.
+// Token kept in memory + sessionStorage (per-tab).
 
 export type DriveConnectResult = {
   success: boolean;
@@ -31,34 +25,26 @@ export type DriveFolder = {
 const SCOPES =
   'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
 
-const REDIRECT_URI =
-  typeof window !== 'undefined'
-    ? `${window.location.origin}/api/auth/cb`
-    : '/api/auth/cb';
-
 const TOKEN_SS_KEY = 'r3a.gdrive.accessToken';
 const EXPIRY_SS_KEY = 'r3a.gdrive.tokenExpiry';
 const ACCOUNT_SS_KEY = 'r3a.gdrive.account';
-
-// Client ID dari env var (Vite)
-const ENV_CLIENT_ID =
-  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
-
-function getClientId(): string {
-  return (ENV_CLIENT_ID || '').trim();
-}
 
 // --- Token state -------------------------------------------------------------
 
 let accessToken: string | null = null;
 let tokenExpiry = 0;
 let lastKnownAccount: string | null = null;
-let codeClient: CodeClient | null = null;
-let refreshInFlight: Promise<string> | null = null;
+let tokenClient: TokenClient | null = null;
+let currentClientId = '';
 
-type CodeClient = {
-  requestCode: () => void;
-  callback?: (resp: { code?: string; scope?: string; error?: string; error_description?: string }) => void;
+type TokenClient = {
+  requestAccessToken: (opts?: { prompt?: '' | 'consent' | 'select_account' }) => void;
+  callback?: (resp: {
+    access_token?: string;
+    expires_in?: number;
+    error?: string;
+    error_description?: string;
+  }) => void;
 };
 
 // --- sessionStorage helpers --------------------------------------------------
@@ -93,72 +79,6 @@ function setAccessToken(token: string | null, expiry: number): void {
 function setAccount(account: string | null): void {
   lastKnownAccount = account;
   ssSet(ACCOUNT_SS_KEY, account);
-}
-
-// --- IndexedDB for refresh token --------------------------------------------
-
-const IDB_NAME = 'r3a-booth';
-const IDB_STORE = 'gdriveAuth';
-const IDB_VERSION = 3;
-
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-function openDB(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(IDB_STORE)) {
-        db.createObjectStore(IDB_STORE, { keyPath: 'key' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => { dbPromise = null; reject(req.error); };
-  });
-  return dbPromise;
-}
-
-async function idbSet(key: string, value: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).put({ key, value });
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function idbGet(key: string): Promise<string | null> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readonly');
-    const req = tx.objectStore(IDB_STORE).get(key);
-    req.onsuccess = () => resolve(req.result ? (req.result.value as string) : null);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function idbDelete(key: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, 'readwrite');
-    tx.objectStore(IDB_STORE).delete(key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function saveRefreshToken(token: string): Promise<void> {
-  await idbSet('refresh_token', token);
-}
-
-async function getRefreshToken(): Promise<string | null> {
-  return idbGet('refresh_token').catch(() => null);
-}
-
-async function clearRefreshToken(): Promise<void> {
-  await idbDelete('refresh_token').catch(() => {});
 }
 
 // --- GIS loader --------------------------------------------------------------
@@ -222,154 +142,50 @@ declare const google: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const gapi: any;
 
-// --- Authorization Code flow -------------------------------------------------
+// --- Implicit flow -----------------------------------------------------------
 
-function initCodeClient(clientId: string): Promise<void> {
+function initTokenClient(clientId: string): Promise<void> {
   return loadGis().then(() => {
-    codeClient = google.accounts.oauth2.initCodeClient({
+    currentClientId = clientId;
+    tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: clientId,
       scope: SCOPES,
-      ux_mode: 'popup',
-      redirect_uri: REDIRECT_URI,
-      callback: () => { /* set per-request */ },
+      callback: () => { /* handled per-request */ },
     });
   });
 }
 
-async function requestTokens(): Promise<{ accessToken: string; expiresIn: number; refreshToken: string | null }> {
-  const clientId = getClientId();
-  if (!clientId) {
-    throw new Error(
-      'Google Client ID not configured. Set VITE_GOOGLE_CLIENT_ID in Vercel and redeploy.',
-    );
-  }
-
-  await initCodeClient(clientId);
-
-  const code = await new Promise<string>((resolve, reject) => {
-    if (!codeClient) {
-      reject(new Error('Code client not initialized'));
-      return;
-    }
-    codeClient.callback = (resp) => {
-      if (resp.error) {
-        reject(new Error(resp.error_description || resp.error));
-        return;
-      }
-      if (!resp.code) {
-        reject(new Error('No authorization code returned'));
-        return;
-      }
-      resolve(resp.code);
-    };
-    codeClient.requestCode();
-  });
-
-  const res = await fetch('/api/auth/exchange', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, redirect_uri: REDIRECT_URI }),
-  });
-
-  if (!res.ok) {
-    let msg = `Token exchange failed (HTTP ${res.status})`;
-    try {
-      const err = await res.json();
-      if (err?.error_description) msg = err.error_description;
-      else if (err?.error) msg = err.error;
-    } catch { /* keep default */ }
-    throw new Error(msg);
-  }
-
-  const data = await res.json() as {
-    access_token?: string;
-    expires_in?: number;
-    refresh_token?: string;
-  };
-
-  if (!data.access_token) {
-    throw new Error('No access_token in exchange response');
-  }
-
-  const expiresIn = data.expires_in ?? 3600;
-  const refreshToken = data.refresh_token ?? null;
-
-  setAccessToken(data.access_token, Date.now() + expiresIn * 1000);
-  if (refreshToken) {
-    await saveRefreshToken(refreshToken);
-  }
-
-  return { accessToken: data.access_token, expiresIn, refreshToken };
+function requestToken(
+  clientId: string,
+  promptMode: '' | 'consent' | 'select_account' = '',
+): Promise<string> {
+  return initTokenClient(clientId).then(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        if (!tokenClient) {
+          reject(new Error('Token client not initialized'));
+          return;
+        }
+        tokenClient.callback = (resp) => {
+          if (resp.error) {
+            reject(new Error(resp.error_description || resp.error));
+            return;
+          }
+          accessToken = resp.access_token || null;
+          tokenExpiry = Date.now() + (resp.expires_in ? resp.expires_in * 1000 : 3600 * 1000);
+          setAccessToken(accessToken, tokenExpiry);
+          resolve(accessToken!);
+        };
+        tokenClient.requestAccessToken({ prompt: promptMode });
+      }),
+  );
 }
 
-async function refreshAccessToken(): Promise<string> {
-  if (refreshInFlight) return refreshInFlight;
-
-  refreshInFlight = (async () => {
-    const refreshToken = await getRefreshToken();
-    if (!refreshToken) {
-      throw new Error('No refresh token available. Please reconnect Google Drive.');
-    }
-
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!res.ok) {
-      let msg = `Token refresh failed (HTTP ${res.status})`;
-      try {
-        const err = await res.json();
-        if (err?.error_description) msg = err.error_description;
-        else if (err?.error) msg = err.error;
-      } catch { /* keep default */ }
-      if (msg.includes('invalid_grant') || msg.includes('revoked')) {
-        await clearRefreshToken();
-        setAccessToken(null, 0);
-        setAccount(null);
-      }
-      throw new Error(msg);
-    }
-
-    const data = await res.json() as {
-      access_token?: string;
-      expires_in?: number;
-    };
-
-    if (!data.access_token) {
-      throw new Error('No access_token in refresh response');
-    }
-
-    const expiresIn = data.expires_in ?? 3600;
-    setAccessToken(data.access_token, Date.now() + expiresIn * 1000);
-    return data.access_token;
-  })();
-
-  try {
-    return await refreshInFlight;
-  } finally {
-    refreshInFlight = null;
-  }
-}
-
-// --- Public API --------------------------------------------------------------
-
-export function getValidToken(): Promise<string> {
+export function getValidToken(clientId: string): Promise<string> {
   if (accessToken && Date.now() < tokenExpiry - 60000) {
     return Promise.resolve(accessToken);
   }
-  return refreshAccessToken().catch(async (err) => {
-    if (err instanceof Error && (
-      err.message.includes('No refresh token') ||
-      err.message.includes('invalid_grant') ||
-      err.message.includes('revoked')
-    )) {
-      const tokens = await requestTokens();
-      return tokens.accessToken;
-    }
-    throw err;
-  });
+  return requestToken(clientId, '');
 }
 
 async function fetchUserEmail(token: string): Promise<string> {
@@ -381,17 +197,15 @@ async function fetchUserEmail(token: string): Promise<string> {
   return data.email || 'Unknown account';
 }
 
-export async function connectGoogleDrive(): Promise<DriveConnectResult> {
-  const clientId = getClientId();
-  if (!clientId) {
-    return {
-      success: false,
-      error: 'Google Client ID not configured. Contact admin.',
-    };
+// --- Public API --------------------------------------------------------------
+
+export async function connectGoogleDrive(clientId: string): Promise<DriveConnectResult> {
+  if (!clientId || clientId.trim().length < 10) {
+    return { success: false, error: 'Please enter a valid Google OAuth Client ID.' };
   }
   try {
-    const tokens = await requestTokens();
-    const email = await fetchUserEmail(tokens.accessToken);
+    const token = await requestToken(clientId, 'consent');
+    const email = await fetchUserEmail(token);
     setAccount(email);
     return { success: true, account: email };
   } catch (err) {
@@ -408,16 +222,15 @@ export async function disconnectGoogleDrive(): Promise<boolean> {
   }
   setAccessToken(null, 0);
   setAccount(null);
-  await clearRefreshToken();
-  codeClient = null;
+  tokenClient = null;
+  currentClientId = '';
   return true;
 }
 
-export async function testGoogleDriveConnection(): Promise<DriveTestResult> {
-  const clientId = getClientId();
-  if (!clientId) return { success: false, message: 'Google Client ID not configured.' };
+export async function testGoogleDriveConnection(clientId: string): Promise<DriveTestResult> {
+  if (!clientId) return { success: false, message: 'No Client ID configured.' };
   try {
-    const token = await getValidToken();
+    const token = await getValidToken(clientId);
     const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -435,14 +248,13 @@ export async function testGoogleDriveConnection(): Promise<DriveTestResult> {
   }
 }
 
-export async function testGoogleDriveUpload(): Promise<DriveTestResult> {
+export async function testGoogleDriveUpload(_clientId: string): Promise<DriveTestResult> {
   return { success: false, message: 'Upload test is not part of Phase 1.' };
 }
 
-export async function pickDriveFolder(): Promise<DriveFolder | null> {
-  const clientId = getClientId();
-  if (!clientId) throw new Error('Google Client ID not configured.');
-  const token = await getValidToken();
+export async function pickDriveFolder(clientId: string): Promise<DriveFolder | null> {
+  if (!clientId) throw new Error('No Client ID configured.');
+  const token = await getValidToken(clientId);
   await loadPicker();
 
   return new Promise<DriveFolder | null>((resolve, reject) => {
@@ -470,9 +282,9 @@ export async function pickDriveFolder(): Promise<DriveFolder | null> {
   });
 }
 
-export async function shareFolderWithAnyone(folderId: string): Promise<boolean> {
+export async function shareFolderWithAnyone(folderId: string, clientId: string): Promise<boolean> {
   try {
-    const token = await getValidToken();
+    const token = await getValidToken(clientId);
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions`, {
       method: 'POST',
       headers: {
@@ -536,20 +348,15 @@ export type TokenStatus = {
   expiresAt: number | null;
   expiresInMs: number | null;
   account: string | null;
-  hasRefreshToken: boolean;
-  hasClientId: boolean;
 };
 
-export async function getTokenStatus(): Promise<TokenStatus> {
+export function getTokenStatus(): TokenStatus {
   const now = Date.now();
   const hasToken = !!accessToken && now < tokenExpiry;
-  const refreshToken = await getRefreshToken().catch(() => null);
   return {
     hasToken,
     expiresAt: accessToken ? tokenExpiry : null,
     expiresInMs: hasToken ? tokenExpiry - now : null,
     account: lastKnownAccount,
-    hasRefreshToken: !!refreshToken,
-    hasClientId: !!getClientId(),
   };
 }

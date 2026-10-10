@@ -89,9 +89,6 @@ export async function findGuestByFolderId(guestFolderId: string): Promise<GuestR
 
 // --- Google Drive folder creation -------------------------------------------
 
-/**
- * Search for an existing folder by name inside a parent folder.
- */
 async function findFolderByName(parentId: string, name: string, token: string): Promise<string | null> {
   const query = `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,parents)`;
@@ -103,9 +100,6 @@ async function findFolderByName(parentId: string, name: string, token: string): 
   return match?.id ?? null;
 }
 
-/**
- * Create a folder inside a parent folder, or return existing folder ID if it already exists.
- */
 async function createFolder(parentId: string, name: string, token: string): Promise<string> {
   const existing = await findFolderByName(parentId, name, token);
   if (existing) return existing;
@@ -137,20 +131,17 @@ export type CreateGuestFolderResult = {
   error?: string;
 };
 
-/**
- * Get or create the next guest folder for an event.
- * - Increments the guest counter for this event.
- * - Creates "Guest N" folder inside mainFolderId.
- * - If the folder already exists (e.g. after a page refresh), reuses it.
- * - Prevents duplicates by checking IndexedDB first.
- *
- * Client ID is now read from env (VITE_GOOGLE_CLIENT_ID) inside gdriveService,
- * so this function no longer needs clientId as a parameter.
- */
 export async function getOrCreateNextGuestFolder(
   eventId: string,
   mainFolderId: string,
+  clientId: string,
 ): Promise<CreateGuestFolderResult> {
+  if (!clientId) {
+    return {
+      success: false,
+      error: 'Google Drive not configured. Connect and select a MAIN folder in Settings first.',
+    };
+  }
   if (!mainFolderId) {
     return {
       success: false,
@@ -159,7 +150,7 @@ export async function getOrCreateNextGuestFolder(
   }
 
   try {
-    const token = await getValidToken();
+    const token = await getValidToken(clientId);
     const existingGuests = await getGuestsForEvent(eventId);
     const nextNumber = existingGuests.length + 1;
     const guestName = `Guest ${nextNumber}`;
@@ -171,7 +162,7 @@ export async function getOrCreateNextGuestFolder(
       return { success: true, guest: existingRecord };
     }
 
-    void shareFolderWithAnyone(folderId);
+    void shareFolderWithAnyone(folderId, clientId);
 
     const guest: GuestRecord = {
       id: `gst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
