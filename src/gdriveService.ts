@@ -33,8 +33,8 @@ const SCOPES =
 
 const REDIRECT_URI =
   typeof window !== 'undefined'
-    ? `${window.location.origin}/api/auth/callback`
-    : '/api/auth/callback';
+    ? `${window.location.origin}/api/auth/cb`
+    : '/api/auth/cb';
 
 const TOKEN_SS_KEY = 'r3a.gdrive.accessToken';
 const EXPIRY_SS_KEY = 'r3a.gdrive.tokenExpiry';
