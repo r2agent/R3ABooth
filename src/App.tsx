@@ -14,6 +14,7 @@ import {
   testGoogleDriveConnection,
   testGoogleDriveUpload,
   pickDriveFolder,
+  getValidToken,
   getPrinters,
   testPrinter,
   runDiagnostics,
@@ -25,6 +26,21 @@ function statusToAccent(status: string): string {
   if (status === 'Active') return '#44a96f';
   if (status === 'Ended') return '#837a73';
   return '#f56a2d';
+}
+
+// Helper: extract folder ID from Google Drive URL or plain ID
+function parseFolderId(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  // Format: https://drive.google.com/drive/folders/XXXX
+  const m1 = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (m1) return m1[1];
+  // Format: https://drive.google.com/open?id=XXXX  or ?id=XXXX
+  const m2 = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (m2) return m2[1];
+  // Already plain ID
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+  return '';
 }
 
 const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R3aEvent[]; onHome: () => void; onOpen: (event: R3aEvent) => void; onNew: () => void; onEditEvent: (event: R3aEvent) => void }) => {
@@ -219,6 +235,45 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
       }
     } catch (err) {
       setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to open folder picker' });
+    }
+    setGdrivePicking(false);
+  };
+
+  // === NEW: Apply folder from manual input ===
+  const handleApplyManualFolder = async () => {
+    const raw = settings.googleDrive.manualFolderInput;
+    const folderId = parseFolderId(raw);
+    if (!folderId) {
+      setGdriveTestState({ status: 'error', message: 'Invalid folder URL or ID. Paste a Google Drive folder link.' });
+      return;
+    }
+    const clientId = settings.googleDrive.clientId;
+    if (!clientId) {
+      setGdriveTestState({ status: 'error', message: 'Connect Google Drive first.' });
+      return;
+    }
+    setGdrivePicking(true);
+    setGdriveTestState({ status: 'running', message: 'Checking folder...' });
+    try {
+      // Fetch folder name from Drive API
+      const token = await getValidToken(clientId);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,mimeType`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `Folder not found (HTTP ${res.status})`);
+      }
+      const data = await res.json() as { id: string; name: string; mimeType: string };
+      if (data.mimeType !== 'application/vnd.google-apps.folder') {
+        throw new Error('That ID is not a folder.');
+      }
+      const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: data.id, mainFolderName: data.name } };
+      setSettings(next);
+      saveAllSettings(next);
+      setGdriveTestState({ status: 'success', message: `Folder set: ${data.name}` });
+    } catch (err) {
+      setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to set folder' });
     }
     setGdrivePicking(false);
   };
@@ -426,18 +481,44 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                     <span>GOOGLE ACCOUNT</span>
                     <button type="button" className="gdrive-account-btn">{settings.googleDrive.account || 'Connected'}</button>
                   </div>
+
+                  {/* === MAIN FOLDER: dua opsi === */}
                   <div className="setting-control">
-                    <span>MAIN FOLDER</span>
+                    <span>MAIN FOLDER (CURRENT)</span>
+                    <button type="button" className="gdrive-folder-display">
+                      <FolderOpen size={16} />
+                      {settings.googleDrive.mainFolderName || 'No folder selected'}
+                    </button>
+                  </div>
+
+                  <div className="setting-control">
+                    <span>OPTION A — PASTE FOLDER LINK / ID</span>
                     <div className="gdrive-folder-row">
-                      <button type="button" className="gdrive-folder-display">
-                        <FolderOpen size={16} />
-                        {settings.googleDrive.mainFolderName || 'No folder selected'}
+                      <input
+                        type="text"
+                        value={settings.googleDrive.manualFolderInput}
+                        onChange={(e) => update('googleDrive', { manualFolderInput: e.target.value })}
+                        placeholder="https://drive.google.com/drive/folders/XXXX  or  folder ID"
+                        style={{ flex: 1, padding: 8 }}
+                      />
+                      <button type="button" className="gdrive-change-folder" onClick={handleApplyManualFolder} disabled={gdrivePicking}>
+                        {gdrivePicking ? 'CHECKING...' : 'SET FOLDER'}
                       </button>
+                    </div>
+                    <em style={{ fontSize: 11, opacity: 0.6 }}>
+                      Buka folder di Google Drive → copy URL → paste di sini.
+                    </em>
+                  </div>
+
+                  <div className="setting-control">
+                    <span>OPTION B — PICK FROM DRIVE</span>
+                    <div className="gdrive-folder-row">
                       <button type="button" className="gdrive-change-folder" onClick={handleChangeFolder} disabled={gdrivePicking}>
-                        {gdrivePicking ? 'OPENING...' : 'CHANGE FOLDER'}
+                        {gdrivePicking ? 'OPENING...' : 'OPEN PICKER'}
                       </button>
                     </div>
                   </div>
+
                   <div className="gdrive-actions">
                     <button type="button" onClick={handleTestGdrive} disabled={gdriveTestState.status === 'running'}>
                       {gdriveTestState.status === 'running' ? 'TESTING...' : 'TEST CONNECTION'}

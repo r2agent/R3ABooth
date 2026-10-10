@@ -1,37 +1,50 @@
-import { saveCameraSettings as saveCamInternal, loadCameraSettings as loadCamInternal, type CameraSettings } from './cameraStore';
+// Settings store — localStorage-backed.
 
-export type PrinterSettings = {
+export type CameraSettingsShape = {
+  cameraOn: boolean;
+  selectedDeviceId: string;
+  resolution: string;
+  frameRate: string;
+  aspectRatio: string;
+  orientation: string;
+  mirror: boolean;
+  previewQuality: string;
+  lowLatency: boolean;
+};
+
+export type PrinterSettingsShape = {
   printerOn: boolean;
   printer: string;
   paperSize: string;
 };
 
-export type StorageSettings = {
+export type StorageSettingsShape = {
   fileNaming: string;
   savePhotos: boolean;
   saveVideos: boolean;
-  keepFiles: string;
   autoDownloadResult: boolean;
+  keepFiles: string;
 };
 
-export type GoogleDriveSettings = {
+export type GoogleDriveSettingsShape = {
+  clientId: string;
   connected: boolean;
   account: string;
   mainFolderId: string;
   mainFolderName: string;
-  clientId: string;
   autoUpload: boolean;
-  uploadFolder: string;
+  useManualFolder: boolean;   // NEW: pakai input manual
+  manualFolderInput: string;  // NEW: URL/ID folder manual
 };
 
-export type ApplicationSettings = {
+export type ApplicationSettingsShape = {
   startupMode: string;
   language: string;
   checkUpdates: boolean;
   analytics: boolean;
 };
 
-export type DisplaySettings = {
+export type DisplaySettingsShape = {
   displayMode: string;
   brightness: number;
   touchInput: boolean;
@@ -41,143 +54,113 @@ export type DisplaySettings = {
   showDriveQrButton: boolean;
 };
 
-export type SecuritySettings = {
+export type SecuritySettingsShape = {
   adminLock: boolean;
   adminPin: string;
   autoLock: string;
   accessLevel: string;
 };
 
-export type SystemInfo = {
+export type SystemSettingsShape = {
   appVersion: string;
 };
 
 export type AllSettings = {
-  camera: CameraSettings;
-  printer: PrinterSettings;
-  storage: StorageSettings;
-  googleDrive: GoogleDriveSettings;
-  application: ApplicationSettings;
-  display: DisplaySettings;
-  security: SecuritySettings;
-  system: SystemInfo;
+  camera: CameraSettingsShape;
+  printer: PrinterSettingsShape;
+  storage: StorageSettingsShape;
+  googleDrive: GoogleDriveSettingsShape;
+  application: ApplicationSettingsShape;
+  display: DisplaySettingsShape;
+  security: SecuritySettingsShape;
+  system: SystemSettingsShape;
 };
 
-const SETTINGS_KEY = 'r3a-all-settings';
+const STORAGE_KEY = 'r3a-booth-settings-v1';
 
-const defaultPrinter: PrinterSettings = {
-  printerOn: false,
-  printer: 'No printer selected',
-  paperSize: '4 × 6 in',
-};
-
-const defaultStorage: StorageSettings = {
-  fileNaming: '{event}_{date}_{number}',
-  savePhotos: true,
-  saveVideos: false,
-  keepFiles: '30 DAYS',
-  autoDownloadResult: true,
-};
-
-const defaultGoogleDrive: GoogleDriveSettings = {
-  connected: false,
-  account: '',
-  mainFolderId: '',
-  mainFolderName: '',
-  clientId: '',
-  autoUpload: false,
-  uploadFolder: 'R3A Booth',
-};
-
-const defaultApplication: ApplicationSettings = {
-  startupMode: 'HOME SCREEN',
-  language: 'ENGLISH',
-  checkUpdates: true,
-  analytics: false,
-};
-
-const defaultDisplay: DisplaySettings = {
-  displayMode: 'FULLSCREEN',
-  brightness: 100,
-  touchInput: true,
-  idleScreen: 'HOME SCREEN',
-  showPrintButton: true,
-  showQrButton: true,
-  showDriveQrButton: true,
-};
-
-const defaultSecurity: SecuritySettings = {
-  adminLock: false,
-  adminPin: '',
-  autoLock: 'NEVER',
-  accessLevel: 'OPERATOR',
-};
-
-const defaultSystem: SystemInfo = {
-  appVersion: 'R3A BOOTH 0.1.0',
+const DEFAULT_SETTINGS: AllSettings = {
+  camera: {
+    cameraOn: true,
+    selectedDeviceId: '',
+    resolution: '1920 × 1080',
+    frameRate: '30 FPS',
+    aspectRatio: '16:9',
+    orientation: 'LANDSCAPE',
+    mirror: true,
+    previewQuality: 'HIGH',
+    lowLatency: false,
+  },
+  printer: {
+    printerOn: false,
+    printer: '',
+    paperSize: '4 × 6 in',
+  },
+  storage: {
+    fileNaming: '',
+    savePhotos: true,
+    saveVideos: true,
+    autoDownloadResult: true,
+    keepFiles: '30 DAYS',
+  },
+  googleDrive: {
+    clientId: '',
+    connected: false,
+    account: '',
+    mainFolderId: '',
+    mainFolderName: '',
+    autoUpload: true,
+    useManualFolder: false,
+    manualFolderInput: '',
+  },
+  application: {
+    startupMode: 'HOME SCREEN',
+    language: 'ENGLISH',
+    checkUpdates: true,
+    analytics: false,
+  },
+  display: {
+    displayMode: 'KIOSK',
+    brightness: 100,
+    touchInput: true,
+    idleScreen: 'HOME SCREEN',
+    showPrintButton: true,
+    showQrButton: true,
+    showDriveQrButton: true,
+  },
+  security: {
+    adminLock: false,
+    adminPin: '',
+    autoLock: 'NEVER',
+    accessLevel: 'ADMIN',
+  },
+  system: {
+    appVersion: '1.0.0',
+  },
 };
 
 export function loadAllSettings(): AllSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    const camera = loadCamInternal();
-    if (!raw) {
-      return {
-        camera,
-        printer: { ...defaultPrinter },
-        storage: { ...defaultStorage },
-        googleDrive: { ...defaultGoogleDrive },
-        application: { ...defaultApplication },
-        display: { ...defaultDisplay },
-        security: { ...defaultSecurity },
-        system: { ...defaultSystem },
-      };
-    }
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+    if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<AllSettings>;
     return {
-      camera,
-      printer: { ...defaultPrinter, ...parsed.printer },
-      storage: { ...defaultStorage, ...parsed.storage },
-      googleDrive: { ...defaultGoogleDrive, ...parsed.googleDrive },
-      application: { ...defaultApplication, ...parsed.application },
-      display: { ...defaultDisplay, ...parsed.display },
-      security: { ...defaultSecurity, ...parsed.security },
-      system: { ...defaultSystem, ...parsed.system },
+      camera: { ...DEFAULT_SETTINGS.camera, ...(parsed.camera || {}) },
+      printer: { ...DEFAULT_SETTINGS.printer, ...(parsed.printer || {}) },
+      storage: { ...DEFAULT_SETTINGS.storage, ...(parsed.storage || {}) },
+      googleDrive: { ...DEFAULT_SETTINGS.googleDrive, ...(parsed.googleDrive || {}) },
+      application: { ...DEFAULT_SETTINGS.application, ...(parsed.application || {}) },
+      display: { ...DEFAULT_SETTINGS.display, ...(parsed.display || {}) },
+      security: { ...DEFAULT_SETTINGS.security, ...(parsed.security || {}) },
+      system: { ...DEFAULT_SETTINGS.system, ...(parsed.system || {}) },
     };
   } catch {
-    return {
-      camera: loadCamInternal(),
-      printer: { ...defaultPrinter },
-      storage: { ...defaultStorage },
-      googleDrive: { ...defaultGoogleDrive },
-      application: { ...defaultApplication },
-      display: { ...defaultDisplay },
-      security: { ...defaultSecurity },
-      system: { ...defaultSystem },
-    };
+    return { ...DEFAULT_SETTINGS };
   }
 }
 
 export function saveAllSettings(settings: AllSettings): void {
   try {
-    saveCamInternal(settings.camera);
-    const { camera, ...rest } = settings;
-    void camera;
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(rest));
-  } catch {
-    // ignore quota errors
-  }
-}
-
-export function getDefaultSettings(): AllSettings {
-  return {
-    camera: loadCamInternal(),
-    printer: { ...defaultPrinter },
-    storage: { ...defaultStorage },
-    googleDrive: { ...defaultGoogleDrive },
-    application: { ...defaultApplication },
-    display: { ...defaultDisplay },
-    security: { ...defaultSecurity },
-    system: { ...defaultSystem },
-  };
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch { /* ignore */ }
 }
