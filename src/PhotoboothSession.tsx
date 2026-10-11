@@ -272,6 +272,7 @@ export const PhotoboothSession = ({
 }) => {
   const { stream, status, error } = useCamera(cameraSettings, true);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
   const [countdown, setCountdown] = useState(0);
@@ -634,7 +635,89 @@ export const PhotoboothSession = ({
     return () => window.removeEventListener('keydown', handler);
   }, [phase, onExit]);
 
-  const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
+  const captureMap = useMemo(
+    () => new Map(captures.map((c) => [c.captureId, c.dataUrl])),
+    [captures],
+  );
+
+  /* ============================================================
+     PREVIEW CANVAS — gambar foto slot ke canvas dengan logika
+     IDENTIK dengan compositeFrame(). Tidak bergantung CSS.
+     ============================================================ */
+  useEffect(() => {
+    if (phase !== 'filter') return;
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+    if (!activeFrame) return;
+
+    let cancelled = false;
+
+    const render = async () => {
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const pw = parent.clientWidth;
+      const ph = parent.clientHeight;
+      if (pw < 1 || ph < 1) return;
+
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.floor(pw * dpr));
+      canvas.height = Math.max(1, Math.floor(ph * dpr));
+      canvas.style.width = `${pw}px`;
+      canvas.style.height = `${ph}px`;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, pw, ph);
+
+      // Fill background
+      ctx.fillStyle = '#2a2522';
+      ctx.fillRect(0, 0, pw, ph);
+
+      // Draw each slot — SAMA PERSIS logika compositeFrame()
+      for (const slot of allSlots) {
+        const cap = captureMap.get(slot.captureId);
+        if (!cap) continue;
+        try {
+          const photo = await loadImage(cap);
+          if (cancelled) return;
+          const sx = (slot.x / 100) * pw;
+          const sy = (slot.y / 100) * ph;
+          const sw = (slot.w / 100) * pw;
+          const sh = (slot.h / 100) * ph;
+          const filterId = captureFilters.get(slot.captureId) || 'natural';
+          const glow = isGlowFilter(filterId);
+          const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(sx, sy, sw, sh);
+          ctx.clip();
+          ctx.filter = baseCss;
+          drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
+          ctx.filter = 'none';
+          if (glow) {
+            applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
+          }
+          ctx.restore();
+        } catch { /* skip failed slot */ }
+      }
+
+      // Draw frame overlay di atas (kalau tidak ada frame, biarkan)
+      if (activeFrame.image) {
+        try {
+          const frameImg = await loadImage(activeFrame.image);
+          if (cancelled) return;
+          ctx.drawImage(frameImg, 0, 0, pw, ph);
+        } catch { /* ignore */ }
+      }
+    };
+
+    // Delay sebentar supaya layout settle
+    const timer = setTimeout(render, 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [phase, activeFrame, allSlots, captureMap, captureFilters]);
 
   const LoadingOverlay = saving ? (
     <div
@@ -652,19 +735,8 @@ export const PhotoboothSession = ({
         backdropFilter: 'blur(4px)',
       }}
     >
-      <div
-        className="compositing-spinner"
-        style={{ width: 72, height: 72, borderWidth: 5 }}
-      />
-      <span
-        style={{
-          fontSize: 32,
-          fontWeight: 700,
-          letterSpacing: '.25em',
-          textTransform: 'uppercase',
-          color: '#fff',
-        }}
-      >
+      <div className="compositing-spinner" style={{ width: 72, height: 72, borderWidth: 5 }} />
+      <span style={{ fontSize: 32, fontWeight: 700, letterSpacing: '.25em', textTransform: 'uppercase', color: '#fff' }}>
         PROSES FOTO
       </span>
     </div>
@@ -856,51 +928,55 @@ export const PhotoboothSession = ({
                 aspectRatio: String(frameAspect),
                 position: 'relative',
                 overflow: 'hidden',
+                width: '100%',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                margin: '0 auto',
+                background: '#2a2522',
               }}
             >
-              {/* ─────────────────────────────────────────────
-                  FOTO SLOT — pakai <div> + background-image
-                  background-size: cover = crop proporsional,
-                  TIDAK bisa stretch, didukung semua browser.
-                  ───────────────────────────────────────────── */}
+              {/* ============================================================
+                  CANVAS — gambar foto + frame dengan logika IDENTIK composite
+                  ============================================================ */}
+              <canvas
+                ref={previewCanvasRef}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+                  display: 'block',
+                }}
+              />
+
+              {/* ============================================================
+                  SLOT OVERLAYS — hanya untuk klik + border kuning
+                  (foto sudah digambar di canvas di bawahnya)
+                  ============================================================ */}
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
                 if (!cap) return null;
-                const filterId = captureFilters.get(slot.captureId) || 'natural';
                 const isSelected = selectedCaptureId === slot.captureId;
                 return (
                   <div
                     key={slot.id}
-                    className={`filter-preview-slot ${isSelected ? 'is-selected' : ''}`}
+                    onClick={() => setSelectedCaptureId(slot.captureId)}
                     style={{
                       position: 'absolute',
                       left: `${slot.x}%`,
                       top: `${slot.y}%`,
                       width: `${slot.w}%`,
                       height: `${slot.h}%`,
-                      overflow: 'hidden',
-                      zIndex: 1,
-                      cursor: 'pointer',
                       border: isSelected ? '2px solid #ffd94e' : '2px solid transparent',
                       boxShadow: isSelected ? '0 0 0 2px rgba(255,217,78,.4)' : 'none',
+                      cursor: 'pointer',
+                      zIndex: 10,
+                      boxSizing: 'border-box',
                     }}
-                    onClick={() => setSelectedCaptureId(slot.captureId)}
                   >
-                    {/* ⚠️ BUKAN <img> — pakai <div> + background-image */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        backgroundImage: `url("${cap}")`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center center',
-                        backgroundRepeat: 'no-repeat',
-                        filter: getFilterCss(filterId),
-                      }}
-                    />
                     {isSelected ? (
                       <div
                         style={{
@@ -914,7 +990,6 @@ export const PhotoboothSession = ({
                           fontWeight: 800,
                           borderRadius: 4,
                           letterSpacing: '.08em',
-                          zIndex: 10,
                         }}
                       >
                         SELECTED
@@ -923,31 +998,6 @@ export const PhotoboothSession = ({
                   </div>
                 );
               })}
-
-              {/* ─────────────────────────────────────────────
-                  FRAME OVERLAY — render TERAKHIR supaya di atas foto
-                  zIndex: 100 = di atas semua slot
-                  ───────────────────────────────────────────── */}
-              {activeFrame?.image ? (
-                <img
-                  src={activeFrame.image}
-                  alt={activeFrame.name}
-                  className="filter-preview-frame-img"
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    objectPosition: 'center center',
-                    zIndex: 100,
-                    pointerEvents: 'none',
-                  }}
-                />
-              ) : (
-                <div className="filter-preview-empty">No frame image</div>
-              )}
             </div>
           </div>
           {selectedCaptureId ? (
