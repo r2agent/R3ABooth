@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   RefreshCw,
   X,
+  ChevronLeft,
   AlertCircle,
   CheckCircle2,
   Clock,
@@ -100,10 +101,14 @@ function deviceIcon(id: string) {
 /* ---------- COMPONENT ---------- */
 export const OperatorDashboard = ({
   allSettings,
+  eventSlug,
   onClose,
+  onBackToPhotobooth,
 }: {
   allSettings: AllSettings;
+  eventSlug?: string;
   onClose: () => void;
+  onBackToPhotobooth?: () => void;
 }) => {
   const [stats, setStats] = useState({ uploaded: 0, pending: 0, failed: 0 });
   const [pending, setPending] = useState<PendingUpload[]>([]);
@@ -141,17 +146,22 @@ export const OperatorDashboard = ({
   // Logs
   const [logs, setLogs] = useState(getLogs());
 
-/* ============================================================
-   LIVE TABLETS — status real-time dari semua tablet
-   ============================================================ */
-const [tablets, setTablets] = useState<TabletStatus[]>([]);
+  /* ============================================================
+     LIVE TABLETS — status real-time dari semua tablet
+     ============================================================ */
+  const [tablets, setTablets] = useState<TabletStatus[]>([]);
 
-useEffect(() => {
-  const unsubscribe = subscribeAllTablets((newTablets) => {
-    setTablets(newTablets);
-  });
-  return unsubscribe;
-}, []);
+  useEffect(() => {
+    const unsubscribe = subscribeAllTablets((newTablets) => {
+      setTablets(newTablets);
+    });
+    return unsubscribe;
+  }, []);
+
+  /* Filter tablets by event slug (kalau ada) */
+  const filteredTablets = eventSlug
+    ? tablets.filter((t) => t.currentEventSlug === eventSlug)
+    : tablets;
 
   const refresh = useCallback(async () => {
     try {
@@ -237,7 +247,6 @@ useEffect(() => {
     setDiagnosing(true);
     pushLog('info', 'Running full diagnostic...');
     try {
-      // Set checking state
       setDevices((prev) => prev.map((d) => ({ ...d, status: 'checking', detail: 'Checking...' })));
       const results = await runFullDiagnostic();
       setDevices(results);
@@ -283,7 +292,6 @@ useEffect(() => {
 
   const handleClearCache = useCallback(() => {
     try {
-      // Clear session storage & cache (jangan localStorage karena ada stats)
       sessionStorage.clear();
       pushLog('info', 'Session storage cleared');
       setActionMessage('Cache dibersihkan. Reload halaman untuk efek penuh.');
@@ -341,11 +349,28 @@ useEffect(() => {
       <div className="photobooth-kiosk-header">
         <div className="photobooth-project">
           <span>R3A BOOTH</span>
-          <strong>OPERATOR DASHBOARD</strong>
+          <strong>
+            OPERATOR DASHBOARD
+            {eventSlug ? (
+              <span style={{ color: '#ffd94e', marginLeft: 8 }}>— {eventSlug}</span>
+            ) : null}
+          </strong>
         </div>
-        <button className="photobooth-exit" onClick={onClose} type="button">
-          <X size={24} /> CLOSE
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {onBackToPhotobooth && eventSlug ? (
+            <button
+              className="photobooth-exit"
+              onClick={onBackToPhotobooth}
+              type="button"
+              style={{ background: '#4ade80', color: '#000', borderColor: 'transparent' }}
+            >
+              <ChevronLeft size={24} /> BACK TO PHOTOBOOTH
+            </button>
+          ) : null}
+          <button className="photobooth-exit" onClick={onClose} type="button">
+            <X size={24} /> CLOSE
+          </button>
+        </div>
       </div>
 
       <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: '0 0 16px' }}>
@@ -365,93 +390,95 @@ useEffect(() => {
           {actionMessage}
         </div>
       ) : null}
-      
-{/* ============ LIVE TABLETS ============ */}
-<section style={{ marginBottom: 16 }}>
-  <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-    LIVE TABLETS ({tablets.length})
-  </h3>
-  {tablets.length === 0 ? (
-    <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
-      Tidak ada tablet online.
-    </p>
-  ) : (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-        gap: 10,
-      }}
-    >
-      {tablets.map((t) => {
-        const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
-        const isStale = lastActivityAgo > 60; // > 1 menit tidak aktif
-        const isOnline = t.online && !isStale;
-        
-        return (
+
+      {/* ============ LIVE TABLETS ============ */}
+      <section style={{ marginBottom: 16 }}>
+        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+          LIVE TABLETS ({filteredTablets.length})
+          {eventSlug ? (
+            <span style={{ color: '#ffd94e', marginLeft: 8, fontSize: 12 }}>
+              • Event: {eventSlug}
+            </span>
+          ) : null}
+        </h3>
+        {filteredTablets.length === 0 ? (
+          <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
+            {eventSlug
+              ? `Tidak ada tablet online untuk event "${eventSlug}".`
+              : 'Tidak ada tablet online.'}
+          </p>
+        ) : (
           <div
-            key={t.deviceId}
             style={{
-              border: `1px solid ${isOnline ? 'rgba(74,222,128,.4)' : 'rgba(255,255,255,.1)'}`,
-              padding: 12,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              background: isOnline ? 'rgba(74,222,128,.05)' : 'transparent',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+              gap: 10,
             }}
           >
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: isOnline ? '#4ade80' : '#6b7280',
-                }}
-              />
-              <strong style={{ fontSize: 13, color: '#fff' }}>{t.deviceName}</strong>
-            </div>
+            {filteredTablets.map((t) => {
+              const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
+              const isStale = lastActivityAgo > 60;
+              const isOnline = t.online && !isStale;
 
-            {/* Event info */}
-            {t.currentEventName ? (
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>
-                📸 {t.currentEventName}
-              </div>
-            ) : (
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
-                Belum ada event
-              </div>
-            )}
+              return (
+                <div
+                  key={t.deviceId}
+                  style={{
+                    border: `1px solid ${isOnline ? 'rgba(74,222,128,.4)' : 'rgba(255,255,255,.1)'}`,
+                    padding: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    background: isOnline ? 'rgba(74,222,128,.05)' : 'transparent',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: isOnline ? '#4ade80' : '#6b7280',
+                      }}
+                    />
+                    <strong style={{ fontSize: 13, color: '#fff' }}>{t.deviceName}</strong>
+                  </div>
 
-            {/* Phase */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span style={{ color: 'rgba(255,255,255,.5)' }}>Phase:</span>
-              <span style={{ color: '#ffd94e', fontWeight: 600 }}>
-                {t.currentPhase.toUpperCase()}
-              </span>
-            </div>
+                  {t.currentEventName ? (
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>
+                      📸 {t.currentEventName}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
+                      Belum ada event
+                    </div>
+                  )}
 
-            {/* Photo count */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-              <span style={{ color: 'rgba(255,255,255,.5)' }}>Foto:</span>
-              <span style={{ color: '#fff' }}>
-                {t.photoCount} / {t.totalCaptures}
-              </span>
-            </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                    <span style={{ color: 'rgba(255,255,255,.5)' }}>Phase:</span>
+                    <span style={{ color: '#ffd94e', fontWeight: 600 }}>
+                      {t.currentPhase.toUpperCase()}
+                    </span>
+                  </div>
 
-            {/* Last activity */}
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
-              {isStale
-                ? `⚠️ ${lastActivityAgo}s tidak aktif`
-                : `✅ Aktif ${lastActivityAgo}s lalu`}
-            </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                    <span style={{ color: 'rgba(255,255,255,.5)' }}>Foto:</span>
+                    <span style={{ color: '#fff' }}>
+                      {t.photoCount} / {t.totalCaptures}
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
+                    {isStale
+                      ? `⚠️ ${lastActivityAgo}s tidak aktif`
+                      : `✅ Aktif ${lastActivityAgo}s lalu`}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
-    </div>
-  )}
-</section>
+        )}
+      </section>
 
       {/* ============ DEVICE STATUS ============ */}
       <section style={{ marginBottom: 16 }}>
