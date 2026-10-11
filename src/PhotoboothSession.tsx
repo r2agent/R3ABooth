@@ -353,10 +353,6 @@ export const PhotoboothSession = ({
     setFramesReady(true);
   }, [frames.length]);
 
-  const videoRefCallback = useCallback((el: HTMLVideoElement | null) => {
-    (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = el;
-  }, []);
-
   const resetSession = useCallback(() => {
     setFlash(false);
     setCaptures([]);
@@ -642,20 +638,21 @@ export const PhotoboothSession = ({
 
   const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
 
-  // === FULLSCREEN LOADING OVERLAY ===
+  // === FULLSCREEN LOADING OVERLAY (TRANSPARAN) ===
   const LoadingOverlay = saving ? (
     <div
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 999999,
-        background: '#0a0a0a',
+        background: 'rgba(0,0,0,0.6)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 28,
         color: '#fff',
+        backdropFilter: 'blur(4px)',
       }}
     >
       <div
@@ -784,7 +781,7 @@ export const PhotoboothSession = ({
           <section className="photobooth-main">
             {stream ? (
               <>
-                <div className="photobooth-video-wrap" style={{ aspectRatio: String(getAspectRatioValue(cameraSettings.aspectRatio)) }}>
+                <div className="photobooth-video-wrap">
                   <CameraPreview stream={stream} mirror={cameraSettings.mirror} aspectRatio={cameraSettings.aspectRatio} className="photobooth-video" />
                   {phase === 'countdown' ? (
                     <div className="countdown-overlay">
@@ -813,13 +810,15 @@ export const PhotoboothSession = ({
             )}
           </section>
           <div className="photobooth-controls">
-            <div className="photobooth-camera-status"><CameraStatusBadge status={status} error={error} /></div>
-            <div className="photobooth-capture-info">
-              <span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span>
-            </div>
             <button className="photobooth-capture" type="button" disabled={!stream || phase === 'countdown' || totalCapturesNeeded === 0} onClick={handleCapture}>
               <Camera size={32} /> {phase === 'countdown' ? 'CAPTURING...' : 'CAPTURE'}
             </button>
+          </div>
+          <div className="photobooth-camera-status">
+            <CameraStatusBadge status={status} error={error} />
+          </div>
+          <div className="photobooth-capture-info">
+            <span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span>
           </div>
           {captureError ? (
             <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div>
@@ -829,7 +828,7 @@ export const PhotoboothSession = ({
           ) : null}
           <div className="photobooth-slots">
             {allSlots.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
-            {allSlots.map((slot, i) => {
+            {allSlots.map((slot) => {
               const filled = captureMap.has(slot.captureId);
               const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
               return (
@@ -850,7 +849,7 @@ export const PhotoboothSession = ({
         <section className="photobooth-filter-section">
           <div className="filter-header">
             <h2>SELECT FILTER</h2>
-            <p>Select a photo, then choose a filter. Each photo can have a different filter.</p>
+            <p>Select a photo, then choose a filter.</p>
           </div>
           <div className="filter-preview-area">
             <div className="filter-preview-frame" style={{ ['--frame-aspect' as string]: String(frameAspect), aspectRatio: String(frameAspect) }}>
@@ -914,7 +913,7 @@ export const PhotoboothSession = ({
                     }}
                     type="button"
                   >
-                    <span className="filter-thumb" style={{ filter: f.css }}><FilterIcon size={16} /></span>
+                    <span className="filter-thumb" style={{ filter: f.css }}><FilterIcon size={18} /></span>
                     {f.name}
                   </button>
                 );
@@ -923,7 +922,7 @@ export const PhotoboothSession = ({
           ) : null}
           <div className="filter-actions">
             <button className="filter-back" onClick={() => { resetSession(); setPhase('live'); }} type="button"><RotateCcw size={18} /> RETAKE</button>
-            <button className="filter-compose" onClick={handleComposite} type="button"><ImageIcon size={18} /> COMPOSITE &amp; PREVIEW</button>
+            <button className="filter-compose" onClick={handleComposite} type="button"><ImageIcon size={18} /> COMPOSITE</button>
           </div>
         </section>
       ) : null}
