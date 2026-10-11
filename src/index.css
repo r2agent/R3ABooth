@@ -328,7 +328,15 @@ button { font: inherit; cursor: pointer; }
 .filter-preview-frame-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; z-index: 100; pointer-events: none; }
 .filter-preview-slot { position: absolute; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: border-color .15s; z-index: 1; }
 .filter-preview-slot.is-selected { border-color: #ffd94e; box-shadow: 0 0 0 2px rgba(255,217,78,.4); z-index: 5; }
-.filter-preview-slot img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.filter-preview-slot img { 
+  position: absolute;
+  inset: 0;
+  width: 100% !important; 
+  height: 100% !important; 
+  object-fit: cover !important; 
+  object-position: center !important;
+  display: block;
+}
 .filter-preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%; color: rgba(255,255,255,.3); font-size: 13px; font-weight: 600; letter-spacing: .08em; text-align: center; padding: 16px; }
 
 /* Kolom KANAN — slot thumbs + filter preview + filter options + actions */

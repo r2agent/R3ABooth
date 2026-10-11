@@ -294,7 +294,6 @@ export const PhotoboothSession = ({
   const logoClickCount = useRef(0);
   const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Lapor phase ke parent (untuk screensaver)
   useEffect(() => {
     if (onPhaseChange) {
       onPhaseChange(phase);
@@ -547,7 +546,6 @@ export const PhotoboothSession = ({
         downloadDataUrl(compositeUrl, 'final-result.jpg');
       }
 
-      // Upload ke Drive di BACKGROUND (tidak ditunggu)
       const gd = allSettings.googleDrive;
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
@@ -638,7 +636,6 @@ export const PhotoboothSession = ({
 
   const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
 
-  // === FULLSCREEN LOADING OVERLAY (TRANSPARAN) ===
   const LoadingOverlay = saving ? (
     <div
       style={{
@@ -877,7 +874,14 @@ export const PhotoboothSession = ({
                   <div
                     key={slot.id}
                     className={`filter-preview-slot ${isSelected ? 'is-selected' : ''}`}
-                    style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` }}
+                    style={{ 
+                      left: `${slot.x}%`, 
+                      top: `${slot.y}%`, 
+                      width: `${slot.w}%`, 
+                      height: `${slot.h}%`,
+                      position: 'absolute',
+                      overflow: 'hidden'
+                    }}
                     onClick={() => setSelectedCaptureId(slot.captureId)}
                   >
                     <img 
@@ -889,7 +893,9 @@ export const PhotoboothSession = ({
                         objectPosition: 'center',
                         width: '100%',
                         height: '100%',
-                        display: 'block'
+                        display: 'block',
+                        position: 'absolute',
+                        inset: 0
                       }} 
                     />
                   </div>
