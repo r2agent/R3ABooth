@@ -15,12 +15,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2020',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          firebase: ['firebase/app', 'firebase/database'],
-        },
-      },
+    commonjsOptions: {
+      include: [/node_modules/],
+      transformMixedEsModules: true,
     },
   },
 });
