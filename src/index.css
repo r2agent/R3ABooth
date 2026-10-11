@@ -103,168 +103,31 @@ button { font: inherit; cursor: pointer; }
 @keyframes flash-fade { 0% { opacity: 1; } 40% { opacity: .9; } 100% { opacity: 0; } }
 
 /* ============================================================
-   PHOTOBOOTH — LIVE / COUNTDOWN (FULLSCREEN + OVERLAY)  ← UPDATE 1-5
+   PHOTOBOOTH — LIVE / COUNTDOWN (FULLSCREEN + OVERLAY)
    ============================================================ */
-
-/* Layout utama jadi fullscreen tanpa grid. */
-.photobooth-screen:not(.photobooth-kiosk) {
-  display: block;
-  padding: 0;
-}
-
-/* Preview fullscreen */
-.photobooth-main {
-  position: absolute;
-  inset: 0;
-  display: block;
-  padding: 0;
-  z-index: 1;
-}
-
-/* Video wrap fullscreen */
-.photobooth-video-wrap {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  aspect-ratio: auto;
-  border: none;
-  background: #000;
-}
+.photobooth-screen:not(.photobooth-kiosk) { display: block; padding: 0; }
+.photobooth-main { position: absolute; inset: 0; display: block; padding: 0; z-index: 1; }
+.photobooth-video-wrap { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; aspect-ratio: auto; border: none; background: #000; }
 .photobooth-video { width: 100%; height: 100%; object-fit: cover; }
-
-/* Preview fallback fullscreen */
-.photobooth-preview {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  border: none;
-}
-
-/* Countdown overlay */
+.photobooth-preview { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; border: none; }
 .countdown-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.3); z-index: 10; }
 .countdown-number { font-family: 'Space Grotesk', sans-serif; font-size: clamp(120px, 18vw, 240px); font-weight: 700; color: #fff; text-shadow: 0 0 60px rgba(239,63,37,.8); animation: countdown-pulse 1s ease-in-out; }
 @keyframes countdown-pulse { 0% { transform: scale(1.3); opacity: 0; } 30% { transform: scale(1); opacity: 1; } 100% { transform: scale(.9); opacity: .7; } }
-
-/* Tombol CAPTURE — overlay bawah-tengah */
-.photobooth-controls {
-  position: fixed;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 40;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-.photobooth-capture {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 56px;
-  border: 0;
-  border-radius: 50px;
-  color: #fff;
-  background: #ef3f25;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  box-shadow: 0 8px 32px rgba(0,0,0,.5);
-  transition: .18s;
-}
+.photobooth-controls { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); z-index: 40; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.photobooth-capture { display: flex; align-items: center; gap: 14px; padding: 18px 56px; border: 0; border-radius: 50px; color: #fff; background: #ef3f25; font-size: 20px; font-weight: 700; letter-spacing: .08em; box-shadow: 0 8px 32px rgba(0,0,0,.5); transition: .18s; }
 .photobooth-capture:hover { background: #c92f1d; transform: scale(1.05); }
 .photobooth-capture:disabled { opacity: .5; cursor: not-allowed; transform: none; }
-
-/* Status kiri-bawah */
-.photobooth-camera-status {
-  position: fixed;
-  bottom: 32px;
-  left: 32px;
-  z-index: 40;
-  margin: 0;
-}
-.photobooth-capture-info {
-  position: fixed;
-  bottom: 90px;
-  left: 32px;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: rgba(0,0,0,.55);
-  border-radius: 50px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: .1em;
-  margin: 0;
-}
-
-/* Slot thumbnails — KANAN, vertikal */
-.photobooth-slots {
-  position: fixed;
-  top: 120px;
-  right: 32px;
-  bottom: 140px;
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0;
-  overflow-y: auto;
-  width: auto;
-  justify-content: flex-start;
-  scrollbar-width: thin;
-}
-.photobooth-slot {
-  width: 88px;
-  height: 88px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border: 2px solid rgba(255,255,255,.3);
-  border-radius: 8px;
-  color: rgba(255,255,255,.6);
-  background: rgba(0,0,0,.4);
-  font-size: 20px;
-  font-weight: 700;
-  backdrop-filter: blur(6px);
-  overflow: hidden;
-}
+.photobooth-camera-status { position: fixed; bottom: 32px; left: 32px; z-index: 40; margin: 0; }
+.photobooth-capture-info { position: fixed; bottom: 90px; left: 32px; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(0,0,0,.55); border-radius: 50px; color: #fff; font-size: 13px; font-weight: 700; letter-spacing: .1em; margin: 0; }
+.photobooth-slots { position: fixed; top: 120px; right: 32px; bottom: 140px; z-index: 40; display: flex; flex-direction: column; gap: 10px; padding: 0; overflow-y: auto; width: auto; justify-content: flex-start; scrollbar-width: thin; }
+.photobooth-slot { width: 88px; height: 88px; flex-shrink: 0; display: grid; place-items: center; border: 2px solid rgba(255,255,255,.3); border-radius: 8px; color: rgba(255,255,255,.6); background: rgba(0,0,0,.4); font-size: 20px; font-weight: 700; backdrop-filter: blur(6px); overflow: hidden; }
 .photobooth-slot.active { border-color: #ef3f25; color: #ef3f25; box-shadow: 0 0 0 3px rgba(239,63,37,.3); }
 .photobooth-slot.filled { border-color: #4ca16b; }
 .photobooth-slot.filled img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
 .photobooth-slot.filled span { display: none; }
 .photobooth-slot.add { border-style: dashed; color: rgba(255,255,255,.3); }
 .photobooth-no-slots { color: rgba(255,255,255,.4); font-size: 13px; writing-mode: vertical-rl; }
-
-/* Error toast */
-.photobooth-capture-error {
-  position: fixed;
-  bottom: 100px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 24px;
-  color: #ff9f7a;
-  background: rgba(20,10,8,.9);
-  border: 1px solid rgba(239,63,37,.4);
-  border-radius: 50px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .04em;
-}
-
-/* Camera status badge */
+.photobooth-capture-error { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 10px; padding: 12px 24px; color: #ff9f7a; background: rgba(20,10,8,.9); border: 1px solid rgba(239,63,37,.4); border-radius: 50px; font-size: 13px; font-weight: 600; letter-spacing: .04em; }
 .camera-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; font-size: 11px; font-weight: 700; letter-spacing: .1em; border-radius: 50px; background: rgba(0,0,0,.5); }
 .camera-status-badge.connected { color: #4ca16b; }
 .camera-status-badge.connecting { color: #ffd94e; }
@@ -286,7 +149,7 @@ button { font: inherit; cursor: pointer; }
 .setting-control select { min-width: 260px; height: 50px; display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 0 16px; border: 0; color: #342f2d; background: #fffdf9; font: inherit; font-size: 14px; font-weight: 600; text-align: left; }
 
 /* ============================================================
-   PHOTOBOOTH — FILTER SCREEN (PREVIEW KIRI, FILTER KANAN)  ← UPDATE 6-7
+   PHOTOBOOTH — FILTER SCREEN (PREVIEW KIRI, FILTER KANAN)
    ============================================================ */
 .photobooth-filter-section {
   position: absolute;
@@ -310,7 +173,6 @@ button { font: inherit; cursor: pointer; }
 .filter-header h2 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; margin: 0 0 2px; }
 .filter-header p { color: rgba(255,255,255,.5); font-size: 12px; margin: 0; max-width: 400px; }
 
-/* Preview kiri — besar */
 .filter-preview-area {
   position: relative;
   display: flex;
@@ -332,7 +194,7 @@ button { font: inherit; cursor: pointer; }
 }
 .filter-preview-frame-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; z-index: 100; pointer-events: none; }
 
-/* SLOT — container untuk foto. object-fit cover agar crop proporsional. */
+/* SLOT — container untuk foto */
 .filter-preview-slot {
   position: absolute;
   overflow: hidden;
@@ -346,17 +208,9 @@ button { font: inherit; cursor: pointer; }
   box-shadow: 0 0 0 2px rgba(255,217,78,.4);
   z-index: 5;
 }
-.filter-preview-slot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center;
-  display: block;
-}
 
 .filter-preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%; color: rgba(255,255,255,.3); font-size: 13px; font-weight: 600; letter-spacing: .08em; text-align: center; padding: 16px; }
 
-/* FILTER OPTIONS — kolom kanan */
 .filter-options {
   position: absolute;
   top: 50%;
@@ -577,4 +431,24 @@ button { font: inherit; cursor: pointer; }
   .photobooth-filter-section { grid-template-columns: 1fr; }
   .filter-options,
   .filter-actions { position: relative; width: auto; right: auto; top: auto; transform: none; }
+}
+
+/* ============================================================
+   ⚠️ PATCH FINAL — FILTER PREVIEW SLOT IMG (PAKSA COVER, TIDAK STRETCH)
+   Ditaruh paling bawah + selector spesifik + !important
+   supaya override inline style & CSS lain.
+   ============================================================ */
+.photobooth-filter-section .filter-preview-slot > img,
+.photobooth-filter-section .filter-preview-slot img {
+  object-fit: cover !important;
+  object-position: center center !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  position: static !important;
+  inset: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
 }
