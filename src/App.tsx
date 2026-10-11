@@ -1026,7 +1026,6 @@ function App() {
       if (!slug) {
         setCloudEvent(null);
         setCloudLoading(false);
-        setActiveEvent(null);
       }
     };
     window.addEventListener('popstate', onPopState);
@@ -1039,11 +1038,9 @@ function App() {
     if (!slug) return;
     if (RESERVED_PATHS.has(slug)) return;
     if (cloudEvent || cloudLoading) return;
-    // Kalau activeEvent ada DAN slug cocok → tidak perlu load dari cloud
-    if (activeEvent && activeEvent.slug === slug) return;
 
     setCloudLoading(true);
-  }, [urlSlug, cloudEvent, cloudLoading, activeEvent]);
+  }, [urlSlug, cloudEvent, cloudLoading]);
 
   /* ---------- HANDLE SYNC FROM CLOUD ---------- */
   const handleSyncFromCloud = async () => {
@@ -1218,27 +1215,6 @@ function App() {
 
   // Priority 2: Event via URL slug
   if (urlSlug && !RESERVED_PATHS.has(urlSlug)) {
-    // ✅ Kalau activeEvent ada DAN slug cocok → pakai LOKAL (frame lengkap)
-    if (activeEvent && activeEvent.slug === urlSlug) {
-      return (
-        <WithReminder {...reminderProps}>
-          <PhotoboothSession
-            event={activeEvent}
-            cameraSettings={settings.camera}
-            allSettings={settings}
-            onExit={() => {
-              window.history.pushState({}, '', '/');
-              setUrlSlug('');
-              setActiveEvent(null);
-              setScreen('project-list');
-            }}
-            onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
-          />
-        </WithReminder>
-      );
-    }
-
-    // Kalau cloudEvent ada → pakai (untuk guest buka URL langsung)
     if (cloudEvent) {
       return (
         <WithReminder {...reminderProps}>
@@ -1258,8 +1234,6 @@ function App() {
         </WithReminder>
       );
     }
-
-    // Belum load → tampilkan EventLoader
     return (
       <WithReminder {...reminderProps}>
         <EventLoader
@@ -1284,15 +1258,7 @@ function App() {
         <ProjectList
           events={events}
           onHome={() => setScreen('home')}
-          onOpen={(event) => {
-            // ✅ Push URL ke /[slug] kalau event punya slug
-            if (event.slug) {
-              window.history.pushState({}, '', `/${event.slug}`);
-              setUrlSlug(event.slug);
-            }
-            setActiveEvent(event);
-            setScreen('photobooth-session');
-          }}
+          onOpen={(event) => { setActiveEvent(event); setScreen('photobooth-session'); }}
           onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }}
           onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }}
           onSyncFromCloud={handleSyncFromCloud}
@@ -1311,14 +1277,14 @@ function App() {
     );
   }
 
-  if (screen === 'photobooth-session' && activeEvent && !urlSlug) {
+  if (screen === 'photobooth-session' && activeEvent) {
     return (
       <WithReminder {...reminderProps}>
         <PhotoboothSession
           event={activeEvent}
           cameraSettings={settings.camera}
           allSettings={settings}
-          onExit={() => { setActiveEvent(null); setScreen('project-list'); }}
+          onExit={() => setScreen('project-list')}
           onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
         />
       </WithReminder>
