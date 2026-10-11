@@ -11,6 +11,7 @@ import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
 import { buildDriveFolderUrl } from './gdriveService';
 import { recordSession } from './sessionStats';
+import { writeStatus, markOfflineOnDisconnect, clearStatus } from './statusSync';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
@@ -307,6 +308,31 @@ export const PhotoboothSession = ({
       onPhaseChange(phase);
     }
   }, [phase, onPhaseChange]);
+
+/* ============================================================
+   STATUS SYNC — tulis status ke Firebase setiap phase berubah
+   ============================================================ */
+useEffect(() => {
+  const activeSlug = event?.slug || '';
+  const activeName = event?.eventName || 'Untitled';
+
+  void writeStatus({
+    currentEventSlug: activeSlug,
+    currentEventName: activeName,
+    currentPhase: phase,
+    sessionActive: phase !== 'frame-select',
+    photoCount: captures.length,
+    totalCaptures: totalCapturesNeeded,
+  });
+}, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
+
+/* Mark offline saat tab ditutup */
+useEffect(() => {
+  markOfflineOnDisconnect();
+  return () => {
+    void clearStatus();
+  };
+}, []);
 
   const handleLogoClick = useCallback(() => {
     logoClickCount.current += 1;

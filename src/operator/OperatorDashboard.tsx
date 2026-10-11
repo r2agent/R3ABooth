@@ -49,6 +49,7 @@ import {
   type TodayStats,
 } from '../sessionStats';
 import type { AllSettings } from '../settingsStore';
+import { subscribeAllTablets, type TabletStatus } from '../statusSync';
 
 const REFRESH_INTERVAL_MS = 3000;
 
@@ -139,6 +140,18 @@ export const OperatorDashboard = ({
 
   // Logs
   const [logs, setLogs] = useState(getLogs());
+
+/* ============================================================
+   LIVE TABLETS — status real-time dari semua tablet
+   ============================================================ */
+const [tablets, setTablets] = useState<TabletStatus[]>([]);
+
+useEffect(() => {
+  const unsubscribe = subscribeAllTablets((newTablets) => {
+    setTablets(newTablets);
+  });
+  return unsubscribe;
+}, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -352,6 +365,93 @@ export const OperatorDashboard = ({
           {actionMessage}
         </div>
       ) : null}
+      
+{/* ============ LIVE TABLETS ============ */}
+<section style={{ marginBottom: 16 }}>
+  <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+    LIVE TABLETS ({tablets.length})
+  </h3>
+  {tablets.length === 0 ? (
+    <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
+      Tidak ada tablet online.
+    </p>
+  ) : (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+        gap: 10,
+      }}
+    >
+      {tablets.map((t) => {
+        const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
+        const isStale = lastActivityAgo > 60; // > 1 menit tidak aktif
+        const isOnline = t.online && !isStale;
+        
+        return (
+          <div
+            key={t.deviceId}
+            style={{
+              border: `1px solid ${isOnline ? 'rgba(74,222,128,.4)' : 'rgba(255,255,255,.1)'}`,
+              padding: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              background: isOnline ? 'rgba(74,222,128,.05)' : 'transparent',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: isOnline ? '#4ade80' : '#6b7280',
+                }}
+              />
+              <strong style={{ fontSize: 13, color: '#fff' }}>{t.deviceName}</strong>
+            </div>
+
+            {/* Event info */}
+            {t.currentEventName ? (
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>
+                📸 {t.currentEventName}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
+                Belum ada event
+              </div>
+            )}
+
+            {/* Phase */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span style={{ color: 'rgba(255,255,255,.5)' }}>Phase:</span>
+              <span style={{ color: '#ffd94e', fontWeight: 600 }}>
+                {t.currentPhase.toUpperCase()}
+              </span>
+            </div>
+
+            {/* Photo count */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span style={{ color: 'rgba(255,255,255,.5)' }}>Foto:</span>
+              <span style={{ color: '#fff' }}>
+                {t.photoCount} / {t.totalCaptures}
+              </span>
+            </div>
+
+            {/* Last activity */}
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
+              {isStale
+                ? `⚠️ ${lastActivityAgo}s tidak aktif`
+                : `✅ Aktif ${lastActivityAgo}s lalu`}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+</section>
 
       {/* ============ DEVICE STATUS ============ */}
       <section style={{ marginBottom: 16 }}>
