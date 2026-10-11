@@ -1,5 +1,7 @@
 /* ============================================================
    CLOUD EVENT SYNC — simpan & load event dari Firebase
+   Firebase cuma simpan METADATA + SLOT POSITIONS
+   Frame image TIDAK di-publish (biar ringan, no 10 MB limit)
    ============================================================ */
 import {
   ref,
@@ -34,7 +36,10 @@ function eventPath(slug: string): string {
   return `events/${slug}`;
 }
 
-/* ---------- SAVE EVENT TO CLOUD ---------- */
+/* ============================================================
+   SAVE EVENT TO CLOUD
+   ⚠️ Frame image TIDAK dikirim ke Firebase (cuma slot + metadata)
+   ============================================================ */
 export async function saveEventToCloud(
   event: R3aEvent,
 ): Promise<{ success: boolean; slug?: string; error?: string }> {
@@ -55,8 +60,20 @@ export async function saveEventToCloud(
       ? (existing.val() as CloudEvent).publishedAt
       : now;
 
+    /* ============================================================
+       ⚠️ PENTING: Buang frame image dari payload
+       Firebase cuma simpan: id, name, slots (tanpa image base64)
+       ============================================================ */
+    const framesWithoutImage = event.frames.map((frame) => ({
+      id: frame.id,
+      name: frame.name,
+      image: '',              // ← KOSONGKAN image (jangan kirim base64)
+      slots: frame.slots,     // ← Slot tetap dikirim
+    }));
+
     const payload: CloudEvent = {
       ...event,
+      frames: framesWithoutImage,
       slug,
       publishedAt,
       updatedAt: now,
@@ -72,7 +89,7 @@ export async function saveEventToCloud(
   }
 }
 
-/* ---------- PUBLISH EVENT TO CLOUD (alias, dipakai EventFile.tsx) ---------- */
+/* ---------- PUBLISH EVENT TO CLOUD (alias untuk EventFile.tsx) ---------- */
 export async function publishEventToCloud(
   event: R3aEvent,
 ): Promise<{ success: boolean; slug?: string; error?: string }> {
@@ -157,6 +174,7 @@ export async function isSlugAvailable(slug: string): Promise<boolean> {
 
 /* ============================================================
    SYNC CLOUD → LOCAL — ambil event dari Firebase, merge ke IndexedDB
+   Frame image dari cloud = kosong → device lokal yang harus isi sendiri
    ============================================================ */
 export type SyncResult = {
   total: number;
@@ -222,7 +240,16 @@ export async function syncCloudToLocal(
           await saveLocalFn(eventToSave);
           result.added++;
         } else if ((eventToSave.updatedAt || 0) > (existing.updatedAt || 0)) {
-          await saveLocalFn(eventToSave);
+          // Preserve frame image lokal (kalau ada) — cloud tidak punya frame image
+          const mergedFrames = eventToSave.frames.map((cloudFrame) => {
+            const localFrame = existing.frames.find((f) => f.id === cloudFrame.id);
+            return {
+              ...cloudFrame,
+              // Kalau cloud frame image kosong, pakai lokal (kalau ada)
+              image: cloudFrame.image || localFrame?.image || '',
+            };
+          });
+          await saveLocalFn({ ...eventToSave, frames: mergedFrames });
           result.updated++;
         } else {
           result.skipped++;
