@@ -14,7 +14,6 @@ import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
 
-// === Client ID dari env Vercel ===
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
@@ -270,6 +269,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveProgress, setSaveProgress] = useState<string>('');
   const [flash, setFlash] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [resultId, setResultId] = useState<string>('');
@@ -295,7 +296,6 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
 
   useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
 
-  // Retry failed uploads when network comes back online
   useEffect(() => {
     const handleOnline = () => {
       const gd = allSettings.googleDrive;
@@ -347,6 +347,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     setSelectedCaptureId(null);
     setCompositeUrl(null);
     setSaved(false);
+    setSaving(false);
+    setSaveProgress('');
     setQrDataUrl(null);
     setResultId('');
     setPrinted(false);
@@ -468,6 +470,11 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
 
   const handleSave = useCallback(async () => {
     if (!compositeUrl || !activeFrame) return;
+    if (saving) return;
+
+    setSaving(true);
+    setSaveProgress('Saving result...');
+
     try {
       const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const result: StoredResult = {
@@ -480,8 +487,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       };
       await saveResult(result);
       setResultId(id);
-      setSaved(true);
 
+      setSaveProgress('Generating photos...');
       const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
       const slotPhotos: { index: number; dataUrl: string }[] = [];
       for (let i = 0; i < allSlots.length; i++) {
@@ -496,6 +503,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
 
       let slideshowVideo: string | null = null;
       if (allSettings.storage.saveVideos) {
+        setSaveProgress('Generating video...');
         const rawSlotPhotos: { index: number; dataUrl: string }[] = [];
         for (let i = 0; i < allSlots.length; i++) {
           const cap = captureMap.get(allSlots[i].captureId);
@@ -503,17 +511,14 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
         }
         if (rawSlotPhotos.length > 0) {
           try {
-            const DURATION_PER_SLIDE_MS = 300;   // durasi per foto (ms)
-            const LOOP_COUNT = 3;                // berapa kali urutan diulang
-
-            // Duplikasi array foto 3x → [1,2,3,1,2,3,1,2,3]
+            const DURATION_PER_SLIDE_MS = 300;
+            const LOOP_COUNT = 3;
             const loopedPhotos: { dataUrl: string }[] = [];
             for (let loop = 0; loop < LOOP_COUNT; loop++) {
               for (const p of rawSlotPhotos) {
                 loopedPhotos.push({ dataUrl: p.dataUrl });
               }
             }
-
             slideshowVideo = await generateSlideshowVideo(loopedPhotos, DURATION_PER_SLIDE_MS);
           } catch {
             slideshowVideo = null;
@@ -522,6 +527,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       }
 
       if (allSettings.storage.autoDownloadResult) {
+        setSaveProgress('Downloading files...');
         for (const sp of slotPhotos) {
           const slotName = `slot-${String(sp.index).padStart(2, '0')}.jpg`;
           downloadDataUrl(sp.dataUrl, slotName);
@@ -534,6 +540,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
 
       const gd = allSettings.googleDrive;
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
+        setSaveProgress('Uploading to Google Drive...');
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
           ...slotPhotos.map((sp) => ({
@@ -544,10 +551,17 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
             : []),
         ];
-        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
+        await autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
       }
-    } catch { /* ignore */ }
-  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);
+
+      setSaveProgress('');
+      setSaved(true);
+    } catch {
+      setSaveProgress('');
+    } finally {
+      setSaving(false);
+    }
+  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
 
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
@@ -877,31 +891,61 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
           <div className="result-header">
             <h2>YOUR PHOTO IS READY</h2>
           </div>
-          <div className="result-preview">
+          <div className="result-preview" style={{ position: 'relative' }}>
             <img src={compositeUrl} alt="Final result" />
+
+            {saving ? (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(0,0,0,0.78)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 16,
+                  zIndex: 10,
+                }}
+              >
+                <div className="compositing-spinner" />
+                <span style={{
+                  color: '#fff',
+                  fontSize: 16,
+                  fontWeight: 700,
+                  letterSpacing: '.1em',
+                  textTransform: 'uppercase',
+                }}>
+                  {saveProgress || 'PROCESSING...'}
+                </span>
+                <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 12 }}>
+                  Jangan tutup halaman
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className="result-actions">
-            <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} type="button"><RotateCcw size={18} /> RETAKE</button>
-            <button className="result-save" onClick={handleSave} disabled={saved} type="button">
-              {saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
+            <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} disabled={saving} type="button"><RotateCcw size={18} /> RETAKE</button>
+            <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
+              {saving ? <>PROCESSING...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
             </button>
             {allSettings.display.showPrintButton ? (
-              <button className="result-print" onClick={handlePrint} disabled={!saved || printing || printed} type="button">
+              <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
                 <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
               </button>
             ) : null}
             {allSettings.display.showQrButton ? (
-              <button className="result-qr" onClick={handleShowQr} disabled={!saved} type="button">
+              <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button">
                 <QrCode size={18} /> QR CODE
               </button>
             ) : null}
             {currentGuest && allSettings.display.showDriveQrButton ? (
-              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved} type="button">
+              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button">
                 <QrCode size={18} /> DRIVE QR
               </button>
             ) : null}
           </div>
-          <button className="result-new-session" onClick={handleBackToFrameSelect} type="button">
+          <button className="result-new-session" onClick={handleBackToFrameSelect} disabled={saving} type="button">
             <RefreshCw size={18} /> NEW SESSION
           </button>
         </section>
