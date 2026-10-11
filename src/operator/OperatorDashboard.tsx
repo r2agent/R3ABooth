@@ -22,37 +22,9 @@ import {
   Tablet,
   Monitor,
   Globe,
+  Key,
+  Calendar,
 } from 'lucide-react';
-import {
-  getAllPendingUploads,
-  getUploadStats,
-  retryAllPending,
-  type PendingUpload,
-} from '../uploadService';
-import { getTokenStatus, connectGoogleDrive, type TokenStatus } from '../gdriveService';
-import {
-  runFullDiagnostic,
-  checkCamera,
-  checkInternet,
-  checkStorage,
-  checkPrinter,
-  checkMemory,
-  getSystemInfo,
-  getLogs,
-  clearLogs,
-  downloadLogs,
-  pushLog,
-  type DeviceCheck,
-  type DeviceCheckStatus,
-} from '../deviceDiagnostic';
-import {
-  getTodayStats,
-  getLastSession,
-  getAppUptimeMs,
-  resetAppUptime,
-  clearAllStats,
-  type TodayStats,
-} from '../sessionStats';
 import type { AllSettings } from '../settingsStore';
 import {
   subscribeAllTablets,
@@ -65,28 +37,8 @@ import { formatDeviceType } from '../deviceInfo';
 const REFRESH_INTERVAL_MS = 3000;
 
 /* ---------- HELPERS ---------- */
-function statusColor(s: DeviceCheckStatus): string {
-  switch (s) {
-    case 'ok': return '#4ade80';
-    case 'warning': return '#facc15';
-    case 'error': return '#ef4444';
-    case 'checking': return '#60a5fa';
-    default: return 'rgba(255,255,255,.5)';
-  }
-}
-
-function statusIcon(s: DeviceCheckStatus) {
-  switch (s) {
-    case 'ok': return <CheckCircle2 size={16} />;
-    case 'warning': return <AlertCircle size={16} />;
-    case 'error': return <AlertCircle size={16} />;
-    case 'checking': return <RefreshCw size={16} />;
-    default: return <AlertCircle size={16} />;
-  }
-}
-
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return `${Math.round(ms)}ms`;
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
@@ -97,15 +49,26 @@ function formatDuration(ms: number): string {
   return `${hour}h ${remMin}m`;
 }
 
-function deviceIcon(id: string) {
-  switch (id) {
-    case 'camera': return <Camera size={18} />;
-    case 'internet': return <Wifi size={18} />;
-    case 'storage': return <HardDrive size={18} />;
-    case 'printer': return <Printer size={18} />;
-    case 'memory': return <Cpu size={18} />;
-    default: return <Activity size={18} />;
-  }
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '—';
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(2)} GB`;
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return `${mb.toFixed(0)} MB`;
+  const kb = bytes / 1024;
+  return `${kb.toFixed(0)} KB`;
+}
+
+function formatTokenExpiry(expiresAt: number): string {
+  if (!expiresAt || expiresAt <= 0) return '—';
+  const now = Date.now();
+  const diff = expiresAt - now;
+  if (diff <= 0) return '⚠️ EXPIRED';
+  const min = Math.floor(diff / 60000);
+  if (min < 60) return `${min} menit lagi`;
+  const hour = Math.floor(min / 60);
+  const remMin = min % 60;
+  return `${hour}j ${remMin}m lagi`;
 }
 
 function deviceTypeIcon(type: string) {
@@ -129,9 +92,6 @@ export const OperatorDashboard = ({
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  /* ============================================================
-     LIVE DEVICES
-     ============================================================ */
   const [tablets, setTablets] = useState<TabletStatus[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
@@ -149,16 +109,12 @@ export const OperatorDashboard = ({
 
   const selectedDevice = filteredTablets.find((t) => t.deviceId === selectedDeviceId) ?? null;
 
-  /* ============================================================
-     AGREGAT STATISTIK — sum semua device
-     ============================================================ */
   const aggregatedStats = (() => {
     let totalSessions = 0;
     let totalPhotos = 0;
     let totalUploaded = 0;
     let totalPending = 0;
     let totalFailed = 0;
-
     for (const t of filteredTablets) {
       totalSessions += t.todaySessionCount ?? 0;
       totalPhotos += t.todayPhotoCount ?? 0;
@@ -166,11 +122,9 @@ export const OperatorDashboard = ({
       totalPending += t.pendingCount ?? 0;
       totalFailed += t.failedCount ?? 0;
     }
-
     return { totalSessions, totalPhotos, totalUploaded, totalPending, totalFailed };
   })();
 
-  /* Override body min-width saat operator open */
   useEffect(() => {
     const originalMinWidth = document.body.style.minWidth;
     const originalOverflow = document.body.style.overflow;
@@ -193,9 +147,6 @@ export const OperatorDashboard = ({
     return () => clearTimeout(t);
   }, [actionMessage]);
 
-  /* ============================================================
-     QUICK ACTIONS — kirim command ke device yang di-select
-     ============================================================ */
   const handleCommand = useCallback(async (type: CommandType, label: string) => {
     if (!selectedDevice) {
       setActionMessage('Pilih device dulu.');
@@ -217,29 +168,19 @@ export const OperatorDashboard = ({
         .device-card { transition: border-color .18s, background .18s; cursor: pointer; }
         .device-card:hover { border-color: rgba(255,217,78,.5) !important; background: rgba(255,217,78,.04) !important; }
         .device-card.is-selected { border-color: #ffd94e !important; background: rgba(255,217,78,.08) !important; box-shadow: 0 0 0 1px rgba(255,217,78,.3); }
-
+        .info-row { display: flex; justify-content: space-between; font-size: 12px; gap: 8px; }
+        .info-row span:first-child { color: rgba(255,255,255,.5); }
+        .info-row span:last-child { color: #fff; text-align: right; word-break: break-word; }
         @media (max-width: 768px) {
           .operator-dashboard { padding: 12px !important; }
-          .operator-dashboard .photobooth-kiosk-header { padding: 12px 14px !important; flex-wrap: wrap; gap: 10px; }
-          .operator-dashboard .photobooth-kiosk-header .photobooth-project strong { font-size: 13px !important; }
-          .operator-dashboard .photobooth-kiosk-header .photobooth-exit { padding: 8px 12px !important; font-size: 11px !important; }
-          .operator-dashboard h3 { font-size: 12px !important; }
           .op-grid { grid-template-columns: 1fr !important; }
           .op-grid-stats { grid-template-columns: repeat(2, 1fr) !important; }
           .op-grid-device { grid-template-columns: repeat(2, 1fr) !important; }
           .op-grid-tablets { grid-template-columns: 1fr !important; }
-          .op-stat-value { font-size: 18px !important; }
-          .op-log-list { font-size: 10px !important; }
-          .op-action-btn { padding: 8px 12px !important; font-size: 11px !important; }
-        }
-        @media (max-width: 480px) {
-          .op-grid-stats { grid-template-columns: 1fr !important; }
-          .op-grid-device { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
       <main className="photobooth-screen photobooth-kiosk operator-dashboard">
-        {/* HEADER */}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project">
             <span>R3A BOOTH</span>
@@ -286,12 +227,16 @@ export const OperatorDashboard = ({
               {eventSlug ? `Tidak ada device online untuk event "${eventSlug}".` : 'Tidak ada device online.'}
             </p>
           ) : (
-            <div className="op-grid-tablets" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+            <div className="op-grid-tablets" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
               {filteredTablets.map((t) => {
                 const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
                 const isStale = lastActivityAgo > 60;
                 const isOnline = t.online && !isStale;
                 const isSelected = selectedDeviceId === t.deviceId;
+
+                const sessionDuration = t.sessionStartedAt > 0
+                  ? Date.now() - t.sessionStartedAt
+                  : 0;
 
                 return (
                   <div
@@ -310,50 +255,49 @@ export const OperatorDashboard = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#4ade80' : '#6b7280', flexShrink: 0 }} />
                       <strong style={{ fontSize: 13, color: '#fff', wordBreak: 'break-word', flex: 1 }}>
-                        {t.deviceName}
+                        {t.browser || 'Browser'} - {formatDeviceType(t.deviceType || 'unknown')} - {t.os || 'OS'}
                       </strong>
-                      <span style={{ color: 'rgba(255,255,255,.6)' }} title={formatDeviceType(t.deviceType || 'unknown')}>
+                      <span style={{ color: 'rgba(255,255,255,.6)' }}>
                         {deviceTypeIcon(t.deviceType || 'desktop')}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)' }}>
-                      {formatDeviceType(t.deviceType || 'unknown')}
-                      {t.browser ? ` • ${t.browser}` : ''}
-                      {t.os ? ` • ${t.os}` : ''}
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
+                      ID: {t.deviceId.slice(-8)}
                     </div>
 
                     {t.currentEventName ? (
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)', wordBreak: 'break-word' }}>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>
                         📸 {t.currentEventName}
                       </div>
                     ) : (
                       <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>Belum ada event</div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                      <span style={{ color: 'rgba(255,255,255,.5)' }}>Phase:</span>
+                    <div className="info-row">
+                      <span>Phase:</span>
                       <span style={{ color: '#ffd94e', fontWeight: 600 }}>{t.currentPhase.toUpperCase()}</span>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                      <span style={{ color: 'rgba(255,255,255,.5)' }}>Foto:</span>
-                      <span style={{ color: '#fff' }}>{t.photoCount} / {t.totalCaptures}</span>
+                    <div className="info-row">
+                      <span>Foto:</span>
+                      <span>{t.photoCount} / {t.totalCaptures}</span>
                     </div>
+
+                    {sessionDuration > 0 ? (
+                      <div className="info-row">
+                        <span>Durasi sesi:</span>
+                        <span>{formatDuration(sessionDuration)}</span>
+                      </div>
+                    ) : null}
 
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
                       {isStale ? `⚠️ ${lastActivityAgo}s tidak aktif` : `✅ Aktif ${lastActivityAgo}s lalu`}
                     </div>
 
-                    {isSelected ? (
-                      <div style={{ marginTop: 6, fontSize: 10, color: '#ffd94e', textAlign: 'right' }}>
-                        ▼ TERPILIH
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 6, fontSize: 10, color: 'rgba(255,255,255,.3)', textAlign: 'right' }}>
-                        Klik untuk pilih
-                      </div>
-                    )}
+                    <div style={{ marginTop: 6, fontSize: 10, color: isSelected ? '#ffd94e' : 'rgba(255,255,255,.3)', textAlign: 'right' }}>
+                      {isSelected ? '▼ TERPILIH' : 'Klik untuk pilih'}
+                    </div>
                   </div>
                 );
               })}
@@ -367,117 +311,109 @@ export const OperatorDashboard = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.1em', marginBottom: 4 }}>
-                  DEVICE DETAIL — TERPILIH
+                  DEVICE DETAIL
                 </div>
                 <h3 style={{ margin: 0, fontSize: 18, color: '#fff' }}>
-                  {selectedDevice.deviceName}
+                  {selectedDevice.browser} - {formatDeviceType(selectedDevice.deviceType || 'unknown')} - {selectedDevice.os}
                 </h3>
               </div>
               <button
                 onClick={() => setSelectedDeviceId(null)}
                 type="button"
-                style={{
-                  padding: '8px 16px',
-                  background: 'rgba(255,255,255,.1)',
-                  color: '#fff',
-                  border: '1px solid rgba(255,255,255,.2)',
-                  fontWeight: 600,
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
+                style={{ padding: '8px 16px', background: 'rgba(255,255,255,.1)', color: '#fff', border: '1px solid rgba(255,255,255,.2)', fontWeight: 600, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                <X size={14} /> BATAL PILIH
+                <X size={14} /> BATAL
               </button>
             </div>
 
-            {/* Identitas Device */}
+            {/* Identitas */}
             <div style={{ marginBottom: 16 }}>
               <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
                 IDENTITAS DEVICE
               </h4>
               <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <span style={{ color: 'rgba(255,255,255,.5)' }}>{deviceTypeIcon(selectedDevice.deviceType || 'desktop')}</span>
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em' }}>TIPE</span>
-                  </div>
-                  <strong style={{ fontSize: 14, color: '#fff' }}>{formatDeviceType(selectedDevice.deviceType || 'unknown')}</strong>
-                </div>
-
-                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <Globe size={16} style={{ color: 'rgba(255,255,255,.5)' }} />
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em' }}>BROWSER</span>
-                  </div>
-                  <strong style={{ fontSize: 14, color: '#fff' }}>{selectedDevice.browser || '—'}</strong>
-                </div>
-
-                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <Monitor size={16} style={{ color: 'rgba(255,255,255,.5)' }} />
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em' }}>OS</span>
-                  </div>
-                  <strong style={{ fontSize: 14, color: '#fff' }}>{selectedDevice.os || '—'}</strong>
-                </div>
-
-                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <Monitor size={16} style={{ color: 'rgba(255,255,255,.5)' }} />
-                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em' }}>SCREEN</span>
-                  </div>
-                  <strong style={{ fontSize: 14, color: '#fff' }}>{selectedDevice.screenSize || '—'}</strong>
-                </div>
+                <InfoCard icon={<Monitor size={16} />} label="TIPE" value={formatDeviceType(selectedDevice.deviceType || 'unknown')} />
+                <InfoCard icon={<Globe size={16} />} label="BROWSER" value={selectedDevice.browser || '—'} />
+                <InfoCard icon={<Monitor size={16} />} label="OS" value={selectedDevice.os || '—'} />
+                <InfoCard icon={<Monitor size={16} />} label="SCREEN" value={selectedDevice.screenSize || '—'} />
               </div>
             </div>
 
-            {/* Storage & Drive Device */}
+            {/* Storage Device */}
             <div style={{ marginBottom: 16 }}>
               <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
-                STORAGE & DRIVE (DEVICE INI)
+                STORAGE DEVICE (BROWSER)
+              </h4>
+              <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                <InfoCard icon={<HardDrive size={16} />} label="FREE SPACE" value={formatBytes(selectedDevice.storageFree ?? 0)} color="#4ade80" />
+                <InfoCard icon={<HardDrive size={16} />} label="USED" value={formatBytes(selectedDevice.storageUsed ?? 0)} color="#facc15" />
+                <InfoCard icon={<HardDrive size={16} />} label="TOTAL QUOTA" value={formatBytes(selectedDevice.storageQuota ?? 0)} />
+              </div>
+            </div>
+
+            {/* Drive & Upload */}
+            <div style={{ marginBottom: 16 }}>
+              <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
+                GOOGLE DRIVE & UPLOAD (DEVICE INI)
               </h4>
               <div className="op-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr' }}>
                 <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
                   <h5 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
                     DRIVE STATUS
                   </h5>
-                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {selectedDevice.driveConnected ? (
-                      <><CheckCircle2 size={14} color="#4ade80" /> Connected</>
-                    ) : (
-                      <><AlertCircle size={14} color="#ef4444" /> Not connected</>
-                    )}
-                  </p>
-                  <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)', wordBreak: 'break-word' }}>
-                    Account: {selectedDevice.driveAccount || '—'}
-                  </p>
+                  <div className="info-row" style={{ marginBottom: 6 }}>
+                    <span>Status:</span>
+                    <span style={{ color: selectedDevice.driveConnected ? '#4ade80' : '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {selectedDevice.driveConnected ? <><CheckCircle2 size={12} /> Connected</> : <><AlertCircle size={12} /> Not connected</>}
+                    </span>
+                  </div>
+                  <div className="info-row" style={{ marginBottom: 6 }}>
+                    <span>Account:</span>
+                    <span>{selectedDevice.driveAccount || '—'}</span>
+                  </div>
+                  <div className="info-row">
+                    <span>Token:</span>
+                    <span style={{
+                      color: selectedDevice.driveTokenExpiresAt > Date.now() ? '#4ade80' : '#ef4444',
+                      display: 'flex', alignItems: 'center', gap: 4
+                    }}>
+                      <Key size={12} /> {formatTokenExpiry(selectedDevice.driveTokenExpiresAt ?? 0)}
+                    </span>
+                  </div>
                 </div>
 
                 <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
                   <h5 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
                     UPLOAD STATUS
                   </h5>
-                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <CheckCircle2 size={14} color="#4ade80" /> Uploaded: {selectedDevice.uploadedCount ?? 0}
-                  </p>
-                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Clock size={14} color="#facc15" /> Pending: {selectedDevice.pendingCount ?? 0}
-                  </p>
-                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <AlertCircle size={14} color="#ef4444" /> Failed: {selectedDevice.failedCount ?? 0}
-                  </p>
+                  <div className="info-row" style={{ marginBottom: 6 }}>
+                    <span>Uploaded:</span>
+                    <span style={{ color: '#4ade80' }}>{selectedDevice.uploadedCount ?? 0}</span>
+                  </div>
+                  <div className="info-row" style={{ marginBottom: 6 }}>
+                    <span>Pending:</span>
+                    <span style={{ color: '#facc15' }}>{selectedDevice.pendingCount ?? 0}</span>
+                  </div>
+                  <div className="info-row">
+                    <span>Failed:</span>
+                    <span style={{ color: '#ef4444' }}>{selectedDevice.failedCount ?? 0}</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Quick Actions (untuk device terpilih) */}
+            {/* Quick Actions */}
             <div style={{ marginTop: 20 }}>
               <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: '#ffd94e' }}>
-                ⚡ QUICK ACTIONS → {selectedDevice.deviceName.toUpperCase()}
+                ⚡ QUICK ACTIONS → {selectedDevice.browser} ({selectedDevice.os})
               </h4>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <ActionButton
+                  icon={<Plug size={16} />}
+                  label="RECONNECT DRIVE"
+                  onClick={() => handleCommand('reconnect-drive', 'Reconnect Drive')}
+                  color="#2563eb"
+                />
                 <ActionButton
                   icon={<RefreshCw size={16} />}
                   label="RETRY UPLOAD"
@@ -515,14 +451,11 @@ export const OperatorDashboard = ({
                   color="#dc2626"
                 />
               </div>
-              <p style={{ margin: '12px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
-                ⚠️ Perintah dikirim ke device terpilih. Device akan eksekusi dalam ~1 detik.
-              </p>
             </div>
           </section>
         ) : null}
 
-        {/* ============ STATISTIK KESELURUHAN ============ */}
+        {/* ============ STATISTIK AGREGAT ============ */}
         <section style={{ marginBottom: 16 }}>
           <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
             STATISTIK HARI INI (SEMUA BOOTH)
@@ -538,39 +471,31 @@ export const OperatorDashboard = ({
             * Dihitung dari {filteredTablets.length} device aktif
           </p>
         </section>
-
-        {/* ============ LOGS (LOCAL OPERATOR) ============ */}
-        <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-            LOGS (DEVICE OPERATOR)
-          </h3>
-          {getLogs().length === 0 ? (
-            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>Belum ada log.</p>
-          ) : (
-            <ul className="op-log-list" style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 240, overflow: 'auto', fontFamily: 'monospace', fontSize: 12 }}>
-              {getLogs().slice(0, 50).map((l, i) => (
-                <li key={i} style={{ padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,.05)', color: l.level === 'error' ? '#ef4444' : l.level === 'warn' ? '#facc15' : 'rgba(255,255,255,.7)', wordBreak: 'break-word' }}>
-                  [{new Date(l.time).toLocaleTimeString()}] [{l.level.toUpperCase()}] {l.message}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </main>
     </>
   );
 };
 
 /* ---------- SUB COMPONENTS ---------- */
+const InfoCard = ({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color?: string }) => (
+  <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+      <span style={{ color: 'rgba(255,255,255,.5)' }}>{icon}</span>
+      <span style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em' }}>{label}</span>
+    </div>
+    <strong style={{ fontSize: 14, color: color || '#fff', wordBreak: 'break-word' }}>{value}</strong>
+  </div>
+);
+
 const StatCard = ({ label, value, color }: { label: string; value: string; color: string }) => (
   <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
     <span style={{ fontSize: 11, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>{label.toUpperCase()}</span>
-    <span className="op-stat-value" style={{ fontSize: 22, fontWeight: 700, color }}>{value}</span>
+    <span style={{ fontSize: 22, fontWeight: 700, color }}>{value}</span>
   </div>
 );
 
 const ActionButton = ({ icon, label, onClick, disabled, color }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; color: string }) => (
-  <button onClick={onClick} disabled={disabled} type="button" className="op-action-btn" style={{ padding: '10px 16px', background: disabled ? '#555' : color, color: '#fff', border: 'none', fontWeight: 600, fontSize: 12, cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: disabled ? 0.5 : 1 }}>
+  <button onClick={onClick} disabled={disabled} type="button" style={{ padding: '10px 16px', background: disabled ? '#555' : color, color: '#fff', border: 'none', fontWeight: 600, fontSize: 12, cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: disabled ? 0.5 : 1 }}>
     {icon} {label}
   </button>
 );

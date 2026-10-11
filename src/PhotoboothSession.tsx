@@ -290,6 +290,8 @@ export const PhotoboothSession = ({
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   /* Track waktu mulai sesi untuk statistik */
   const sessionStartedAtRef = useRef<number | null>(null);
+  /* Flag untuk prevent race condition saat push status */
+  const isPushingRef = useRef(false);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
   const [countdown, setCountdown] = useState(0);
@@ -306,6 +308,8 @@ export const PhotoboothSession = ({
   const [printing, setPrinting] = useState(false);
   const [printed, setPrinted] = useState(false);
   const [showAdminExit, setShowAdminExit] = useState(false);
+  /* Screensaver state — track screensaver */
+  const [screensaverActive, setScreensaverActive] = useState(false);
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
   const [guestAssigning, setGuestAssigning] = useState(false);
@@ -347,30 +351,40 @@ export const PhotoboothSession = ({
     let cancelled = false;
 
     const push = async () => {
-      const token = getTokenStatus();
-      const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
-      const todayStats = getTodayStats();
-      const storage = await getStorageEstimate();
-      if (cancelled) return;
+      // Prevent race condition — skip kalau push sebelumnya belum selesai
+      if (isPushingRef.current) return;
+      isPushingRef.current = true;
 
-      void writeStatus({
-        currentEventSlug: event?.slug || '',
-        currentEventName: event?.eventName || 'Untitled',
-        currentPhase: phase,
-        sessionActive: phase !== 'frame-select',
-        photoCount: captures.length,
-        totalCaptures: totalCapturesNeeded,
-        driveConnected: token.hasToken,
-        driveAccount: token.account || '',
-        uploadedCount: stats.uploaded,
-        pendingCount: stats.pending,
-        failedCount: stats.failed,
-        todaySessionCount: todayStats.sessionCount,
-        todayPhotoCount: todayStats.photoCount,
-        storageFree: storage.free,
-        storageUsed: storage.used,
-        storageQuota: storage.quota,
-      });
+      try {
+        const token = getTokenStatus();
+        const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
+        const todayStats = getTodayStats();
+        const storage = await getStorageEstimate();
+        if (cancelled) return;
+
+        void writeStatus({
+          currentEventSlug: event?.slug || '',
+          currentEventName: event?.eventName || 'Untitled',
+          currentPhase: phase,
+          sessionActive: phase !== 'frame-select',
+          photoCount: captures.length,
+          totalCaptures: totalCapturesNeeded,
+          sessionStartedAt: sessionStartedAtRef.current ?? 0,
+          driveConnected: token.hasToken,
+          driveAccount: token.account || '',
+          driveTokenExpiresAt: token.expiresAt ?? 0,
+          uploadedCount: stats.uploaded,
+          pendingCount: stats.pending,
+          failedCount: stats.failed,
+          todaySessionCount: todayStats.sessionCount,
+          todayPhotoCount: todayStats.photoCount,
+          storageFree: storage.free,
+          storageUsed: storage.used,
+          storageQuota: storage.quota,
+        });
+      } finally {
+        isPushingRef.current = false;
+      }
     };
 
     void push();
@@ -388,6 +402,22 @@ export const PhotoboothSession = ({
     return () => {
       void clearStatus();
     };
+  }, []);
+
+  /* ============================================================
+     SCREENSAVER DETECTION — track screensaver phase
+     ============================================================ */
+  useEffect(() => {
+    const checkScreensaver = () => {
+      const isSaver = document.querySelector('.screensaver-overlay') !== null
+        || document.body.classList.contains('screensaver-active')
+        || document.body.style.overflow === 'hidden' && !!document.querySelector('[class*="screensaver"]');
+      setScreensaverActive(!!isSaver);
+    };
+
+    const id = setInterval(checkScreensaver, 2000);
+    checkScreensaver();
+    return () => clearInterval(id);
   }, []);
 
   /* ============================================================
@@ -452,9 +482,9 @@ export const PhotoboothSession = ({
 
   useEffect(() => {
     if (onPhaseChange) {
-      onPhaseChange(phase);
+      onPhaseChange(screensaverActive ? 'screensaver' : phase);
     }
-  }, [phase, onPhaseChange]);
+  }, [phase, onPhaseChange, screensaverActive]);
 
   useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
 

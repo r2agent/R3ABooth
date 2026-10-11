@@ -18,30 +18,27 @@ import { getDeviceInfo } from './deviceInfo';
 export type TabletStatus = {
   deviceId: string;
   deviceName: string;
-  /* Identitas device */
   deviceType: string;
   browser: string;
   os: string;
   screenSize: string;
-  /* Event & session */
   currentEventSlug: string;
   currentEventName: string;
   currentPhase: string;
   sessionActive: boolean;
   photoCount: number;
   totalCaptures: number;
+  sessionStartedAt: number;
   lastActivity: number;
   online: boolean;
-  /* Drive & upload status */
   driveConnected: boolean;
   driveAccount: string;
+  driveTokenExpiresAt: number;   // ← timestamp kapan token expired
   uploadedCount: number;
   pendingCount: number;
   failedCount: number;
-  /* Statistik hari ini */
   todaySessionCount: number;
   todayPhotoCount: number;
-  /* NEW: storage info */
   storageFree: number;
   storageUsed: number;
   storageQuota: number;
@@ -68,18 +65,26 @@ export function getDeviceId(): string {
   const KEY = 'r3a-device-id';
   let id = localStorage.getItem(KEY);
   if (!id) {
-    id = `tablet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    id = `device-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     localStorage.setItem(KEY, id);
   }
   return id;
 }
 
-/* ---------- DEVICE NAME ---------- */
+/* ---------- AUTO DEVICE NAME (dari browser + tipe + OS) ---------- */
+export function getAutoDeviceName(): string {
+  const info = getDeviceInfo();
+  const typeLabel =
+    info.deviceType === 'mobile' ? 'HP'
+    : info.deviceType === 'tablet' ? 'Tablet'
+    : 'PC';
+  return `${info.browser} - ${typeLabel} - ${info.os}`;
+}
+
 export function getDeviceName(): string {
-  const id = getDeviceId();
-  const saved = localStorage.getItem('r3a-device-name');
-  if (saved) return saved;
-  return `Tablet ${id.slice(-4).toUpperCase()}`;
+  const custom = typeof window !== 'undefined' ? localStorage.getItem('r3a-device-name') : null;
+  if (custom) return custom;
+  return getAutoDeviceName();
 }
 
 export function setDeviceName(name: string): void {
@@ -99,7 +104,6 @@ function commandPath(deviceId: string): string {
 /* ---------- WRITE STATUS ---------- */
 export async function writeStatus(partial: Partial<TabletStatus>): Promise<void> {
   if (!isFirebaseConfigured()) return;
-
   try {
     const db = getFirebaseDb();
     const deviceId = getDeviceId();
@@ -118,10 +122,12 @@ export async function writeStatus(partial: Partial<TabletStatus>): Promise<void>
       sessionActive: partial.sessionActive ?? false,
       photoCount: partial.photoCount ?? 0,
       totalCaptures: partial.totalCaptures ?? 0,
+      sessionStartedAt: partial.sessionStartedAt ?? 0,
       lastActivity: Date.now(),
       online: true,
       driveConnected: partial.driveConnected ?? false,
       driveAccount: partial.driveAccount ?? '',
+      driveTokenExpiresAt: partial.driveTokenExpiresAt ?? 0,
       uploadedCount: partial.uploadedCount ?? 0,
       pendingCount: partial.pendingCount ?? 0,
       failedCount: partial.failedCount ?? 0,
@@ -157,10 +163,12 @@ export function markOfflineOnDisconnect(): void {
       sessionActive: false,
       photoCount: 0,
       totalCaptures: 0,
+      sessionStartedAt: 0,
       lastActivity: Date.now(),
       online: false,
       driveConnected: false,
       driveAccount: '',
+      driveTokenExpiresAt: 0,
       uploadedCount: 0,
       pendingCount: 0,
       failedCount: 0,
@@ -255,7 +263,7 @@ export async function getDeviceStatus(deviceId: string): Promise<TabletStatus | 
   }
 }
 
-/* ---------- STORAGE ESTIMATE HELPER ---------- */
+/* ---------- STORAGE ESTIMATE ---------- */
 export async function getStorageEstimate(): Promise<{ free: number; used: number; quota: number }> {
   try {
     type StorageEstimate = { quota?: number; usage?: number };
