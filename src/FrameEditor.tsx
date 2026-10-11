@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
 import { Copy, Plus, Trash2, Upload } from 'lucide-react';
-import { createSlot, duplicateSlot, type Frame, type Slot } from './eventStore';
+import { createSlot, duplicateSlot, type Frame, type Slot } from './eventTypes';
 
 type DragState = {
   slotId: string;

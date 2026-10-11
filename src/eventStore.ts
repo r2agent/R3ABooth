@@ -1,48 +1,18 @@
-export type Slot = {
-  id: string;
-  captureId: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
+/* Re-export types dari eventTypes.ts */
+export type {
+  Slot,
+  Frame,
+  OutputSettings,
+  PrinterSettings,
+  EventStatus,
+  R3aEvent,
+} from './eventTypes';
 
-export type Frame = {
-  id: string;
-  name: string;
-  image: string;
-  slots: Slot[];
-};
-
-export type OutputSettings = {
-  destinationFolder: string;
-  fileNaming: string;
-  savePhotos: boolean;
-  saveVideos: boolean;
-};
-
-export type PrinterSettings = {
-  printer: string;
-  paperSize: string;
-  copies: number;
-};
-
-export type EventStatus = 'Ready' | 'Active' | 'Ended';
-
-export type R3aEvent = {
-  id: string;
-  slug?: string;           // ← TAMBAH: slug untuk URL unik
-  eventName: string;
-  clientName: string;
-  date: string;
-  location: string;
-  frames: Frame[];
-  outputSettings: OutputSettings;
-  printerSettings: PrinterSettings;
-  eventStatus: EventStatus;
-  createdAt: number;
-  updatedAt: number;
-};
+import type {
+  Slot,
+  Frame,
+  R3aEvent,
+} from './eventTypes';
 
 const DB_NAME = 'r3a-booth';
 const STORE_NAME = 'events';

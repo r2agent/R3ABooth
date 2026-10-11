@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
 import { EventLoader } from './EventLoader';
-import { createEmptyEvent, deleteEvent, getAllEvents, saveEvent as saveEventLocal, type R3aEvent } from './eventStore';
+import { createEmptyEvent, deleteEvent, getAllEvents, saveEvent as saveEventLocal, type R3aEvent } from './eventTypes';
 import { syncCloudToLocal, type SyncResult, type CloudEvent } from './cloudEventSync';
 import { enumerateCameras, type CameraDevice } from './cameraStore';
 import { CameraTestModal, CameraStatusBadge } from './cameraUi';

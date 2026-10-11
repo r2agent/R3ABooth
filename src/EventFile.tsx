@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight, Image as ImageIcon, Plus, Trash2, Cloud, Copy, Check, AlertCircle, ExternalLink } from 'lucide-react';
 import { FrameEditor } from './FrameEditor';
-import { createFrame, createSlot, duplicateSlot, saveEvent, type R3aEvent, type Frame, type Slot } from './eventStore';
+import { createFrame, createSlot, duplicateSlot, saveEvent, type R3aEvent, type Frame, type Slot } from './eventTypes';
 import { publishEventToCloud, buildEventUrl, generateSlug } from './cloudEventSync';
 
 type EventFileTab = 'event' | 'frame' | 'status';
