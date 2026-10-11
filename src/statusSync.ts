@@ -192,8 +192,10 @@ export function subscribeAllTablets(
       return;
     }
     const data = snapshot.val() as Record<string, TabletStatus>;
-    const tablets = Object.values(data).sort(
-      (a, b) => (b.lastActivity || 0) - (a.lastActivity || 0),
+    // ⚠️ FIX: sort by deviceId (STABIL) — biar list tidak geser tiap detik.
+    // Sebelumnya pakai lastActivity → device yang baru update naik ke atas.
+    const tablets = Object.values(data).sort((a, b) =>
+      (a.deviceId || '').localeCompare(b.deviceId || ''),
     );
     cb(tablets);
   });

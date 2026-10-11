@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw } from 'lucide-react';
+import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key } from 'lucide-react';
 import { useCamera } from './useCamera';
 import { CameraPreview, CameraStatusBadge, errorMessages } from './cameraUi';
 import { getAspectRatioValue } from './cameraStore';
@@ -307,6 +307,9 @@ export const PhotoboothSession = ({
   const [printed, setPrinted] = useState(false);
   const [showAdminExit, setShowAdminExit] = useState(false);
   const [screensaverActive, setScreensaverActive] = useState(false);
+  // ⚠️ NEW: overlay tap untuk command yang butuh user gesture
+  const [pendingFullscreen, setPendingFullscreen] = useState(false);
+  const [pendingRefreshToken, setPendingRefreshToken] = useState(false);
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
   const [guestAssigning, setGuestAssigning] = useState(false);
@@ -436,21 +439,13 @@ export const PhotoboothSession = ({
           case 'reconnect-drive':
           case 'refresh-token': {
             if (!VITE_CLIENT_ID) break;
-            void (async () => {
-              try {
-                await connectGoogleDrive(VITE_CLIENT_ID);
-              } catch { /* ignore */ }
-            })();
+            // ⚠️ OAuth popup butuh user gesture → tampilkan overlay tap
+            setPendingRefreshToken(true);
             break;
           }
           case 'force-fullscreen': {
-            void (async () => {
-              try {
-                if (!document.fullscreenElement) {
-                  await document.documentElement.requestFullscreen?.();
-                }
-              } catch { /* ignore */ }
-            })();
+            // ⚠️ Fullscreen butuh user gesture → tampilkan overlay tap
+            setPendingFullscreen(true);
             break;
           }
         }
@@ -1130,6 +1125,60 @@ export const PhotoboothSession = ({
             <button className="qr-new-session" onClick={handleBackToFrameSelect} type="button"><RefreshCw size={18} /> DONE</button>
           </div>
         </section>
+      ) : null}
+
+      {pendingFullscreen ? (
+        <div
+          onClick={async () => {
+            try {
+              if (!document.fullscreenElement) {
+                await document.documentElement.requestFullscreen?.();
+              }
+            } catch { /* ignore */ }
+            setPendingFullscreen(false);
+          }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999999,
+            background: 'rgba(0,0,0,.85)', display: 'grid', placeItems: 'center',
+            cursor: 'pointer', color: '#fff', textAlign: 'center', padding: 32,
+          }}
+        >
+          <div>
+            <Maximize2 size={72} style={{ marginBottom: 20, marginLeft: 'auto', marginRight: 'auto' }} />
+            <h2 style={{ margin: '0 0 10px', fontFamily: 'Space Grotesk, sans-serif', fontSize: 32 }}>
+              TAP UNTUK FULLSCREEN
+            </h2>
+            <p style={{ margin: 0, opacity: .7, fontSize: 16 }}>
+              Browser butuh tap manual di device ini.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingRefreshToken ? (
+        <div
+          onClick={async () => {
+            try {
+              await connectGoogleDrive(VITE_CLIENT_ID);
+            } catch { /* ignore */ }
+            setPendingRefreshToken(false);
+          }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999999,
+            background: 'rgba(0,0,0,.85)', display: 'grid', placeItems: 'center',
+            cursor: 'pointer', color: '#fff', textAlign: 'center', padding: 32,
+          }}
+        >
+          <div>
+            <Key size={72} style={{ marginBottom: 20, marginLeft: 'auto', marginRight: 'auto' }} />
+            <h2 style={{ margin: '0 0 10px', fontFamily: 'Space Grotesk, sans-serif', fontSize: 32 }}>
+              TAP UNTUK REFRESH TOKEN
+            </h2>
+            <p style={{ margin: 0, opacity: .7, fontSize: 16 }}>
+              Login Google butuh tap manual di device ini.
+            </p>
+          </div>
+        </div>
       ) : null}
 
       {showAdminExit ? (
