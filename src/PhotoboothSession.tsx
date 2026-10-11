@@ -386,10 +386,17 @@ export const PhotoboothSession = ({
     root.render(
       <div
         onClick={async () => {
+          let success = false;
           try {
-            await connectGoogleDrive(VITE_CLIENT_ID);
+            const result = await connectGoogleDrive(VITE_CLIENT_ID);
+            success = result.success;
           } catch { /* ignore */ }
           setPendingRefreshToken(false);
+          // ⚠️ Setelah OAuth popup, browser biasanya keluar dari fullscreen.
+          // Tampilkan overlay fullscreen lagi biar device balik ke mode booth.
+          if (success) {
+            setPendingFullscreen(true);
+          }
         }}
         style={{
           position: 'fixed', inset: 0, zIndex: 9999999,
