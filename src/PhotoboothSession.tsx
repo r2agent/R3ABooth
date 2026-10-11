@@ -303,61 +303,6 @@ export const PhotoboothSession = ({
   const logoClickCount = useRef(0);
   const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (onPhaseChange) {
-      onPhaseChange(phase);
-    }
-  }, [phase, onPhaseChange]);
-
-/* ============================================================
-   STATUS SYNC — tulis status ke Firebase setiap phase berubah
-   ============================================================ */
-useEffect(() => {
-  const activeSlug = event?.slug || '';
-  const activeName = event?.eventName || 'Untitled';
-
-  void writeStatus({
-    currentEventSlug: activeSlug,
-    currentEventName: activeName,
-    currentPhase: phase,
-    sessionActive: phase !== 'frame-select',
-    photoCount: captures.length,
-    totalCaptures: totalCapturesNeeded,
-  });
-}, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
-
-/* Mark offline saat tab ditutup */
-useEffect(() => {
-  markOfflineOnDisconnect();
-  return () => {
-    void clearStatus();
-  };
-}, []);
-
-  const handleLogoClick = useCallback(() => {
-    logoClickCount.current += 1;
-    if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current);
-    if (logoClickCount.current >= 6) {
-      logoClickCount.current = 0;
-      setShowAdminExit(true);
-      return;
-    }
-    logoClickTimeout.current = setTimeout(() => { logoClickCount.current = 0; }, 2000);
-  }, []);
-
-  useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      const gd = allSettings.googleDrive;
-      if (gd.connected && VITE_CLIENT_ID) {
-        void retryFailedUploads(VITE_CLIENT_ID);
-      }
-    };
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, [allSettings.googleDrive]);
-
   const [captureError, setCaptureError] = useState<CaptureError>(null);
   const [qrError, setQrError] = useState(false);
   const [driveQrDataUrl, setDriveQrDataUrl] = useState<string | null>(null);
@@ -371,8 +316,9 @@ useEffect(() => {
   const uniqueCaptureIds = useMemo(() => getUniqueCaptureIds(allSlots), [allSlots]);
   const totalCapturesNeeded = uniqueCaptureIds.length;
 
-  /* Slot untuk sidebar live preview — hanya captureId UNIK.
-     Kalau ada slot duplikat (captureId sama), hanya yang pertama ditampilkan. */
+  /* ============================================================
+     SLOT UNIK untuk sidebar live preview
+     ============================================================ */
   const uniqueSlotsForPreview = useMemo(() => {
     const seen = new Set<string>();
     const result: Slot[] = [];
@@ -384,6 +330,62 @@ useEffect(() => {
     }
     return result;
   }, [allSlots]);
+
+  /* ============================================================
+     STATUS SYNC — tulis status ke Firebase setiap phase berubah
+     (DIPINDAH KE SINI, setelah totalCapturesNeeded)
+     ============================================================ */
+  useEffect(() => {
+    const activeSlug = event?.slug || '';
+    const activeName = event?.eventName || 'Untitled';
+
+    void writeStatus({
+      currentEventSlug: activeSlug,
+      currentEventName: activeName,
+      currentPhase: phase,
+      sessionActive: phase !== 'frame-select',
+      photoCount: captures.length,
+      totalCaptures: totalCapturesNeeded,
+    });
+  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
+
+  /* Mark offline saat tab ditutup */
+  useEffect(() => {
+    markOfflineOnDisconnect();
+    return () => {
+      void clearStatus();
+    };
+  }, []);
+
+  const handleLogoClick = useCallback(() => {
+    logoClickCount.current += 1;
+    if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current);
+    if (logoClickCount.current >= 6) {
+      logoClickCount.current = 0;
+      setShowAdminExit(true);
+      return;
+    }
+    logoClickTimeout.current = setTimeout(() => { logoClickCount.current = 0; }, 2000);
+  }, []);
+
+  useEffect(() => {
+    if (onPhaseChange) {
+      onPhaseChange(phase);
+    }
+  }, [phase, onPhaseChange]);
+
+  useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      const gd = allSettings.googleDrive;
+      if (gd.connected && VITE_CLIENT_ID) {
+        void retryFailedUploads(VITE_CLIENT_ID);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [allSettings.googleDrive]);
 
   useEffect(() => {
     if (!activeFrame?.image) { setFrameAspect(3 / 2); return; }
@@ -418,7 +420,6 @@ useEffect(() => {
     setDriveQrDataUrl(null);
     setDriveQrError(false);
     sessionStartedAtRef.current = null;
-    /* Clear image cache untuk bebaskan memory */
     imageCacheRef.current.clear();
   }, []);
 
@@ -431,7 +432,6 @@ useEffect(() => {
   const handleStartCapture = useCallback(async () => {
     resetSession();
     setGuestError(null);
-    /* Tandai waktu mulai sesi */
     sessionStartedAtRef.current = Date.now();
 
     const gd = allSettings.googleDrive;
@@ -615,13 +615,9 @@ useEffect(() => {
             : []),
         ];
         void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
-        // Asumsi sukses kalau upload tidak throw
         uploadSuccessCount = uploadFiles.length;
       }
 
-      /* ============================================================
-         RECORD SESSION — untuk statistik Operator Dashboard
-         ============================================================ */
       try {
         const startedAt = sessionStartedAtRef.current ?? (Date.now() - 60000);
         recordSession({
@@ -715,9 +711,6 @@ useEffect(() => {
     [captures],
   );
 
-  /* ============================================================
-     PRELOAD GAMBAR KE CACHE — biar render selanjutnya synchronous
-     ============================================================ */
   const ensureImagesCached = useCallback(async (sources: string[]): Promise<void> => {
     const cache = imageCacheRef.current;
     const missing = sources.filter((src) => src && !cache.has(src));
@@ -734,10 +727,6 @@ useEffect(() => {
     );
   }, []);
 
-  /* ============================================================
-     PREVIEW CANVAS — render SYNCHRONOUS dari cache,
-     tidak ada flicker saat ganti filter.
-     ============================================================ */
   useEffect(() => {
     if (phase !== 'filter') return;
     const area = previewAreaRef.current;
