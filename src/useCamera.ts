@@ -10,8 +10,18 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
   const [status, setStatus] = useState<CameraStatus>('idle');
   const [error, setError] = useState<CameraError | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enabledRef = useRef(enabled);
+  const settingsRef = useRef(settings);
+
+  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
   const stop = useCallback(() => {
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -22,7 +32,8 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
   }, []);
 
   const start = useCallback(async () => {
-    if (!settings || !settings.cameraOn) {
+    const s = settingsRef.current;
+    if (!s || !s.cameraOn) {
       setStatus('disconnected');
       return;
     }
@@ -36,16 +47,16 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
     }
 
     try {
-      const { width, height } = getEffectiveResolution(settings);
-      const fps = getFrameRateConstraint(settings.frameRate);
-      const previewConstraint = getPreviewQualityConstraint(settings.previewQuality);
+      const { width, height } = getEffectiveResolution(s);
+      const fps = getFrameRateConstraint(s.frameRate);
+      const previewConstraint = getPreviewQualityConstraint(s.previewQuality);
 
       const idealWidth = previewConstraint?.width ?? width;
       const idealHeight = previewConstraint?.height ?? height;
 
       const constraints: MediaStreamConstraints = {
-        video: settings.selectedDeviceId
-          ? { deviceId: { exact: settings.selectedDeviceId }, width: { ideal: idealWidth }, height: { ideal: idealHeight }, frameRate: { ideal: fps } }
+        video: s.selectedDeviceId
+          ? { deviceId: { exact: s.selectedDeviceId }, width: { ideal: idealWidth }, height: { ideal: idealHeight }, frameRate: { ideal: fps } }
           : { width: { ideal: idealWidth }, height: { ideal: idealHeight }, frameRate: { ideal: fps } },
         audio: false,
       };
@@ -62,7 +73,7 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
       else setError('unknown');
       setStatus('error');
     }
-  }, [settings]);
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
@@ -77,15 +88,34 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
     if (!enabled || !stream) return;
     const track = stream.getVideoTracks()[0];
     if (!track) return;
-    const onEnded = () => { setStatus('disconnected'); };
+
+    const scheduleRestart = () => {
+      if (!enabledRef.current) return;
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      // Delay 800ms supaya OAuth popup / device suspend selesai dulu
+      restartTimerRef.current = setTimeout(() => {
+        if (enabledRef.current && settingsRef.current?.cameraOn) {
+          void start();
+        }
+      }, 800);
+    };
+
+    const onEnded = () => {
+      setStatus('disconnected');
+      scheduleRestart();
+    };
     const onUnmute = () => { setStatus('connected'); };
+    const onMute = () => { setStatus('disconnected'); };
+
     track.addEventListener('ended', onEnded);
     track.addEventListener('unmute', onUnmute);
+    track.addEventListener('mute', onMute);
     return () => {
       track.removeEventListener('ended', onEnded);
       track.removeEventListener('unmute', onUnmute);
+      track.removeEventListener('mute', onMute);
     };
-  }, [stream, enabled]);
+  }, [stream, enabled, start]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -96,13 +126,28 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
           setStatus('disconnected');
           await start();
         }
-      } else if (settings?.cameraOn) {
+      } else if (settingsRef.current?.cameraOn) {
         await start();
       }
     };
     navigator.mediaDevices?.addEventListener?.('devicechange', handler);
     return () => navigator.mediaDevices?.removeEventListener?.('devicechange', handler);
-  }, [enabled, start, stream, settings?.cameraOn]);
+  }, [enabled, start]);
+
+  // ⚠️ Auto-restart saat device kembali visible (setelah OAuth popup close, minimize, dll)
+  useEffect(() => {
+    if (!enabled) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        const track = streamRef.current?.getVideoTracks()[0];
+        if (!track || track.readyState === 'ended') {
+          void start();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [enabled, start]);
 
   return { stream, status, error, start, stop };
 }
