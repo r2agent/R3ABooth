@@ -23,6 +23,7 @@ import {
   runDiagnostics,
 } from './gdriveService';
 
+// === Client ID dari env Vercel ===
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
@@ -45,6 +46,7 @@ function parseFolderId(input: string): string {
   return '';
 }
 
+// === Wrapper popup + screensaver untuk semua screen ===
 const WithReminder = ({
   visible,
   minutes,
@@ -845,6 +847,7 @@ function App() {
     typeof window !== 'undefined' ? window.location.hash : ''
   );
 
+  // === Reminder state ===
   const [reminderVisible, setReminderVisible] = useState(false);
   const [reminderMinutes, setReminderMinutes] = useState(0);
   const [reminderRefreshing, setReminderRefreshing] = useState(false);
@@ -852,6 +855,7 @@ function App() {
   const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastReminderAtRef = useRef<number>(Date.now());
 
+  // === Idle screensaver state ===
   const [screensaverVisible, setScreensaverVisible] = useState(false);
   const lastActivityRef = useRef<number>(Date.now());
   const screensaverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -866,29 +870,36 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
+  // === Reminder timer — MURNI BY INTERVAL ===
   useEffect(() => {
     if (reminderTimerRef.current) {
       clearInterval(reminderTimerRef.current);
       reminderTimerRef.current = null;
     }
+
     const gd = settings.googleDrive;
     if (!gd.reminderEnabled || !gd.connected || !VITE_CLIENT_ID) {
       setReminderVisible(false);
       return;
     }
+
     const rawInterval = Number(gd.reminderIntervalMin);
     const intervalMin =
       Number.isFinite(rawInterval) && rawInterval >= 1 && rawInterval <= 60
         ? rawInterval
         : 50;
     const intervalMs = intervalMin * 60 * 1000;
+
     lastReminderAtRef.current = Date.now();
+
     reminderTimerRef.current = setInterval(() => {
       const now = Date.now();
       if (now - lastReminderAtRef.current < intervalMs) return;
+
       const status = getTokenStatus();
       const msLeft = status.hasToken && status.expiresAt ? status.expiresAt - now : 0;
       const minutesLeft = Math.max(0, Math.floor(msLeft / 60000));
+
       setReminderMinutes(minutesLeft);
       setReminderVisible(true);
       setNeedsFullscreen(false);
@@ -896,11 +907,13 @@ function App() {
     }, 5 * 1000);
   }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.reminderIntervalMin]);
 
+  // === Idle screensaver timer ===
   useEffect(() => {
     if (screensaverTimerRef.current) {
       clearInterval(screensaverTimerRef.current);
       screensaverTimerRef.current = null;
     }
+
     const timeoutMin = Number(settings.display.idleTimeoutMin);
     const timeoutMs =
       Number.isFinite(timeoutMin) && timeoutMin >= 1 && timeoutMin <= 120
