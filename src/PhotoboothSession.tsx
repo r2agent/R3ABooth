@@ -19,7 +19,7 @@ import {
   getDeviceId,
   subscribeCommands,
   clearCommand,
-  getStorageEstimate,
+  getDriveQuota,
 } from './statusSync';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
@@ -292,6 +292,8 @@ export const PhotoboothSession = ({
   const sessionStartedAtRef = useRef<number | null>(null);
   /* Flag untuk prevent race condition saat push status */
   const isPushingRef = useRef(false);
+  /* Track waktu buka event — untuk durasi akurat */
+  const eventOpenedAtRef = useRef<number>(Date.now());
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
   const [countdown, setCountdown] = useState(0);
@@ -345,6 +347,13 @@ export const PhotoboothSession = ({
   }, [allSlots]);
 
   /* ============================================================
+     TRACK EVENT OPENED TIME — reset saat event berubah
+     ============================================================ */
+  useEffect(() => {
+    eventOpenedAtRef.current = Date.now();
+  }, [event?.id, event?.slug]);
+
+  /* ============================================================
      STATUS SYNC — tulis status ke Firebase setiap phase berubah
      ============================================================ */
   useEffect(() => {
@@ -359,28 +368,27 @@ export const PhotoboothSession = ({
         const token = getTokenStatus();
         const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
         const todayStats = getTodayStats();
-        const storage = await getStorageEstimate();
+        const driveQuota = token.hasToken ? await getDriveQuota() : { usage: 0, limit: 0 };
         if (cancelled) return;
 
         void writeStatus({
           currentEventSlug: event?.slug || '',
           currentEventName: event?.eventName || 'Untitled',
-          currentPhase: phase,
+          currentPhase: screensaverActive ? 'screensaver' : phase,
           sessionActive: phase !== 'frame-select',
           photoCount: captures.length,
           totalCaptures: totalCapturesNeeded,
-          sessionStartedAt: sessionStartedAtRef.current ?? 0,
+          eventOpenedAt: eventOpenedAtRef.current,
           driveConnected: token.hasToken,
           driveAccount: token.account || '',
           driveTokenExpiresAt: token.expiresAt ?? 0,
+          driveUsage: driveQuota.usage,
+          driveLimit: driveQuota.limit,
           uploadedCount: stats.uploaded,
           pendingCount: stats.pending,
           failedCount: stats.failed,
           todaySessionCount: todayStats.sessionCount,
           todayPhotoCount: todayStats.photoCount,
-          storageFree: storage.free,
-          storageUsed: storage.used,
-          storageQuota: storage.quota,
         });
       } finally {
         isPushingRef.current = false;
@@ -394,7 +402,7 @@ export const PhotoboothSession = ({
       cancelled = true;
       clearInterval(id);
     };
-  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
+  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName, screensaverActive]);
 
   /* Mark offline saat tab ditutup */
   useEffect(() => {
@@ -410,8 +418,7 @@ export const PhotoboothSession = ({
   useEffect(() => {
     const checkScreensaver = () => {
       const isSaver = document.querySelector('.screensaver-overlay') !== null
-        || document.body.classList.contains('screensaver-active')
-        || document.body.style.overflow === 'hidden' && !!document.querySelector('[class*="screensaver"]');
+        || document.body.classList.contains('screensaver-active');
       setScreensaverActive(!!isSaver);
     };
 
@@ -453,6 +460,18 @@ export const PhotoboothSession = ({
             void (async () => {
               try {
                 await connectGoogleDrive(VITE_CLIENT_ID);
+              } catch {
+                /* ignore */
+              }
+            })();
+            break;
+          }
+          case 'force-fullscreen': {
+            void (async () => {
+              try {
+                if (!document.fullscreenElement) {
+                  await document.documentElement.requestFullscreen?.();
+                }
               } catch {
                 /* ignore */
               }

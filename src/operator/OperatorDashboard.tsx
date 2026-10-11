@@ -23,7 +23,7 @@ import {
   Monitor,
   Globe,
   Key,
-  Calendar,
+  Maximize2,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -89,7 +89,7 @@ export const OperatorDashboard = ({
   onClose: () => void;
   onBackToPhotobooth?: () => void;
 }) => {
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [, setTick] = useState(0);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const [tablets, setTablets] = useState<TabletStatus[]>([]);
@@ -98,9 +98,14 @@ export const OperatorDashboard = ({
   useEffect(() => {
     const unsubscribe = subscribeAllTablets((newTablets) => {
       setTablets(newTablets);
-      setLastUpdate(new Date());
     });
     return unsubscribe;
+  }, []);
+
+  /* Force re-render tiap 1 detik biar durasi update */
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
   }, []);
 
   const filteredTablets = eventSlug
@@ -137,11 +142,6 @@ export const OperatorDashboard = ({
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setLastUpdate(new Date()), REFRESH_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
     if (!actionMessage) return;
     const t = setTimeout(() => setActionMessage(null), 4000);
     return () => clearTimeout(t);
@@ -154,9 +154,9 @@ export const OperatorDashboard = ({
     }
     const ok = await sendCommand(selectedDevice.deviceId, type);
     if (ok) {
-      setActionMessage(`✅ Perintah "${label}" dikirim ke ${selectedDevice.deviceName}.`);
+      setActionMessage(`✅ Perintah "${label}" dikirim ke ${selectedDevice.browser}.`);
     } else {
-      setActionMessage(`❌ Gagal kirim perintah ke ${selectedDevice.deviceName}.`);
+      setActionMessage(`❌ Gagal kirim perintah.`);
     }
   }, [selectedDevice]);
 
@@ -207,7 +207,7 @@ export const OperatorDashboard = ({
         </div>
 
         <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 12, margin: '0 0 16px' }}>
-          Last update: {lastUpdate.toLocaleTimeString()}
+          Live update tiap 1 detik
         </p>
 
         {actionMessage ? (
@@ -234,8 +234,9 @@ export const OperatorDashboard = ({
                 const isOnline = t.online && !isStale;
                 const isSelected = selectedDeviceId === t.deviceId;
 
-                const sessionDuration = t.sessionStartedAt > 0
-                  ? Date.now() - t.sessionStartedAt
+                /* Durasi = waktu sekarang - eventOpenedAt */
+                const openDuration = t.eventOpenedAt > 0
+                  ? Date.now() - t.eventOpenedAt
                   : 0;
 
                 return (
@@ -284,10 +285,10 @@ export const OperatorDashboard = ({
                       <span>{t.photoCount} / {t.totalCaptures}</span>
                     </div>
 
-                    {sessionDuration > 0 ? (
+                    {openDuration > 0 ? (
                       <div className="info-row">
-                        <span>Durasi sesi:</span>
-                        <span>{formatDuration(sessionDuration)}</span>
+                        <span>Buka event:</span>
+                        <span>{formatDuration(openDuration)}</span>
                       </div>
                     ) : null}
 
@@ -339,16 +340,42 @@ export const OperatorDashboard = ({
               </div>
             </div>
 
-            {/* Storage Device */}
+            {/* Storage DRIVE Device */}
             <div style={{ marginBottom: 16 }}>
               <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
-                STORAGE DEVICE (BROWSER)
+                STORAGE GOOGLE DRIVE (DEVICE INI)
               </h4>
-              <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                <InfoCard icon={<HardDrive size={16} />} label="FREE SPACE" value={formatBytes(selectedDevice.storageFree ?? 0)} color="#4ade80" />
-                <InfoCard icon={<HardDrive size={16} />} label="USED" value={formatBytes(selectedDevice.storageUsed ?? 0)} color="#facc15" />
-                <InfoCard icon={<HardDrive size={16} />} label="TOTAL QUOTA" value={formatBytes(selectedDevice.storageQuota ?? 0)} />
-              </div>
+              {selectedDevice.driveConnected && selectedDevice.driveLimit > 0 ? (
+                <>
+                  <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 10 }}>
+                    <InfoCard icon={<HardDrive size={16} />} label="FREE" value={formatBytes(Math.max(0, selectedDevice.driveLimit - selectedDevice.driveUsage))} color="#4ade80" />
+                    <InfoCard icon={<HardDrive size={16} />} label="USED" value={formatBytes(selectedDevice.driveUsage)} color="#facc15" />
+                    <InfoCard icon={<HardDrive size={16} />} label="TOTAL LIMIT" value={formatBytes(selectedDevice.driveLimit)} />
+                  </div>
+                  {/* Progress bar */}
+                  <div style={{ height: 8, background: 'rgba(255,255,255,.1)', borderRadius: 4, overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(100, (selectedDevice.driveUsage / selectedDevice.driveLimit) * 100)}%`,
+                        background: (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.9
+                          ? '#ef4444'
+                          : (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.75
+                          ? '#facc15'
+                          : '#4ade80',
+                        transition: 'width .3s',
+                      }}
+                    />
+                  </div>
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
+                    {((selectedDevice.driveUsage / selectedDevice.driveLimit) * 100).toFixed(1)}% used
+                  </p>
+                </>
+              ) : (
+                <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
+                  Drive tidak terhubung — quota tidak tersedia.
+                </p>
+              )}
             </div>
 
             {/* Drive & Upload */}
@@ -402,12 +429,33 @@ export const OperatorDashboard = ({
               </div>
             </div>
 
+            {/* Durasi Event */}
+            {selectedDevice.eventOpenedAt > 0 ? (
+              <div style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
+                  DURASI EVENT TERBUKA
+                </h4>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#ffd94e' }}>
+                  {formatDuration(Date.now() - selectedDevice.eventOpenedAt)}
+                </div>
+                <p style={{ margin: '6px 0 0', fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
+                  Dibuka: {new Date(selectedDevice.eventOpenedAt).toLocaleTimeString()}
+                </p>
+              </div>
+            ) : null}
+
             {/* Quick Actions */}
             <div style={{ marginTop: 20 }}>
               <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: '#ffd94e' }}>
                 ⚡ QUICK ACTIONS → {selectedDevice.browser} ({selectedDevice.os})
               </h4>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <ActionButton
+                  icon={<Maximize2 size={16} />}
+                  label="FORCE FULLSCREEN"
+                  onClick={() => handleCommand('force-fullscreen', 'Force Fullscreen')}
+                  color="#9333ea"
+                />
                 <ActionButton
                   icon={<Plug size={16} />}
                   label="RECONNECT DRIVE"

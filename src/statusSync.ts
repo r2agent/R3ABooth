@@ -28,20 +28,20 @@ export type TabletStatus = {
   sessionActive: boolean;
   photoCount: number;
   totalCaptures: number;
-  sessionStartedAt: number;
+  eventOpenedAt: number;        // ← waktu buka event (bukan START SESSION)
   lastActivity: number;
   online: boolean;
   driveConnected: boolean;
   driveAccount: string;
-  driveTokenExpiresAt: number;   // ← timestamp kapan token expired
+  driveTokenExpiresAt: number;
+  /* Drive quota (bukan browser storage) */
+  driveUsage: number;
+  driveLimit: number;
   uploadedCount: number;
   pendingCount: number;
   failedCount: number;
   todaySessionCount: number;
   todayPhotoCount: number;
-  storageFree: number;
-  storageUsed: number;
-  storageQuota: number;
 };
 
 /* ---------- COMMAND TYPE ---------- */
@@ -52,7 +52,8 @@ export type CommandType =
   | 'reset-uptime'
   | 'clear-stats'
   | 'download-logs'
-  | 'reconnect-drive';
+  | 'reconnect-drive'
+  | 'force-fullscreen';
 
 export type DeviceCommand = {
   type: CommandType;
@@ -71,7 +72,7 @@ export function getDeviceId(): string {
   return id;
 }
 
-/* ---------- AUTO DEVICE NAME (dari browser + tipe + OS) ---------- */
+/* ---------- AUTO DEVICE NAME ---------- */
 export function getAutoDeviceName(): string {
   const info = getDeviceInfo();
   const typeLabel =
@@ -122,20 +123,19 @@ export async function writeStatus(partial: Partial<TabletStatus>): Promise<void>
       sessionActive: partial.sessionActive ?? false,
       photoCount: partial.photoCount ?? 0,
       totalCaptures: partial.totalCaptures ?? 0,
-      sessionStartedAt: partial.sessionStartedAt ?? 0,
+      eventOpenedAt: partial.eventOpenedAt ?? 0,
       lastActivity: Date.now(),
       online: true,
       driveConnected: partial.driveConnected ?? false,
       driveAccount: partial.driveAccount ?? '',
       driveTokenExpiresAt: partial.driveTokenExpiresAt ?? 0,
+      driveUsage: partial.driveUsage ?? 0,
+      driveLimit: partial.driveLimit ?? 0,
       uploadedCount: partial.uploadedCount ?? 0,
       pendingCount: partial.pendingCount ?? 0,
       failedCount: partial.failedCount ?? 0,
       todaySessionCount: partial.todaySessionCount ?? 0,
       todayPhotoCount: partial.todayPhotoCount ?? 0,
-      storageFree: partial.storageFree ?? 0,
-      storageUsed: partial.storageUsed ?? 0,
-      storageQuota: partial.storageQuota ?? 0,
     };
 
     await set(ref(db, statusPath(deviceId)), status);
@@ -163,25 +163,24 @@ export function markOfflineOnDisconnect(): void {
       sessionActive: false,
       photoCount: 0,
       totalCaptures: 0,
-      sessionStartedAt: 0,
+      eventOpenedAt: 0,
       lastActivity: Date.now(),
       online: false,
       driveConnected: false,
       driveAccount: '',
       driveTokenExpiresAt: 0,
+      driveUsage: 0,
+      driveLimit: 0,
       uploadedCount: 0,
       pendingCount: 0,
       failedCount: 0,
       todaySessionCount: 0,
       todayPhotoCount: 0,
-      storageFree: 0,
-      storageUsed: 0,
-      storageQuota: 0,
     });
   } catch { /* silent fail */ }
 }
 
-/* ---------- SUBSCRIBE ALL DEVICES ---------- */
+/* ---------- SUBSCRIBE ALL ---------- */
 export function subscribeAllTablets(
   cb: (tablets: TabletStatus[]) => void,
 ): Unsubscribe {
@@ -263,21 +262,39 @@ export async function getDeviceStatus(deviceId: string): Promise<TabletStatus | 
   }
 }
 
-/* ---------- STORAGE ESTIMATE ---------- */
-export async function getStorageEstimate(): Promise<{ free: number; used: number; quota: number }> {
+/* ---------- DRIVE QUOTA (dari Google Drive API) ---------- */
+export async function getDriveQuota(): Promise<{ usage: number; limit: number }> {
   try {
-    type StorageEstimate = { quota?: number; usage?: number };
-    const nav = navigator as Navigator & { storage?: { estimate?: () => Promise<StorageEstimate> } };
-    if (!nav.storage || !nav.storage.estimate) {
-      return { free: 0, used: 0, quota: 0 };
-    }
-    const est = await nav.storage.estimate();
-    const quota = est.quota ?? 0;
-    const used = est.usage ?? 0;
-    const free = quota - used;
-    return { free, used, quota };
+    const token = await getValidTokenCached();
+    if (!token) return { usage: 0, limit: 0 };
+
+    const res = await fetch(
+      'https://www.googleapis.com/drive/v3/about?fields=storageQuota',
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) return { usage: 0, limit: 0 };
+
+    const data = await res.json() as {
+      storageQuota?: { usage?: string; limit?: string };
+    };
+    const usage = Number(data.storageQuota?.usage ?? 0);
+    const limit = Number(data.storageQuota?.limit ?? 0);
+    return { usage, limit };
   } catch {
-    return { free: 0, used: 0, quota: 0 };
+    return { usage: 0, limit: 0 };
+  }
+}
+
+/* Helper — ambil token dari gdriveService (lazy import biar tidak circular) */
+async function getValidTokenCached(): Promise<string | null> {
+  try {
+    const { getValidToken } = await import('./gdriveService');
+    const clientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
+    if (!clientId) return null;
+    const token = await getValidToken(clientId);
+    return token || null;
+  } catch {
+    return null;
   }
 }
 
