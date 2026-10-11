@@ -434,15 +434,13 @@ button { font: inherit; cursor: pointer; }
 }
 
 /* ============================================================
-   ⚠️ PATCH FINAL — FILTER PREVIEW (ANTI STRETCH + IKUT SLOT)
+   ⚠️ PATCH FINAL — FILTER PREVIEW (ANTI STRETCH)
    ============================================================ */
 
-/* Container slot — posisi absolute, crop foto di dalamnya */
 .photobooth-filter-section .filter-preview-slot {
   position: absolute !important;
   overflow: hidden !important;
   z-index: 1 !important;
-  cursor: pointer;
 }
 
 .photobooth-filter-section .filter-preview-slot.is-selected {
@@ -451,13 +449,10 @@ button { font: inherit; cursor: pointer; }
   z-index: 5 !important;
 }
 
-/* Foto di dalam slot — penuhi slot, crop, jangan stretch */
 .photobooth-filter-section .filter-preview-slot img {
   position: absolute !important;
   top: 0 !important;
   left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
@@ -467,11 +462,8 @@ button { font: inherit; cursor: pointer; }
   max-height: none !important;
   min-width: 0 !important;
   min-height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
 }
 
-/* Frame overlay — DI ATAS foto */
 .photobooth-filter-section .filter-preview-frame-img {
   position: absolute !important;
   inset: 0 !important;

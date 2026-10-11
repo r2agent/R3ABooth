@@ -864,20 +864,30 @@ export const PhotoboothSession = ({
                   <div
                     key={slot.id}
                     className={`filter-preview-slot ${isSelected ? 'is-selected' : ''}`}
-                    style={{ 
-                      left: `${slot.x}%`, 
-                      top: `${slot.y}%`, 
-                      width: `${slot.w}%`, 
+                    style={{
+                      left: `${slot.x}%`,
+                      top: `${slot.y}%`,
+                      width: `${slot.w}%`,
                       height: `${slot.h}%`,
                     }}
                     onClick={() => setSelectedCaptureId(slot.captureId)}
                   >
-                    <img 
-                      src={cap} 
-                      alt={slot.captureId} 
-                      style={{ 
+                    <img
+                      src={cap}
+                      alt={slot.captureId}
+                      style={{
                         filter: getFilterCss(filterId),
-                      }} 
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        objectPosition: 'center center',
+                        display: 'block',
+                        maxWidth: 'none',
+                        maxHeight: 'none',
+                      }}
                     />
                     {isSelected ? (
                       <div style={{
