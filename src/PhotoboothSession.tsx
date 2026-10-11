@@ -275,6 +275,8 @@ export const PhotoboothSession = ({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
+  /* Cache gambar — supaya tidak load ulang setiap render */
+  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
   const [countdown, setCountdown] = useState(0);
@@ -643,9 +645,27 @@ export const PhotoboothSession = ({
   );
 
   /* ============================================================
-     PREVIEW CANVAS — Hitung ukuran eksplisit & render foto
-     pakai logika IDENTIK dengan compositeFrame().
-     TIDAK bergantung pada aspect-ratio CSS.
+     PRELOAD GAMBAR KE CACHE — biar render selanjutnya synchronous
+     ============================================================ */
+  const ensureImagesCached = useCallback(async (sources: string[]): Promise<void> => {
+    const cache = imageCacheRef.current;
+    const missing = sources.filter((src) => src && !cache.has(src));
+    if (missing.length === 0) return;
+    await Promise.all(
+      missing.map((src) =>
+        new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => { cache.set(src, img); resolve(); };
+          img.onerror = () => resolve();
+          img.src = src;
+        }),
+      ),
+    );
+  }, []);
+
+  /* ============================================================
+     PREVIEW CANVAS — render SYNCHRONOUS dari cache,
+     tidak ada flicker saat ganti filter.
      ============================================================ */
   useEffect(() => {
     if (phase !== 'filter') return;
@@ -656,16 +676,15 @@ export const PhotoboothSession = ({
     if (!activeFrame) return;
 
     let cancelled = false;
+    let rafId: number;
 
-    const render = async () => {
+    const render = () => {
       if (cancelled) return;
 
-      // Ukur area (kurangi padding atas 60px)
       const areaRect = area.getBoundingClientRect();
       const availW = Math.max(50, areaRect.width);
       const availH = Math.max(50, areaRect.height - 60);
 
-      // Hitung ukuran frame berdasarkan aspect ratio
       let frameW = availW;
       let frameH = frameW / frameAspect;
       if (frameH > availH) {
@@ -675,15 +694,17 @@ export const PhotoboothSession = ({
       frameW = Math.floor(frameW);
       frameH = Math.floor(frameH);
 
-      // Set ukuran frame secara EKSPLISIT (pakai px)
       frame.style.width = `${frameW}px`;
       frame.style.height = `${frameH}px`;
-      frame.style.aspectRatio = 'auto'; // matikan aspect-ratio CSS
+      frame.style.aspectRatio = 'auto';
 
-      // Set ukuran canvas
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.max(1, Math.floor(frameW * dpr));
-      canvas.height = Math.max(1, Math.floor(frameH * dpr));
+      const canvasW = Math.max(1, Math.floor(frameW * dpr));
+      const canvasH = Math.max(1, Math.floor(frameH * dpr));
+      if (canvas.width !== canvasW || canvas.height !== canvasH) {
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+      }
       canvas.style.width = `${frameW}px`;
       canvas.style.height = `${frameH}px`;
 
@@ -693,64 +714,72 @@ export const PhotoboothSession = ({
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, frameW, frameH);
 
-      // Background
       ctx.fillStyle = '#2a2522';
       ctx.fillRect(0, 0, frameW, frameH);
 
-      // Gambar tiap slot — LOGIKA IDENTIK dengan compositeFrame()
+      const cache = imageCacheRef.current;
+
       for (const slot of allSlots) {
         const cap = captureMap.get(slot.captureId);
         if (!cap) continue;
-        try {
-          const photo = await loadImage(cap);
-          if (cancelled) return;
-          const sx = (slot.x / 100) * frameW;
-          const sy = (slot.y / 100) * frameH;
-          const sw = (slot.w / 100) * frameW;
-          const sh = (slot.h / 100) * frameH;
-          const filterId = captureFilters.get(slot.captureId) || 'natural';
-          const glow = isGlowFilter(filterId);
-          const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+        const photo = cache.get(cap);
+        if (!photo) continue;
 
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(sx, sy, sw, sh);
-          ctx.clip();
-          ctx.filter = baseCss;
-          drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
-          ctx.filter = 'none';
-          if (glow) {
-            applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
-          }
-          ctx.restore();
-        } catch { /* skip failed slot */ }
+        const sx = (slot.x / 100) * frameW;
+        const sy = (slot.y / 100) * frameH;
+        const sw = (slot.w / 100) * frameW;
+        const sh = (slot.h / 100) * frameH;
+        const filterId = captureFilters.get(slot.captureId) || 'natural';
+        const glow = isGlowFilter(filterId);
+        const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(sx, sy, sw, sh);
+        ctx.clip();
+        ctx.filter = baseCss;
+        drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
+        ctx.filter = 'none';
+        if (glow) {
+          applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
+        }
+        ctx.restore();
       }
 
-      // Frame overlay di atas
       if (activeFrame.image) {
-        try {
-          const frameImg = await loadImage(activeFrame.image);
-          if (cancelled) return;
+        const frameImg = cache.get(activeFrame.image);
+        if (frameImg) {
           ctx.drawImage(frameImg, 0, 0, frameW, frameH);
-        } catch { /* ignore */ }
+        }
       }
     };
 
-    // Delay sebentar supaya layout settle, lalu render
-    const t1 = setTimeout(render, 0);
-    const t2 = setTimeout(render, 100);
-    const t3 = setTimeout(render, 300);
-    window.addEventListener('resize', render);
-    window.addEventListener('orientationchange', render);
+    const sources = [
+      activeFrame.image,
+      ...allSlots.map((s) => captureMap.get(s.captureId) || ''),
+    ].filter(Boolean);
+
+    const run = async () => {
+      await ensureImagesCached(sources);
+      if (cancelled) return;
+      rafId = requestAnimationFrame(render);
+    };
+
+    void run();
+
+    const onResize = () => {
+      if (cancelled) return;
+      rafId = requestAnimationFrame(render);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
     return () => {
       cancelled = true;
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      window.removeEventListener('resize', render);
-      window.removeEventListener('orientationchange', render);
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
     };
-  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect]);
+  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached]);
 
   const LoadingOverlay = saving ? (
     <div
@@ -964,10 +993,6 @@ export const PhotoboothSession = ({
                 margin: '0 auto',
               }}
             >
-              {/* ============================================================
-                  CANVAS — gambar foto + frame dengan logika IDENTIK composite
-                  Ukuran di-set EKSPLISIT pakai JavaScript, tidak pakai aspect-ratio CSS
-                  ============================================================ */}
               <canvas
                 ref={previewCanvasRef}
                 style={{
@@ -980,7 +1005,6 @@ export const PhotoboothSession = ({
                 }}
               />
 
-              {/* Slot overlays — hanya untuk klik + border kuning */}
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
                 if (!cap) return null;
