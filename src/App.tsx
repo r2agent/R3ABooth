@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
 import { EventLoader } from './EventLoader';
-import { createEmptyEvent, deleteEvent, getAllEvents, type R3aEvent } from './eventStore';
+import { createEmptyEvent, deleteEvent, getAllEvents, saveEvent as saveEventLocal, type R3aEvent } from './eventStore';
+import { syncCloudToLocal, type SyncResult, type CloudEvent } from './cloudEventSync';
 import { enumerateCameras, type CameraDevice } from './cameraStore';
 import { CameraTestModal, CameraStatusBadge } from './cameraUi';
 import { useCamera } from './useCamera';
@@ -11,7 +12,6 @@ import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsSt
 import { OperatorDashboard } from './operator/OperatorDashboard';
 import { ReminderPopup } from './ReminderPopup';
 import { ScreensaverSlideshow } from './ScreensaverSlideshow';
-import { type CloudEvent } from './cloudEventSync';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -58,9 +58,6 @@ function parseFolderId(input: string): string {
 
 /* ============================================================
    HELPER: extract slug dari URL path
-   /                     → '' (home)
-   /perpisahan-dan-pelepasan → 'perpisahan-dan-pelepasan'
-   /operator             → 'operator'
    ============================================================ */
 function getSlugFromUrl(): string {
   if (typeof window === 'undefined') return '';
@@ -115,12 +112,106 @@ const WithReminder = ({
   </>
 );
 
-const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R3aEvent[]; onHome: () => void; onOpen: (event: R3aEvent) => void; onNew: () => void; onEditEvent: (event: R3aEvent) => void }) => {
+/* ---------- SYNC BUTTON COMPONENT ---------- */
+const SyncButton = ({
+  onSync,
+  syncing,
+  message,
+}: {
+  onSync: () => void;
+  syncing: boolean;
+  message: string | null;
+}) => (
+  <div
+    style={{
+      position: 'absolute',
+      top: 100,
+      left: '6%',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      zIndex: 5,
+      flexWrap: 'wrap',
+    }}
+  >
+    <button
+      onClick={onSync}
+      disabled={syncing}
+      type="button"
+      style={{
+        padding: '10px 18px',
+        background: syncing ? 'rgba(255,255,255,.2)' : '#4ade80',
+        color: syncing ? '#fff' : '#000',
+        border: 'none',
+        fontWeight: 700,
+        fontSize: 12,
+        letterSpacing: '.06em',
+        cursor: syncing ? 'wait' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        boxShadow: '0 4px 0 rgba(0,0,0,.15)',
+        transition: '.18s',
+      }}
+    >
+      <RefreshCw
+        size={14}
+        style={syncing ? { animation: 'spin 1s linear infinite' } : undefined}
+      />
+      {syncing ? 'SYNCING...' : 'SYNC FROM CLOUD'}
+    </button>
+
+    {message ? (
+      <span
+        style={{
+          color: '#fff',
+          fontSize: 12,
+          fontWeight: 600,
+          padding: '8px 14px',
+          background: 'rgba(0,0,0,.5)',
+          border: '1px solid rgba(255,255,255,.25)',
+          maxWidth: '100%',
+        }}
+      >
+        {message}
+      </span>
+    ) : null}
+
+    <style>{`
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    `}</style>
+  </div>
+);
+
+const ProjectList = ({
+  events,
+  onHome,
+  onOpen,
+  onNew,
+  onEditEvent,
+  onSyncFromCloud,
+  syncing,
+  syncMessage,
+}: {
+  events: R3aEvent[];
+  onHome: () => void;
+  onOpen: (event: R3aEvent) => void;
+  onNew: () => void;
+  onEditEvent: (event: R3aEvent) => void;
+  onSyncFromCloud: () => void;
+  syncing: boolean;
+  syncMessage: string | null;
+}) => {
   const [activeIndex, setActiveIndex] = useState(0);
 
-  useEffect(() => { if (activeIndex >= events.length) setActiveIndex(0); }, [events.length, activeIndex]);
+  useEffect(() => {
+    if (activeIndex >= events.length) setActiveIndex(0);
+  }, [events.length, activeIndex]);
 
-  const moveProject = (direction: number) => setActiveIndex((activeIndex + direction + events.length) % Math.max(events.length, 1));
+  const moveProject = (direction: number) =>
+    setActiveIndex((activeIndex + direction + events.length) % Math.max(events.length, 1));
   const event = events[activeIndex];
 
   if (events.length === 0) {
@@ -129,6 +220,7 @@ const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R
         <div className="project-grain" aria-hidden="true" />
         <div className="project-rays" aria-hidden="true"><i /><i /><i /></div>
         <header className="project-heading"><p>R3A BOOTH</p><h1>PROJECT</h1><span /></header>
+        <SyncButton onSync={onSyncFromCloud} syncing={syncing} message={syncMessage} />
         <section className="project-card-wrap">
           <div className="project-card" style={{ '--project-accent': '#f56a2d' } as CSSProperties}>
             <div className="project-preview">
@@ -143,7 +235,10 @@ const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R
             </div>
           </div>
         </section>
-        <div className="project-actions"><button className="project-home-button" onClick={onHome} type="button">HOME</button><button className="new-project-button" onClick={onNew} type="button">NEW EVENT <span>+</span></button></div>
+        <div className="project-actions">
+          <button className="project-home-button" onClick={onHome} type="button">HOME</button>
+          <button className="new-project-button" onClick={onNew} type="button">NEW EVENT <span>+</span></button>
+        </div>
       </main>
     );
   }
@@ -153,12 +248,17 @@ const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R
       <div className="project-grain" aria-hidden="true" />
       <div className="project-rays" aria-hidden="true"><i /><i /><i /></div>
       <header className="project-heading"><p>R3A BOOTH</p><h1>PROJECT</h1><span /></header>
+      <SyncButton onSync={onSyncFromCloud} syncing={syncing} message={syncMessage} />
       <button className="project-arrow project-arrow-left" aria-label="Previous project" onClick={() => moveProject(-1)} type="button"><ChevronLeft size={62} strokeWidth={1.5} /></button>
       <section className="project-card-wrap">
         <div className="project-card" style={{ '--project-accent': statusToAccent(event.eventStatus) } as CSSProperties}>
           <div className="project-preview">
             <div className="preview-topbar"><span>R3A</span><span>BOOTH</span></div>
-            <div className="preview-copy"><small>EVENT PHOTO EXPERIENCE</small><strong>{event.eventName || 'Untitled Event'}</strong><em>{event.date || 'No date set'}</em></div>
+            <div className="preview-copy">
+              <small>EVENT PHOTO EXPERIENCE</small>
+              <strong>{event.eventName || 'Untitled Event'}</strong>
+              <em>{event.date || 'No date set'}{event.slug ? ` • /${event.slug}` : ''}</em>
+            </div>
             <div className="preview-spark preview-spark-one" /><div className="preview-spark preview-spark-two" />
             <div className="preview-lines"><i /><i /><i /></div>
           </div>
@@ -178,8 +278,15 @@ const ProjectList = ({ events, onHome, onOpen, onNew, onEditEvent }: { events: R
         </div>
       </section>
       <button className="project-arrow project-arrow-right" aria-label="Next project" onClick={() => moveProject(1)} type="button"><ChevronRight size={62} strokeWidth={1.5} /></button>
-      <div className="project-actions"><button className="project-home-button" onClick={onHome} type="button">HOME</button><button className="new-project-button" onClick={onNew} type="button">NEW EVENT <span>+</span></button></div>
-      <div className="project-dots" aria-label="Project position">{events.map((item, index) => <button key={item.id} className={index === activeIndex ? 'project-dot is-active' : 'project-dot'} aria-label={`Show ${item.eventName}`} onClick={() => setActiveIndex(index)} type="button" />)}</div>
+      <div className="project-actions">
+        <button className="project-home-button" onClick={onHome} type="button">HOME</button>
+        <button className="new-project-button" onClick={onNew} type="button">NEW EVENT <span>+</span></button>
+      </div>
+      <div className="project-dots" aria-label="Project position">
+        {events.map((item, index) => (
+          <button key={item.id} className={index === activeIndex ? 'project-dot is-active' : 'project-dot'} aria-label={`Show ${item.eventName}`} onClick={() => setActiveIndex(index)} type="button" />
+        ))}
+      </div>
     </main>
   );
 };
@@ -869,11 +976,17 @@ function App() {
   );
 
   /* ============================================================
-     URL SLUG STATE — handle /:slug untuk load event dari cloud
+     URL SLUG STATE
      ============================================================ */
   const [urlSlug, setUrlSlug] = useState<string>(() => getSlugFromUrl());
   const [cloudEvent, setCloudEvent] = useState<CloudEvent | null>(null);
   const [cloudLoading, setCloudLoading] = useState<boolean>(false);
+
+  /* ============================================================
+     SYNC FROM CLOUD STATE
+     ============================================================ */
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   // Ref untuk screen & phase (dibaca dari setInterval)
   const screenRef = useRef<Screen>(screen);
@@ -926,6 +1039,34 @@ function App() {
 
     setCloudLoading(true);
   }, [urlSlug, cloudEvent, cloudLoading]);
+
+  /* ---------- HANDLE SYNC FROM CLOUD ---------- */
+  const handleSyncFromCloud = async () => {
+    setSyncing(true);
+    setSyncMessage(null);
+
+    try {
+      const result: SyncResult = await syncCloudToLocal(saveEventLocal, getAllEvents);
+
+      // Refresh list lokal
+      await refreshEvents();
+
+      // Format pesan hasil
+      if (result.errors.length > 0) {
+        setSyncMessage(`⚠️ ${result.added} baru, ${result.updated} update, ${result.errors.length} error`);
+      } else if (result.total === 0) {
+        setSyncMessage(`Tidak ada event di cloud`);
+      } else {
+        setSyncMessage(`✅ ${result.added} baru, ${result.updated} update, ${result.skipped} skip`);
+      }
+    } catch (err) {
+      setSyncMessage(`❌ Sync gagal: ${err instanceof Error ? err.message : 'unknown'}`);
+    } finally {
+      setSyncing(false);
+      // Auto clear message setelah 5 detik
+      setTimeout(() => setSyncMessage(null), 5000);
+    }
+  };
 
   // === Reminder timer — MURNI BY INTERVAL ===
   useEffect(() => {
@@ -1060,7 +1201,7 @@ function App() {
      ROUTING PRIORITY
      1. /#operator (hash) → OperatorDashboard
      2. /:slug (URL) → EventLoader → PhotoboothSession
-     3. Internal screens (home, project-list, event-file, etc)
+     3. Internal screens
      ============================================================ */
 
   // Priority 1: Operator via hash
@@ -1076,10 +1217,9 @@ function App() {
     );
   }
 
-  // Priority 2: Event via URL slug (Firebase)
+  // Priority 2: Event via URL slug
   if (urlSlug && !RESERVED_PATHS.has(urlSlug)) {
     if (cloudEvent) {
-      // Event loaded — langsung buka photobooth session
       return (
         <WithReminder {...reminderProps}>
           <PhotoboothSession
@@ -1087,7 +1227,6 @@ function App() {
             cameraSettings={settings.camera}
             allSettings={settings}
             onExit={() => {
-              // Balik ke home, reset URL
               window.history.pushState({}, '', '/');
               setUrlSlug('');
               setCloudEvent(null);
@@ -1099,7 +1238,6 @@ function App() {
         </WithReminder>
       );
     }
-    // Belum load — tampilkan EventLoader
     return (
       <WithReminder {...reminderProps}>
         <EventLoader
@@ -1109,7 +1247,6 @@ function App() {
             setCloudLoading(false);
           }}
           onNotFound={() => {
-            // Slug tidak ketemu → balik ke home
             window.history.pushState({}, '', '/');
             setUrlSlug('');
             setCloudLoading(false);
@@ -1122,7 +1259,16 @@ function App() {
   if (screen === 'project-list') {
     return (
       <WithReminder {...reminderProps}>
-        <ProjectList events={events} onHome={() => setScreen('home')} onOpen={(event) => { setActiveEvent(event); setScreen('photobooth-session'); }} onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }} onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }} />
+        <ProjectList
+          events={events}
+          onHome={() => setScreen('home')}
+          onOpen={(event) => { setActiveEvent(event); setScreen('photobooth-session'); }}
+          onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }}
+          onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }}
+          onSyncFromCloud={handleSyncFromCloud}
+          syncing={syncing}
+          syncMessage={syncMessage}
+        />
       </WithReminder>
     );
   }

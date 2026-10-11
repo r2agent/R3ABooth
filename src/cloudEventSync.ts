@@ -147,3 +147,101 @@ export async function isSlugAvailable(slug: string): Promise<boolean> {
     return false;
   }
 }
+
+/* ============================================================
+   SYNC CLOUD → LOCAL — ambil event dari Firebase, merge ke IndexedDB
+   ============================================================ */
+export type SyncResult = {
+  total: number;
+  added: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+};
+
+export async function syncCloudToLocal(
+  saveLocalFn: (event: R3aEvent) => Promise<void>,
+  getAllLocalFn: () => Promise<R3aEvent[]>,
+): Promise<SyncResult> {
+  const result: SyncResult = {
+    total: 0,
+    added: 0,
+    updated: 0,
+    skipped: 0,
+    errors: [],
+  };
+
+  if (!isFirebaseConfigured()) {
+    result.errors.push('Firebase belum dikonfigurasi');
+    return result;
+  }
+
+  try {
+    // 1. Fetch semua event dari Firebase
+    const cloudEvents = await listEventsFromCloud();
+    result.total = cloudEvents.length;
+
+    if (cloudEvents.length === 0) return result;
+
+    // 2. Ambil event lokal untuk compare
+    const localEvents = await getAllLocalFn();
+    const localById = new Map(localEvents.map((e) => [e.id, e]));
+    const localBySlug = new Map(
+      localEvents.filter((e) => e.slug).map((e) => [e.slug!, e]),
+    );
+
+    // 3. Merge satu per satu
+    for (const cloudEvent of cloudEvents) {
+      try {
+        // Convert CloudEvent → R3aEvent (drop field cloud-only)
+        const eventToSave: R3aEvent = {
+          id: cloudEvent.id,
+          slug: cloudEvent.slug,
+          eventName: cloudEvent.eventName,
+          clientName: cloudEvent.clientName,
+          date: cloudEvent.date,
+          location: cloudEvent.location,
+          frames: cloudEvent.frames,
+          outputSettings: cloudEvent.outputSettings,
+          printerSettings: cloudEvent.printerSettings,
+          eventStatus: cloudEvent.eventStatus,
+          createdAt: cloudEvent.createdAt,
+          updatedAt: cloudEvent.updatedAt,
+        };
+
+        // Cek by ID dulu, lalu by slug
+        const existingById = localById.get(eventToSave.id);
+        const existingBySlug = eventToSave.slug
+          ? localBySlug.get(eventToSave.slug)
+          : undefined;
+        const existing = existingById || existingBySlug;
+
+        if (!existing) {
+          // Event baru → tambahkan
+          await saveLocalFn(eventToSave);
+          result.added++;
+        } else if ((eventToSave.updatedAt || 0) > (existing.updatedAt || 0)) {
+          // Cloud lebih baru → update
+          await saveLocalFn(eventToSave);
+          result.updated++;
+        } else {
+          // Lokal lebih baru atau sama → skip
+          result.skipped++;
+        }
+      } catch (e) {
+        result.errors.push(
+          `Failed to sync ${cloudEvent.slug || cloudEvent.id}: ${
+            e instanceof Error ? e.message : 'unknown error'
+          }`,
+        );
+      }
+    }
+
+    return result;
+  } catch (e) {
+    result.errors.push(
+      e instanceof Error ? e.message : 'Sync failed',
+    );
+    return result;
+  }
+}
