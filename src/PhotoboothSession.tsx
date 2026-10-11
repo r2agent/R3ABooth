@@ -14,6 +14,10 @@ import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
 
+// === Client ID dari env Vercel ===
+const VITE_CLIENT_ID =
+  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
+
 type SessionPhase = 'frame-select' | 'ready' | 'live' | 'countdown' | 'filter' | 'compositing' | 'result' | 'qr' | 'drive-qr';
 
 type CaptureError = { message: string } | null;
@@ -295,8 +299,8 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   useEffect(() => {
     const handleOnline = () => {
       const gd = allSettings.googleDrive;
-      if (gd.connected && gd.clientId) {
-        void retryFailedUploads(gd.clientId);
+      if (gd.connected && VITE_CLIENT_ID) {
+        void retryFailedUploads(VITE_CLIENT_ID);
       }
     };
     window.addEventListener('online', handleOnline);
@@ -364,9 +368,9 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
     setGuestError(null);
 
     const gd = allSettings.googleDrive;
-    if (gd.connected && gd.clientId && gd.mainFolderId) {
+    if (gd.connected && VITE_CLIENT_ID && gd.mainFolderId) {
       setGuestAssigning(true);
-      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId, gd.clientId);
+      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId, VITE_CLIENT_ID);
       setGuestAssigning(false);
       if (result.success && result.guest) {
         setCurrentGuest(result.guest);
@@ -519,7 +523,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
       }
 
       const gd = allSettings.googleDrive;
-      if (gd.connected && gd.clientId && currentGuest) {
+      if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
           ...slotPhotos.map((sp) => ({
@@ -530,7 +534,7 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
             ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
             : []),
         ];
-        void autoUploadToGuestFolder(currentGuest, gd.clientId, uploadFiles);
+        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
       }
     } catch { /* ignore */ }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest]);
