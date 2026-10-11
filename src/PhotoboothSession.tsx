@@ -282,7 +282,6 @@ export const PhotoboothSession = ({
   const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saveProgress, setSaveProgress] = useState<string>('');
   const [flash, setFlash] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [resultId, setResultId] = useState<string>('');
@@ -367,7 +366,6 @@ export const PhotoboothSession = ({
     setCompositeUrl(null);
     setSaved(false);
     setSaving(false);
-    setSaveProgress('');
     setQrDataUrl(null);
     setResultId('');
     setPrinted(false);
@@ -492,7 +490,6 @@ export const PhotoboothSession = ({
     if (saving) return;
 
     setSaving(true);
-    setSaveProgress('Saving result...');
 
     try {
       const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -507,7 +504,6 @@ export const PhotoboothSession = ({
       await saveResult(result);
       setResultId(id);
 
-      setSaveProgress('Generating photos...');
       const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
       const slotPhotos: { index: number; dataUrl: string }[] = [];
       for (let i = 0; i < allSlots.length; i++) {
@@ -522,7 +518,6 @@ export const PhotoboothSession = ({
 
       let slideshowVideo: string | null = null;
       if (allSettings.storage.saveVideos) {
-        setSaveProgress('Generating video...');
         const rawSlotPhotos: { index: number; dataUrl: string }[] = [];
         for (let i = 0; i < allSlots.length; i++) {
           const cap = captureMap.get(allSlots[i].captureId);
@@ -546,7 +541,6 @@ export const PhotoboothSession = ({
       }
 
       if (allSettings.storage.autoDownloadResult) {
-        setSaveProgress('Downloading files...');
         for (const sp of slotPhotos) {
           const slotName = `slot-${String(sp.index).padStart(2, '0')}.jpg`;
           downloadDataUrl(sp.dataUrl, slotName);
@@ -557,9 +551,9 @@ export const PhotoboothSession = ({
         downloadDataUrl(compositeUrl, 'final-result.jpg');
       }
 
+      // Upload ke Drive di BACKGROUND (tidak ditunggu)
       const gd = allSettings.googleDrive;
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
-        setSaveProgress('Uploading to Google Drive...');
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
           ...slotPhotos.map((sp) => ({
@@ -570,13 +564,12 @@ export const PhotoboothSession = ({
             ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
             : []),
         ];
-        await autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
+        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
       }
 
-      setSaveProgress('');
       setSaved(true);
     } catch {
-      setSaveProgress('');
+      /* ignore */
     } finally {
       setSaving(false);
     }
@@ -649,6 +642,40 @@ export const PhotoboothSession = ({
 
   const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
 
+  // === FULLSCREEN LOADING OVERLAY ===
+  const LoadingOverlay = saving ? (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 999999,
+        background: '#0a0a0a',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 28,
+        color: '#fff',
+      }}
+    >
+      <div
+        className="compositing-spinner"
+        style={{ width: 72, height: 72, borderWidth: 5 }}
+      />
+      <span
+        style={{
+          fontSize: 32,
+          fontWeight: 700,
+          letterSpacing: '.25em',
+          textTransform: 'uppercase',
+          color: '#fff',
+        }}
+      >
+        PROSES FOTO
+      </span>
+    </div>
+  ) : null;
+
   if (!event || !event.frames) {
     return (
       <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
@@ -672,6 +699,7 @@ export const PhotoboothSession = ({
   if (phase === 'frame-select') {
     return (
       <main className="photobooth-screen photobooth-kiosk">
+        {LoadingOverlay}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project"><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
           <div className="hidden-exit-trigger" onClick={handleLogoClick} />
@@ -708,6 +736,7 @@ export const PhotoboothSession = ({
   if (phase === 'ready') {
     return (
       <main className="photobooth-screen photobooth-kiosk">
+        {LoadingOverlay}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project" onClick={handleLogoClick}><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
           <button className="photobooth-exit" onClick={handleBackToFrameSelect} type="button"><X size={24} /> BACK</button>
@@ -742,6 +771,7 @@ export const PhotoboothSession = ({
 
   return (
     <main className={`photobooth-screen ${phase === 'live' || phase === 'countdown' ? '' : 'photobooth-kiosk'}`}>
+      {LoadingOverlay}
       {flash ? <div className="capture-flash" /> : null}
 
       {phase === 'live' || phase === 'countdown' ? (
@@ -910,43 +940,13 @@ export const PhotoboothSession = ({
           <div className="result-header">
             <h2>YOUR PHOTO IS READY</h2>
           </div>
-          <div className="result-preview" style={{ position: 'relative' }}>
+          <div className="result-preview">
             <img src={compositeUrl} alt="Final result" />
-
-            {saving ? (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: 'rgba(0,0,0,0.78)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 16,
-                  zIndex: 10,
-                }}
-              >
-                <div className="compositing-spinner" />
-                <span style={{
-                  color: '#fff',
-                  fontSize: 16,
-                  fontWeight: 700,
-                  letterSpacing: '.1em',
-                  textTransform: 'uppercase',
-                }}>
-                  {saveProgress || 'PROCESSING...'}
-                </span>
-                <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 12 }}>
-                  Jangan tutup halaman
-                </span>
-              </div>
-            ) : null}
           </div>
           <div className="result-actions">
             <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} disabled={saving} type="button"><RotateCcw size={18} /> RETAKE</button>
             <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
-              {saving ? <>PROCESSING...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
+              {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
             </button>
             {allSettings.display.showPrintButton ? (
               <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
