@@ -1,18 +1,48 @@
-/* Re-export types dari eventTypes.ts */
-export type {
-  Slot,
-  Frame,
-  OutputSettings,
-  PrinterSettings,
-  EventStatus,
-  R3aEvent,
-} from './eventTypes';
+export type Slot = {
+  id: string;
+  captureId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 
-import type {
-  Slot,
-  Frame,
-  R3aEvent,
-} from './eventTypes';
+export type Frame = {
+  id: string;
+  name: string;
+  image: string;
+  slots: Slot[];
+};
+
+export type OutputSettings = {
+  destinationFolder: string;
+  fileNaming: string;
+  savePhotos: boolean;
+  saveVideos: boolean;
+};
+
+export type PrinterSettings = {
+  printer: string;
+  paperSize: string;
+  copies: number;
+};
+
+export type EventStatus = 'Ready' | 'Active' | 'Ended';
+
+export type R3aEvent = {
+  id: string;
+  slug?: string;
+  eventName: string;
+  clientName: string;
+  date: string;
+  location: string;
+  frames: Frame[];
+  outputSettings: OutputSettings;
+  printerSettings: PrinterSettings;
+  eventStatus: EventStatus;
+  createdAt: number;
+  updatedAt: number;
+};
 
 const DB_NAME = 'r3a-booth';
 const STORE_NAME = 'events';
@@ -209,48 +239,12 @@ export function duplicateSlot(slot: Slot): Slot {
 }
 
 /* ============================================================
-   CLOUD SYNC FUNCTIONS — proxy ke cloudEventSync.ts
+   ⚠️ CATATAN PENTING
+   
+   Cloud sync functions (publishEventToCloud, fetchEventFromCloud,
+   dll) SUDAH TIDAK ADA di sini — untuk menghindari circular dependency.
+   
+   Kalau butuh fungsi cloud, import langsung dari './cloudEventSync':
+   
+   import { publishEventToCloud } from './cloudEventSync';
    ============================================================ */
-import {
-  saveEventToCloud,
-  generateSlug,
-  type CloudEvent,
-} from './cloudEventSync';
-
-/* ---------- PUBLISH EVENT KE CLOUD ---------- */
-export async function publishEventToCloud(
-  event: R3aEvent,
-): Promise<{ success: boolean; slug?: string; error?: string }> {
-  // Pastikan ada slug
-  const slug = event.slug || generateSlug(event.eventName || 'untitled');
-  if (!slug) {
-    return { success: false, error: 'Nama event tidak valid' };
-  }
-
-  // Update event dengan slug
-  const eventWithSlug: R3aEvent = { ...event, slug, updatedAt: Date.now() };
-
-  // Simpan lokal
-  await saveEvent(eventWithSlug);
-
-  // Publish ke Firebase
-  return await saveEventToCloud(eventWithSlug);
-}
-
-/* ---------- FETCH EVENT DARI CLOUD ---------- */
-export async function fetchEventFromCloud(slug: string): Promise<CloudEvent | null> {
-  const { loadEventFromCloud } = await import('./cloudEventSync');
-  return await loadEventFromCloud(slug);
-}
-
-/* ---------- FETCH ALL EVENTS DARI CLOUD ---------- */
-export async function fetchAllEventsFromCloud(): Promise<CloudEvent[]> {
-  const { listEventsFromCloud } = await import('./cloudEventSync');
-  return await listEventsFromCloud();
-}
-
-/* ---------- DELETE EVENT DARI CLOUD ---------- */
-export async function removeEventFromCloud(slug: string): Promise<boolean> {
-  const { deleteEventFromCloud } = await import('./cloudEventSync');
-  return await deleteEventFromCloud(slug);
-}
