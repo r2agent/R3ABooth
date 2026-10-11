@@ -849,12 +849,20 @@ export const PhotoboothSession = ({
             <p>Tap a photo slot to select it, then choose a filter.</p>
           </div>
           <div className="filter-preview-area">
-            <div className="filter-preview-frame" style={{ ['--frame-aspect' as string]: String(frameAspect), aspectRatio: String(frameAspect) }}>
-              {activeFrame?.image ? (
-                <img src={activeFrame.image} alt={activeFrame.name} className="filter-preview-frame-img" />
-              ) : (
-                <div className="filter-preview-empty">No frame image</div>
-              )}
+            <div
+              className="filter-preview-frame"
+              style={{
+                ['--frame-aspect' as string]: String(frameAspect),
+                aspectRatio: String(frameAspect),
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              {/* ─────────────────────────────────────────────
+                  FOTO SLOT — pakai <div> + background-image
+                  background-size: cover = crop proporsional,
+                  TIDAK bisa stretch, didukung semua browser.
+                  ───────────────────────────────────────────── */}
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
                 if (!cap) return null;
@@ -865,50 +873,81 @@ export const PhotoboothSession = ({
                     key={slot.id}
                     className={`filter-preview-slot ${isSelected ? 'is-selected' : ''}`}
                     style={{
+                      position: 'absolute',
                       left: `${slot.x}%`,
                       top: `${slot.y}%`,
                       width: `${slot.w}%`,
                       height: `${slot.h}%`,
+                      overflow: 'hidden',
+                      zIndex: 1,
+                      cursor: 'pointer',
+                      border: isSelected ? '2px solid #ffd94e' : '2px solid transparent',
+                      boxShadow: isSelected ? '0 0 0 2px rgba(255,217,78,.4)' : 'none',
                     }}
                     onClick={() => setSelectedCaptureId(slot.captureId)}
                   >
-                    <img
-                      src={cap}
-                      alt={slot.captureId}
+                    {/* ⚠️ BUKAN <img> — pakai <div> + background-image */}
+                    <div
                       style={{
-                        filter: getFilterCss(filterId),
                         position: 'absolute',
                         top: 0,
                         left: 0,
                         width: '100%',
                         height: '100%',
-                        objectFit: 'cover',
-                        objectPosition: 'center center',
-                        display: 'block',
-                        maxWidth: 'none',
-                        maxHeight: 'none',
+                        backgroundImage: `url("${cap}")`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center center',
+                        backgroundRepeat: 'no-repeat',
+                        filter: getFilterCss(filterId),
                       }}
                     />
                     {isSelected ? (
-                      <div style={{
-                        position: 'absolute',
-                        bottom: 6,
-                        left: 6,
-                        padding: '3px 10px',
-                        background: '#ffd94e',
-                        color: '#1a1614',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        borderRadius: 4,
-                        letterSpacing: '.08em',
-                        zIndex: 10,
-                      }}>
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: 6,
+                          left: 6,
+                          padding: '3px 10px',
+                          background: '#ffd94e',
+                          color: '#1a1614',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          borderRadius: 4,
+                          letterSpacing: '.08em',
+                          zIndex: 10,
+                        }}
+                      >
                         SELECTED
                       </div>
                     ) : null}
                   </div>
                 );
               })}
+
+              {/* ─────────────────────────────────────────────
+                  FRAME OVERLAY — render TERAKHIR supaya di atas foto
+                  zIndex: 100 = di atas semua slot
+                  ───────────────────────────────────────────── */}
+              {activeFrame?.image ? (
+                <img
+                  src={activeFrame.image}
+                  alt={activeFrame.name}
+                  className="filter-preview-frame-img"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    objectPosition: 'center center',
+                    zIndex: 100,
+                    pointerEvents: 'none',
+                  }}
+                />
+              ) : (
+                <div className="filter-preview-empty">No frame image</div>
+              )}
             </div>
           </div>
           {selectedCaptureId ? (
