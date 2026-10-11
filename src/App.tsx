@@ -1,1372 +1,1263 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
-import { EventFile } from './EventFile';
-import { EventLoader } from './EventLoader';
-import { createEmptyEvent, deleteEvent, getAllEvents, saveEvent as saveEventLocal, type R3aEvent } from './eventStore';
-import { syncCloudToLocal, type SyncResult, type CloudEvent } from './cloudEventSync';
-import { enumerateCameras, type CameraDevice } from './cameraStore';
-import { CameraTestModal, CameraStatusBadge } from './cameraUi';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw } from 'lucide-react';
 import { useCamera } from './useCamera';
-import { PhotoboothSession } from './PhotoboothSession';
-import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
-import { OperatorDashboard } from './operator/OperatorDashboard';
-import { ReminderPopup } from './ReminderPopup';
-import { ScreensaverSlideshow } from './ScreensaverSlideshow';
-import {
-  connectGoogleDrive,
-  disconnectGoogleDrive,
-  testGoogleDriveConnection,
-  testGoogleDriveUpload,
-  pickDriveFolder,
-  getValidToken,
-  getTokenStatus,
-  getPrinters,
-  testPrinter,
-  runDiagnostics,
-} from './gdriveService';
+import { CameraPreview, CameraStatusBadge, errorMessages } from './cameraUi';
+import { getAspectRatioValue } from './cameraStore';
+import { FILTERS, getFilterCss, isGlowFilter, applyGlowToCanvas } from './filters';
+import { saveCapture, saveResult, type StoredCapture, type StoredResult } from './storage';
+import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
+import { printResult } from './printService';
+import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
+import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
+import { buildDriveFolderUrl } from './gdriveService';
+import { recordSession } from './sessionStats';
+import { writeStatus, markOfflineOnDisconnect, clearStatus } from './statusSync';
+import type { CameraSettings } from './cameraStore';
+import type { Frame, R3aEvent, Slot } from './eventStore';
+import type { AllSettings } from './settingsStore';
 
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
-type Screen = 'home' | 'project-list' | 'new-event' | 'event-file' | 'photobooth-session' | 'settings';
+type SessionPhase = 'frame-select' | 'ready' | 'live' | 'countdown' | 'filter' | 'compositing' | 'result' | 'qr' | 'drive-qr';
 
-/* ---------- RESERVED PATHS (bukan slug event) ---------- */
-const RESERVED_PATHS = new Set([
-  '',
-  'operator',
-  'settings',
-  'home',
-  'project',
-]);
+type CaptureError = { message: string } | null;
 
-function statusToAccent(status: string): string {
-  if (status === 'Active') return '#44a96f';
-  if (status === 'Ended') return '#837a73';
-  return '#f56a2d';
+type CaptureData = {
+  captureId: string;
+  dataUrl: string;
+};
+
+function getUniqueCaptureIds(slots: Slot[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const s of slots) {
+    if (!seen.has(s.captureId)) { seen.add(s.captureId); ids.push(s.captureId); }
+  }
+  return ids;
 }
 
-function parseFolderId(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return '';
-  const m1 = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  if (m1) return m1[1];
-  const m2 = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (m2) return m2[1];
-  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+function captureFromVideo(video: HTMLVideoElement, mirror: boolean): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 1920;
+  canvas.height = video.videoHeight || 1080;
+  const ctx = canvas.getContext('2d')!;
+  if (mirror) {
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+function pickVideoMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return '';
+  const candidates = [
+    'video/mp4;codecs=h264',
+    'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ];
+  for (const type of candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
   return '';
 }
 
-/* ============================================================
-   HELPER: extract slug dari URL path
-   ============================================================ */
-function getSlugFromUrl(): string {
-  if (typeof window === 'undefined') return '';
-  const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
-  return path;
+function guessVideoExtension(dataUrl: string): string {
+  const match = dataUrl.match(/^data:video\/([a-zA-Z0-9]+)/);
+  if (!match) return 'webm';
+  return match[1].includes('mp4') ? 'mp4' : 'webm';
 }
 
-const WithReminder = ({
-  visible,
-  minutes,
-  refreshing,
-  onRefresh,
-  onDismiss,
-  needsFullscreen,
-  onGoFullscreen,
-  screensaverVisible,
-  slideDurationSec,
-  onScreensaverDismiss,
-  children,
-}: {
-  visible: boolean;
-  minutes: number;
-  refreshing: boolean;
-  onRefresh: () => void;
-  onDismiss: () => void;
-  needsFullscreen: boolean;
-  onGoFullscreen: () => void;
-  screensaverVisible: boolean;
-  slideDurationSec: number;
-  onScreensaverDismiss: () => void;
-  children: React.ReactNode;
-}) => (
-  <>
-    {children}
-    {screensaverVisible ? (
-      <ScreensaverSlideshow
-        slideDurationSec={slideDurationSec}
-        onDismiss={onScreensaverDismiss}
-      />
-    ) : null}
-    {visible ? (
-      <ReminderPopup
-        minutesUntilExpiry={minutes}
-        hasRefreshToken={false}
-        refreshing={refreshing}
-        onRefresh={onRefresh}
-        onDismiss={onDismiss}
-        needsFullscreen={needsFullscreen}
-        onGoFullscreen={onGoFullscreen}
-      />
-    ) : null}
-  </>
-);
+function loadImageEl(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image for video'));
+    img.src = src;
+  });
+}
 
-/* ---------- SYNC BUTTON COMPONENT ---------- */
-const SyncButton = ({
-  onSync,
-  syncing,
-  message,
+async function generateSlideshowVideo(
+  photos: { dataUrl: string }[],
+  durationPerPhotoMs: number,
+): Promise<string | null> {
+  if (photos.length === 0) return null;
+  const mimeType = pickVideoMimeType();
+  type CaptureCanvas = HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream };
+  const canvas = document.createElement('canvas') as CaptureCanvas;
+  if (!mimeType || typeof MediaRecorder === 'undefined' || typeof canvas.captureStream !== 'function') {
+    return null;
+  }
+
+  let images: HTMLImageElement[];
+  try {
+    images = await Promise.all(photos.map((p) => loadImageEl(p.dataUrl)));
+  } catch {
+    return null;
+  }
+
+  const width = images[0].naturalWidth || 1280;
+  const height = images[0].naturalHeight || 720;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const stream = canvas.captureStream(10);
+
+  return new Promise<string | null>((resolve) => {
+    const chunks: Blob[] = [];
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+    } catch {
+      resolve(null);
+      return;
+    }
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    };
+
+    ctx.drawImage(images[0], 0, 0, width, height);
+    recorder.start();
+
+    let i = 1;
+    const drawNext = () => {
+      if (i < images.length) {
+        ctx.drawImage(images[i], 0, 0, width, height);
+        i++;
+        setTimeout(drawNext, durationPerPhotoMs);
+      } else {
+        setTimeout(() => recorder.stop(), durationPerPhotoMs);
+      }
+    };
+    setTimeout(drawNext, durationPerPhotoMs);
+  });
+}
+
+function drawPhotoCovered(ctx: CanvasRenderingContext2D, photo: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): void {
+  const scale = Math.max(sw / photo.naturalWidth, sh / photo.naturalHeight);
+  const dw = photo.naturalWidth * scale;
+  const dh = photo.naturalHeight * scale;
+  const dx = sx + (sw - dw) / 2;
+  const dy = sy + (sh - dh) / 2;
+  ctx.drawImage(photo, dx, dy, dw, dh);
+}
+
+async function compositeFrame(frame: Frame, captures: Map<string, string>, captureFilters: Map<string, string>): Promise<string> {
+  const frameImg = frame.image ? await loadImage(frame.image) : null;
+  const fw = frameImg?.naturalWidth || 1800;
+  const fh = frameImg?.naturalHeight || 1200;
+  const canvas = document.createElement('canvas');
+  canvas.width = fw;
+  canvas.height = fh;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#2a2522';
+  ctx.fillRect(0, 0, fw, fh);
+
+  for (const slot of frame.slots) {
+    const cap = captures.get(slot.captureId);
+    if (!cap) continue;
+    try {
+      const photo = await loadImage(cap);
+      const sx = (slot.x / 100) * fw;
+      const sy = (slot.y / 100) * fh;
+      const sw = (slot.w / 100) * fw;
+      const sh = (slot.h / 100) * fh;
+      const filterId = captureFilters.get(slot.captureId) || 'natural';
+      const glow = isGlowFilter(filterId);
+      const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(sx, sy, sw, sh);
+      ctx.clip();
+      ctx.filter = baseCss;
+      drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
+      ctx.filter = 'none';
+      if (glow) {
+        applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
+      }
+      ctx.restore();
+    } catch { /* skip failed slot */ }
+  }
+
+  if (frameImg) {
+    ctx.drawImage(frameImg, 0, 0, fw, fh);
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.95);
+}
+
+async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
+  void frame;
+  void slot;
+  const TARGET_ASPECT = 16 / 9;
+
+  const photo = await loadImage(captureDataUrl);
+  const photoAspect = photo.naturalWidth / photo.naturalHeight;
+
+  let cropWidth: number;
+  let cropHeight: number;
+  if (TARGET_ASPECT > photoAspect) {
+    cropWidth = photo.naturalWidth;
+    cropHeight = cropWidth / TARGET_ASPECT;
+  } else {
+    cropHeight = photo.naturalHeight;
+    cropWidth = cropHeight * TARGET_ASPECT;
+  }
+  const cropX = (photo.naturalWidth - cropWidth) / 2;
+  const cropY = (photo.naturalHeight - cropHeight) / 2;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(cropWidth);
+  canvas.height = Math.round(cropHeight);
+  const ctx = canvas.getContext('2d')!;
+
+  const glow = isGlowFilter(filterId);
+  const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+
+  ctx.save();
+  ctx.filter = baseCss;
+  ctx.drawImage(photo, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+  ctx.filter = 'none';
+  if (glow) {
+    applyGlowToCanvas(ctx, photo, 0, 0, canvas.width, canvas.height);
+  }
+  ctx.restore();
+
+  return canvas.toDataURL('image/jpeg', 0.95);
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string): void {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileName;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+export const PhotoboothSession = ({
+  event,
+  cameraSettings,
+  allSettings,
+  onExit,
+  onPhaseChange,
 }: {
-  onSync: () => void;
-  syncing: boolean;
-  message: string | null;
-}) => (
-  <div
-    style={{
-      position: 'absolute',
-      top: 68,
-      right: '6%',
-      display: 'flex',
-      gap: 10,
-      alignItems: 'center',
-      zIndex: 10,
-      flexWrap: 'wrap',
-      justifyContent: 'flex-end',
-      maxWidth: '40%',
-    }}
-  >
-    <button
-      onClick={onSync}
-      disabled={syncing}
-      type="button"
+  event: R3aEvent;
+  cameraSettings: CameraSettings;
+  allSettings: AllSettings;
+  onExit: () => void;
+  onPhaseChange?: (phase: string) => void;
+}) => {
+  const { stream, status, error } = useCamera(cameraSettings, true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const previewAreaRef = useRef<HTMLDivElement>(null);
+  const previewFrameRef = useRef<HTMLDivElement>(null);
+  /* Cache gambar — supaya tidak load ulang setiap render */
+  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  /* Track waktu mulai sesi untuk statistik */
+  const sessionStartedAtRef = useRef<number | null>(null);
+  const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
+  const [phase, setPhase] = useState<SessionPhase>('frame-select');
+  const [countdown, setCountdown] = useState(0);
+  const [captures, setCaptures] = useState<CaptureData[]>([]);
+  const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
+  const [captureFilters, setCaptureFilters] = useState<Map<string, string>>(new Map());
+  const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
+  const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [resultId, setResultId] = useState<string>('');
+  const [printing, setPrinting] = useState(false);
+  const [printed, setPrinted] = useState(false);
+  const [showAdminExit, setShowAdminExit] = useState(false);
+  const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
+  const [guestError, setGuestError] = useState<string | null>(null);
+  const [guestAssigning, setGuestAssigning] = useState(false);
+  const logoClickCount = useRef(0);
+  const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [captureError, setCaptureError] = useState<CaptureError>(null);
+  const [qrError, setQrError] = useState(false);
+  const [driveQrDataUrl, setDriveQrDataUrl] = useState<string | null>(null);
+  const [driveQrError, setDriveQrError] = useState(false);
+  const [frameAspect, setFrameAspect] = useState(3 / 2);
+  const [framesReady, setFramesReady] = useState(false);
+
+  const frames = event?.frames ?? [];
+  const activeFrame = frames[selectedFrameIndex];
+  const allSlots = activeFrame?.slots ?? [];
+  const uniqueCaptureIds = useMemo(() => getUniqueCaptureIds(allSlots), [allSlots]);
+  const totalCapturesNeeded = uniqueCaptureIds.length;
+
+  /* ============================================================
+     SLOT UNIK untuk sidebar live preview
+     ============================================================ */
+  const uniqueSlotsForPreview = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Slot[] = [];
+    for (const s of allSlots) {
+      if (!seen.has(s.captureId)) {
+        seen.add(s.captureId);
+        result.push(s);
+      }
+    }
+    return result;
+  }, [allSlots]);
+
+  /* ============================================================
+     STATUS SYNC — tulis status ke Firebase setiap phase berubah
+     (DIPINDAH KE SINI, setelah totalCapturesNeeded)
+     ============================================================ */
+  useEffect(() => {
+    const activeSlug = event?.slug || '';
+    const activeName = event?.eventName || 'Untitled';
+
+    void writeStatus({
+      currentEventSlug: activeSlug,
+      currentEventName: activeName,
+      currentPhase: phase,
+      sessionActive: phase !== 'frame-select',
+      photoCount: captures.length,
+      totalCaptures: totalCapturesNeeded,
+    });
+  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
+
+  /* Mark offline saat tab ditutup */
+  useEffect(() => {
+    markOfflineOnDisconnect();
+    return () => {
+      void clearStatus();
+    };
+  }, []);
+
+  const handleLogoClick = useCallback(() => {
+    logoClickCount.current += 1;
+    if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current);
+    if (logoClickCount.current >= 6) {
+      logoClickCount.current = 0;
+      setShowAdminExit(true);
+      return;
+    }
+    logoClickTimeout.current = setTimeout(() => { logoClickCount.current = 0; }, 2000);
+  }, []);
+
+  useEffect(() => {
+    if (onPhaseChange) {
+      onPhaseChange(phase);
+    }
+  }, [phase, onPhaseChange]);
+
+  useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      const gd = allSettings.googleDrive;
+      if (gd.connected && VITE_CLIENT_ID) {
+        void retryFailedUploads(VITE_CLIENT_ID);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [allSettings.googleDrive]);
+
+  useEffect(() => {
+    if (!activeFrame?.image) { setFrameAspect(3 / 2); return; }
+    const img = new Image();
+    img.onload = () => setFrameAspect(img.naturalWidth / img.naturalHeight);
+    img.src = activeFrame.image;
+  }, [activeFrame?.image]);
+
+  useEffect(() => {
+    if (frames.length > 0) {
+      setFramesReady(true);
+      return;
+    }
+    setFramesReady(true);
+  }, [frames.length]);
+
+  const resetSession = useCallback(() => {
+    setFlash(false);
+    setCaptures([]);
+    setCurrentCaptureIndex(0);
+    setCaptureFilters(new Map());
+    setSelectedCaptureId(null);
+    setCompositeUrl(null);
+    setSaved(false);
+    setSaving(false);
+    setQrDataUrl(null);
+    setResultId('');
+    setPrinted(false);
+    setPrinting(false);
+    setCaptureError(null);
+    setQrError(false);
+    setDriveQrDataUrl(null);
+    setDriveQrError(false);
+    sessionStartedAtRef.current = null;
+    imageCacheRef.current.clear();
+  }, []);
+
+  const handleSelectFrame = useCallback((index: number) => {
+    setSelectedFrameIndex(index);
+    resetSession();
+    setPhase('ready');
+  }, [resetSession]);
+
+  const handleStartCapture = useCallback(async () => {
+    resetSession();
+    setGuestError(null);
+    sessionStartedAtRef.current = Date.now();
+
+    const gd = allSettings.googleDrive;
+    if (gd.connected && VITE_CLIENT_ID && gd.mainFolderId) {
+      setGuestAssigning(true);
+      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId, VITE_CLIENT_ID);
+      setGuestAssigning(false);
+      if (result.success && result.guest) {
+        setCurrentGuest(result.guest);
+      } else {
+        setGuestError(result.error || 'Failed to create guest folder');
+      }
+    }
+
+    setPhase('live');
+  }, [resetSession, allSettings.googleDrive, event.id]);
+
+  const isVideoReady = useCallback((video: HTMLVideoElement | null): boolean => {
+    return !!(video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0);
+  }, []);
+
+  const handleCapture = useCallback(() => {
+    if (phase !== 'live') return;
+    const video = videoRef.current;
+    if (!isVideoReady(video)) {
+      setCaptureError({ message: 'Camera not ready. Please wait for the video feed to load.' });
+      setTimeout(() => setCaptureError(null), 3000);
+      return;
+    }
+    setCaptureError(null);
+    setPhase('countdown');
+    setCountdown(5);
+  }, [phase, isVideoReady]);
+
+  useEffect(() => {
+    if (phase !== 'countdown' || countdown === 0) return;
+    let preFlashTimer: ReturnType<typeof setTimeout> | null = null;
+    if (countdown === 1) {
+      preFlashTimer = setTimeout(() => {
+        setFlash(true);
+      }, 700);
+    }
+    const timer = setTimeout(() => {
+      if (countdown <= 1) {
+        const video = videoRef.current;
+        if (video && isVideoReady(video)) {
+          const dataUrl = captureFromVideo(video, cameraSettings.mirror);
+          const capId = uniqueCaptureIds[currentCaptureIndex];
+          const newCapture: CaptureData = { captureId: capId, dataUrl };
+          setCaptures((prev) => [...prev, newCapture]);
+          void saveCapture({
+            id: `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            eventId: event.id,
+            captureId: capId,
+            dataUrl,
+            filterId: 'natural',
+            createdAt: Date.now(),
+          } as StoredCapture);
+        } else {
+          setCaptureError({ message: 'Camera not ready at capture time. Please retry.' });
+          setTimeout(() => setCaptureError(null), 3000);
+        }
+        if (currentCaptureIndex + 1 >= totalCapturesNeeded) {
+          setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
+          setPhase('filter');
+        } else {
+          setCurrentCaptureIndex((i) => i + 1);
+          setPhase('live');
+        }
+        setCountdown(0);
+      } else {
+        setCountdown((c) => c - 1);
+      }
+    }, 1000);
+    return () => { clearTimeout(timer); if (preFlashTimer) clearTimeout(preFlashTimer); };
+  }, [phase, countdown, currentCaptureIndex, totalCapturesNeeded, uniqueCaptureIds, cameraSettings.mirror, event.id, isVideoReady]);
+
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(false), 600);
+    return () => clearTimeout(t);
+  }, [flash]);
+
+  useEffect(() => () => { setFlash(false); }, []);
+
+  const handleComposite = useCallback(async () => {
+    if (!activeFrame) return;
+    setPhase('compositing');
+    const captureMap = new Map<string, string>();
+    for (const c of captures) {
+      captureMap.set(c.captureId, c.dataUrl);
+    }
+    try {
+      const result = await compositeFrame(activeFrame, captureMap, captureFilters);
+      setCompositeUrl(result);
+      setPhase('result');
+    } catch {
+      setPhase('filter');
+    }
+  }, [activeFrame, captures, captureFilters]);
+
+  const handleSave = useCallback(async () => {
+    if (!compositeUrl || !activeFrame) return;
+    if (saving) return;
+
+    setSaving(true);
+
+    try {
+      const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const result: StoredResult = {
+        id,
+        eventId: event.id,
+        frameId: activeFrame.id,
+        dataUrl: compositeUrl,
+        filterId: 'multi',
+        createdAt: Date.now(),
+      };
+      await saveResult(result);
+      setResultId(id);
+
+      const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
+      const slotPhotos: { index: number; dataUrl: string }[] = [];
+      for (let i = 0; i < allSlots.length; i++) {
+        const slot = allSlots[i];
+        const cap = captureMap.get(slot.captureId);
+        if (!cap) continue;
+        try {
+          const slotDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
+          slotPhotos.push({ index: i + 1, dataUrl: slotDataUrl });
+        } catch { /* skip failed slot */ }
+      }
+
+      let slideshowVideo: string | null = null;
+      if (allSettings.storage.saveVideos) {
+        const rawSlotPhotos: { index: number; dataUrl: string }[] = [];
+        for (let i = 0; i < allSlots.length; i++) {
+          const cap = captureMap.get(allSlots[i].captureId);
+          if (cap) rawSlotPhotos.push({ index: i + 1, dataUrl: cap });
+        }
+        if (rawSlotPhotos.length > 0) {
+          try {
+            const DURATION_PER_SLIDE_MS = 300;
+            const LOOP_COUNT = 3;
+            const loopedPhotos: { dataUrl: string }[] = [];
+            for (let loop = 0; loop < LOOP_COUNT; loop++) {
+              for (const p of rawSlotPhotos) {
+                loopedPhotos.push({ dataUrl: p.dataUrl });
+              }
+            }
+            slideshowVideo = await generateSlideshowVideo(loopedPhotos, DURATION_PER_SLIDE_MS);
+          } catch {
+            slideshowVideo = null;
+          }
+        }
+      }
+
+      if (allSettings.storage.autoDownloadResult) {
+        for (const sp of slotPhotos) {
+          const slotName = `slot-${String(sp.index).padStart(2, '0')}.jpg`;
+          downloadDataUrl(sp.dataUrl, slotName);
+        }
+        if (slideshowVideo) {
+          downloadDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
+        }
+        downloadDataUrl(compositeUrl, 'final-result.jpg');
+      }
+
+      const gd = allSettings.googleDrive;
+      let uploadSuccessCount = 0;
+      let uploadFailCount = 0;
+
+      if (gd.connected && VITE_CLIENT_ID && currentGuest) {
+        const uploadFiles: UploadFileEntry[] = [
+          { fileName: 'final.jpg', dataUrl: compositeUrl },
+          ...slotPhotos.map((sp) => ({
+            fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`,
+            dataUrl: sp.dataUrl,
+          })),
+          ...(slideshowVideo
+            ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
+            : []),
+        ];
+        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
+        uploadSuccessCount = uploadFiles.length;
+      }
+
+      try {
+        const startedAt = sessionStartedAtRef.current ?? (Date.now() - 60000);
+        recordSession({
+          id: id,
+          eventId: event.id,
+          startedAt,
+          finishedAt: Date.now(),
+          photoCount: slotPhotos.length,
+          uploadSuccess: uploadSuccessCount,
+          uploadFail: uploadFailCount,
+        });
+      } catch {
+        /* ignore stats error */
+      }
+
+      setSaved(true);
+    } catch {
+      /* ignore */
+    } finally {
+      setSaving(false);
+    }
+  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
+
+  const handleShowQr = useCallback(async () => {
+    if (!currentGuest) return;
+    setQrError(false);
+    setQrDataUrl(null);
+    setPhase('qr');
+    const payload = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
+    try {
+      const qr = await generateQrCode(payload);
+      if (qr.qrDataUrl) {
+        setQrDataUrl(qr.qrDataUrl);
+      } else {
+        setQrError(true);
+      }
+    } catch {
+      setQrError(true);
+    }
+  }, [currentGuest, event.name]);
+
+  const handleShowDriveQr = useCallback(async () => {
+    if (!currentGuest) return;
+    setDriveQrError(false);
+    setDriveQrDataUrl(null);
+    setPhase('drive-qr');
+    try {
+      const url = buildDriveFolderUrl(currentGuest.guestFolderId);
+      const qr = await generateQrCode(url);
+      if (qr.qrDataUrl) {
+        setDriveQrDataUrl(qr.qrDataUrl);
+      } else {
+        setDriveQrError(true);
+      }
+    } catch {
+      setDriveQrError(true);
+    }
+  }, [currentGuest]);
+
+  const handlePrint = useCallback(async () => {
+    if (!compositeUrl || printing) return;
+    setPrinting(true);
+    try {
+      const copies = event.printerSettings.copies || 1;
+      await printResult({ copies, paperSize: event.printerSettings.paperSize, dataUrl: compositeUrl, printerName: allSettings.printer.printer });
+      setPrinted(true);
+    } catch { /* ignore */ }
+    setPrinting(false);
+  }, [compositeUrl, printing, event.printerSettings, allSettings.printer.printer]);
+
+  const handleBackToFrameSelect = useCallback(() => {
+    resetSession();
+    setCurrentGuest(null);
+    setGuestError(null);
+    setPhase('frame-select');
+  }, [resetSession]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (phase === 'frame-select') { onExit(); }
+        else { setShowAdminExit(true); }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [phase, onExit]);
+
+  const captureMap = useMemo(
+    () => new Map(captures.map((c) => [c.captureId, c.dataUrl])),
+    [captures],
+  );
+
+  const ensureImagesCached = useCallback(async (sources: string[]): Promise<void> => {
+    const cache = imageCacheRef.current;
+    const missing = sources.filter((src) => src && !cache.has(src));
+    if (missing.length === 0) return;
+    await Promise.all(
+      missing.map((src) =>
+        new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => { cache.set(src, img); resolve(); };
+          img.onerror = () => resolve();
+          img.src = src;
+        }),
+      ),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'filter') return;
+    const area = previewAreaRef.current;
+    const frame = previewFrameRef.current;
+    const canvas = previewCanvasRef.current;
+    if (!area || !frame || !canvas) return;
+    if (!activeFrame) return;
+
+    let cancelled = false;
+    let rafId: number;
+
+    const render = () => {
+      if (cancelled) return;
+
+      const areaRect = area.getBoundingClientRect();
+      const availW = Math.max(50, areaRect.width);
+      const availH = Math.max(50, areaRect.height - 60);
+
+      let frameW = availW;
+      let frameH = frameW / frameAspect;
+      if (frameH > availH) {
+        frameH = availH;
+        frameW = frameH * frameAspect;
+      }
+      frameW = Math.floor(frameW);
+      frameH = Math.floor(frameH);
+
+      frame.style.width = `${frameW}px`;
+      frame.style.height = `${frameH}px`;
+      frame.style.aspectRatio = 'auto';
+
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const canvasW = Math.max(1, Math.floor(frameW * dpr));
+      const canvasH = Math.max(1, Math.floor(frameH * dpr));
+      if (canvas.width !== canvasW || canvas.height !== canvasH) {
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+      }
+      canvas.style.width = `${frameW}px`;
+      canvas.style.height = `${frameH}px`;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, frameW, frameH);
+
+      ctx.fillStyle = '#2a2522';
+      ctx.fillRect(0, 0, frameW, frameH);
+
+      const cache = imageCacheRef.current;
+
+      for (const slot of allSlots) {
+        const cap = captureMap.get(slot.captureId);
+        if (!cap) continue;
+        const photo = cache.get(cap);
+        if (!photo) continue;
+
+        const sx = (slot.x / 100) * frameW;
+        const sy = (slot.y / 100) * frameH;
+        const sw = (slot.w / 100) * frameW;
+        const sh = (slot.h / 100) * frameH;
+        const filterId = captureFilters.get(slot.captureId) || 'natural';
+        const glow = isGlowFilter(filterId);
+        const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(sx, sy, sw, sh);
+        ctx.clip();
+        ctx.filter = baseCss;
+        drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
+        ctx.filter = 'none';
+        if (glow) {
+          applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
+        }
+        ctx.restore();
+      }
+
+      if (activeFrame.image) {
+        const frameImg = cache.get(activeFrame.image);
+        if (frameImg) {
+          ctx.drawImage(frameImg, 0, 0, frameW, frameH);
+        }
+      }
+    };
+
+    const sources = [
+      activeFrame.image,
+      ...allSlots.map((s) => captureMap.get(s.captureId) || ''),
+    ].filter(Boolean);
+
+    const run = async () => {
+      await ensureImagesCached(sources);
+      if (cancelled) return;
+      rafId = requestAnimationFrame(render);
+    };
+
+    void run();
+
+    const onResize = () => {
+      if (cancelled) return;
+      rafId = requestAnimationFrame(render);
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached]);
+
+  const LoadingOverlay = saving ? (
+    <div
       style={{
-        padding: '10px 18px',
-        background: syncing ? 'rgba(255,255,255,.2)' : '#4ade80',
-        color: syncing ? '#fff' : '#000',
-        border: 'none',
-        fontWeight: 700,
-        fontSize: 12,
-        letterSpacing: '.06em',
-        cursor: syncing ? 'wait' : 'pointer',
+        position: 'fixed',
+        inset: 0,
+        zIndex: 999999,
+        background: 'rgba(0,0,0,0.6)',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
-        gap: 8,
-        boxShadow: '0 4px 0 rgba(0,0,0,.15)',
-        transition: '.18s',
+        justifyContent: 'center',
+        gap: 28,
+        color: '#fff',
+        backdropFilter: 'blur(4px)',
       }}
     >
-      <RefreshCw
-        size={14}
-        style={syncing ? { animation: 'spin 1s linear infinite' } : undefined}
-      />
-      {syncing ? 'SYNCING...' : 'SYNC FROM CLOUD'}
-    </button>
-
-    {message ? (
-      <span
-        style={{
-          color: '#fff',
-          fontSize: 11,
-          fontWeight: 600,
-          padding: '6px 12px',
-          background: 'rgba(0,0,0,.5)',
-          border: '1px solid rgba(255,255,255,.25)',
-          maxWidth: '100%',
-        }}
-      >
-        {message}
+      <div className="compositing-spinner" style={{ width: 72, height: 72, borderWidth: 5 }} />
+      <span style={{ fontSize: 32, fontWeight: 700, letterSpacing: '.25em', textTransform: 'uppercase', color: '#fff' }}>
+        PROSES FOTO
       </span>
-    ) : null}
+    </div>
+  ) : null;
 
-    <style>{`
-      @keyframes spin {
-        to { transform: rotate(360deg); }
-      }
-    `}</style>
-  </div>
-);
-
-const ProjectList = ({
-  events,
-  onHome,
-  onOpen,
-  onNew,
-  onEditEvent,
-  onSyncFromCloud,
-  syncing,
-  syncMessage,
-}: {
-  events: R3aEvent[];
-  onHome: () => void;
-  onOpen: (event: R3aEvent) => void;
-  onNew: () => void;
-  onEditEvent: (event: R3aEvent) => void;
-  onSyncFromCloud: () => void;
-  syncing: boolean;
-  syncMessage: string | null;
-}) => {
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  useEffect(() => {
-    if (activeIndex >= events.length) setActiveIndex(0);
-  }, [events.length, activeIndex]);
-
-  const moveProject = (direction: number) =>
-    setActiveIndex((activeIndex + direction + events.length) % Math.max(events.length, 1));
-  const event = events[activeIndex];
-
-  if (events.length === 0) {
+  if (!event || !event.frames) {
     return (
-      <main className="project-list-screen">
-        <div className="project-grain" aria-hidden="true" />
-        <div className="project-rays" aria-hidden="true"><i /><i /><i /></div>
-        <header className="project-heading"><p>R3A BOOTH</p><h1>PROJECT</h1><span /></header>
-        <SyncButton onSync={onSyncFromCloud} syncing={syncing} message={syncMessage} />
-        <section className="project-card-wrap">
-          <div className="project-card" style={{ '--project-accent': '#f56a2d' } as CSSProperties}>
-            <div className="project-preview">
-              <div className="preview-topbar"><span>R3A</span><span>BOOTH</span></div>
-              <div className="preview-copy"><small>EVENT PHOTO EXPERIENCE</small><strong>No Events Yet</strong><em>Create your first event to get started</em></div>
-              <div className="preview-spark preview-spark-one" /><div className="preview-spark preview-spark-two" />
-              <div className="preview-lines"><i /><i /><i /></div>
+      <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+        <AlertCircle size={48} strokeWidth={1} />
+        <h2 style={{ fontSize: 24, margin: 0 }}>Event not found</h2>
+        <p style={{ color: 'rgba(255,255,255,.5)', margin: 0 }}>The event data is missing or malformed.</p>
+        <button onClick={onExit} type="button" style={{ marginTop: 8, padding: '10px 24px', background: '#ef3f25', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>BACK</button>
+      </main>
+    );
+  }
+
+  if (!framesReady) {
+    return (
+      <main className="photobooth-screen photobooth-kiosk" style={{ display: 'grid', placeItems: 'center' }}>
+        <div className="compositing-spinner" />
+        <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 14, fontWeight: 600, letterSpacing: '.1em' }}>LOADING EVENT...</span>
+      </main>
+    );
+  }
+
+  if (phase === 'frame-select') {
+    return (
+      <main className="photobooth-screen photobooth-kiosk">
+        {LoadingOverlay}
+        <div className="photobooth-kiosk-header">
+          <div className="photobooth-project"><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
+          <div className="hidden-exit-trigger" onClick={handleLogoClick} />
+        </div>
+        <section className="frame-select-section">
+          <h1>CHOOSE A FRAME</h1>
+          <p>Select a frame layout to begin your photo session</p>
+          {frames.length === 0 ? (
+            <div className="frame-select-empty">
+              <ImageIcon size={48} strokeWidth={1} />
+              <strong>No frames available</strong>
+              <p>This event has no frames configured. Ask the operator to add frames.</p>
             </div>
-            <div className="project-info">
-              <div><span className="project-label">PROJECT 00 / 00</span><h2>No Events</h2><p>Create a new event to begin</p></div>
-              <div className="project-status"><span className="status-dot status-draft" />Empty</div>
+          ) : (
+            <div className="frame-select-grid">
+              {frames.map((frame, i) => (
+                <button key={frame.id} className="frame-select-card" onClick={() => handleSelectFrame(i)} type="button">
+                  <div className="frame-select-thumb" style={frame.image ? { background: `url(${frame.image}) center/contain no-repeat #2a2522` } : undefined}>
+                    {!frame.image ? <ImageIcon size={32} strokeWidth={1} /> : null}
+                  </div>
+                  <div className="frame-select-info">
+                    <strong>{frame.name}</strong>
+                    <span>{frame.slots.length} SLOTS</span>
+                  </div>
+                </button>
+              ))}
             </div>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  if (phase === 'ready') {
+    return (
+      <main className="photobooth-screen photobooth-kiosk">
+        {LoadingOverlay}
+        <div className="photobooth-kiosk-header">
+          <div className="photobooth-project" onClick={handleLogoClick}><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
+          <button className="photobooth-exit" onClick={handleBackToFrameSelect} type="button"><X size={24} /> BACK</button>
+        </div>
+        <section className="ready-section">
+          <div className="ready-frame-preview" style={{ aspectRatio: frameAspect }}>
+            {activeFrame?.image ? (
+              <img src={activeFrame.image} alt={activeFrame.name} />
+            ) : (
+              <div className="ready-frame-placeholder"><ImageIcon size={48} strokeWidth={1} /></div>
+            )}
+            {allSlots.map((slot) => (
+              <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` }}>
+                <span>{slot.captureId}</span>
+              </div>
+            ))}
+          </div>
+          <div className="ready-info">
+            <h2>{activeFrame?.name || 'FRAME'}</h2>
+            <p>{totalCapturesNeeded} PHOTO{totalCapturesNeeded !== 1 ? 'S' : ''} TO CAPTURE</p>
+            <button className="ready-start" onClick={handleStartCapture} type="button" disabled={guestAssigning}>
+              <Camera size={28} /> {guestAssigning ? 'PREPARING...' : 'START SESSION'}
+            </button>
+            <button className="ready-back" onClick={handleBackToFrameSelect} type="button">
+              <ChevronLeft size={18} /> CHANGE FRAME
+            </button>
           </div>
         </section>
-        <div className="project-actions">
-          <button className="project-home-button" onClick={onHome} type="button">HOME</button>
-          <button className="new-project-button" onClick={onNew} type="button">NEW EVENT <span>+</span></button>
-        </div>
       </main>
     );
   }
 
   return (
-    <main className="project-list-screen">
-      <div className="project-grain" aria-hidden="true" />
-      <div className="project-rays" aria-hidden="true"><i /><i /><i /></div>
-      <header className="project-heading"><p>R3A BOOTH</p><h1>PROJECT</h1><span /></header>
-      <SyncButton onSync={onSyncFromCloud} syncing={syncing} message={syncMessage} />
-      <button className="project-arrow project-arrow-left" aria-label="Previous project" onClick={() => moveProject(-1)} type="button"><ChevronLeft size={62} strokeWidth={1.5} /></button>
-      <section className="project-card-wrap">
-        <div className="project-card" style={{ '--project-accent': statusToAccent(event.eventStatus) } as CSSProperties}>
-          <div className="project-preview">
-            <div className="preview-topbar"><span>R3A</span><span>BOOTH</span></div>
-            <div className="preview-copy">
-              <small>EVENT PHOTO EXPERIENCE</small>
-              <strong>{event.eventName || 'Untitled Event'}</strong>
-              <em>{event.date || 'No date set'}{event.slug ? ` • /${event.slug}` : ''}</em>
-            </div>
-            <div className="preview-spark preview-spark-one" /><div className="preview-spark preview-spark-two" />
-            <div className="preview-lines"><i /><i /><i /></div>
+    <main className={`photobooth-screen ${phase === 'live' || phase === 'countdown' ? '' : 'photobooth-kiosk'}`}>
+      {LoadingOverlay}
+      {flash ? <div className="capture-flash" /> : null}
+
+      {phase === 'live' || phase === 'countdown' ? (
+        <>
+          <div className="photobooth-header photobooth-guest-header">
+            <button className="photobooth-back-btn" onClick={handleBackToFrameSelect} type="button"><ChevronLeft size={20} /> BACK</button>
+            <div className="photobooth-project" onClick={handleLogoClick}><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
+            {currentGuest ? <span className="photobooth-guest-badge">{currentGuest.guestName}</span> : null}
           </div>
-          <div className="project-info">
-            <div>
-              <span className="project-label">EVENT {String(activeIndex + 1).padStart(2, '0')} / {String(events.length).padStart(2, '0')}</span>
-              <h2>{event.eventName || 'Untitled Event'}</h2>
-              <p>{event.date || 'No date set'}</p>
-            </div>
-            <div className="project-status"><span className={`status-dot status-${event.eventStatus === 'Active' ? 'ready' : 'draft'}`} />{event.eventStatus}</div>
-            <button className="open-project" onClick={() => onOpen(event)} type="button">OPEN EVENT <ChevronRight size={22} /></button>
-            <div className="project-card-actions">
-              <button onClick={() => onEditEvent(event)} type="button">EDIT EVENT</button>
-              <button onClick={async () => { await deleteEvent(event.id); window.location.reload(); }} type="button">DELETE</button>
-            </div>
-          </div>
-        </div>
-      </section>
-      <button className="project-arrow project-arrow-right" aria-label="Next project" onClick={() => moveProject(1)} type="button"><ChevronRight size={62} strokeWidth={1.5} /></button>
-      <div className="project-actions">
-        <button className="project-home-button" onClick={onHome} type="button">HOME</button>
-        <button className="new-project-button" onClick={onNew} type="button">NEW EVENT <span>+</span></button>
-      </div>
-      <div className="project-dots" aria-label="Project position">
-        {events.map((item, index) => (
-          <button key={item.id} className={index === activeIndex ? 'project-dot is-active' : 'project-dot'} aria-label={`Show ${item.eventName}`} onClick={() => setActiveIndex(index)} type="button" />
-        ))}
-      </div>
-    </main>
-  );
-};
-
-type SettingsTab = 'camera' | 'storage' | 'application' | 'display' | 'security' | 'system';
-
-type TestState = { status: 'idle' | 'running' | 'success' | 'error'; message: string };
-
-const Settings = ({ onHome }: { onHome: () => void }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('camera');
-  const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
-  const [cameras, setCameras] = useState<CameraDevice[]>([]);
-  const [printers, setPrinters] = useState<string[]>([]);
-  const [showTest, setShowTest] = useState(false);
-  const [saveFlash, setSaveFlash] = useState(false);
-  const [testCamera, setTestCamera] = useState<TestState>({ status: 'idle', message: '' });
-  const [testPrinterState, setTestPrinterState] = useState<TestState>({ status: 'idle', message: '' });
-  const [gdriveConnecting, setGdriveConnecting] = useState(false);
-  const [gdriveTestState, setGdriveTestState] = useState<TestState>({ status: 'idle', message: '' });
-  const [gdriveUploadTestState, setGdriveUploadTestState] = useState<TestState>({ status: 'idle', message: '' });
-  const [gdrivePicking, setGdrivePicking] = useState(false);
-  const [diagResults, setDiagResults] = useState<{ label: string; status: string; healthy: boolean }[]>([]);
-  const [diagRunning, setDiagRunning] = useState(false);
-
-  const tabs: { id: SettingsTab; label: string }[] = [
-    { id: 'camera', label: 'CAMERA & HARDWARE' },
-    { id: 'storage', label: 'STORAGE & UPLOAD' },
-    { id: 'application', label: 'APPLICATION' },
-    { id: 'display', label: 'DISPLAY & INTERFACE' },
-    { id: 'security', label: 'SECURITY & ADMIN' },
-    { id: 'system', label: 'SYSTEM & DIAGNOSTICS' },
-  ];
-
-  useEffect(() => { void enumerateCameras().then(setCameras); }, []);
-  useEffect(() => {
-    const refresh = () => { void enumerateCameras().then(setCameras); };
-    navigator.mediaDevices?.addEventListener?.('devicechange', refresh);
-    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refresh);
-  }, []);
-  useEffect(() => { void getPrinters().then(setPrinters); }, []);
-  const cameraHook = useCamera(settings.camera, settings.camera.cameraOn && activeTab === 'camera');
-
-  const update = (section: keyof AllSettings, updates: Record<string, unknown>) => {
-    setSettings((prev) => ({ ...prev, [section]: { ...prev[section], ...updates } }));
-  };
-
-  const updateCam = (updates: Partial<typeof settings.camera>) => update('camera', updates);
-
-  const selectedCamera = cameras.find((c) => c.deviceId === settings.camera.selectedDeviceId);
-  const cameraLabel = selectedCamera?.label || (cameras.length > 0 ? cameras[0].label : 'No camera detected');
-
-  const handleSave = () => {
-    saveAllSettings(settings);
-    setSaveFlash(true);
-    setTimeout(() => setSaveFlash(false), 2000);
-  };
-
-  const handleTestPrinter = async () => {
-    setTestPrinterState({ status: 'running', message: 'Testing...' });
-    const result = await testPrinter(settings.printer.printer);
-    setTestPrinterState({ status: result.success ? 'success' : 'error', message: result.message });
-  };
-
-  const handleConnectGdrive = async () => {
-    const clientId = VITE_CLIENT_ID;
-    if (!clientId || clientId.trim().length < 10) {
-      setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
-      return;
-    }
-    setGdriveConnecting(true);
-    setGdriveTestState({ status: 'idle', message: '' });
-    const result = await connectGoogleDrive(clientId);
-    setGdriveConnecting(false);
-    if (result.success) {
-      const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
-      setSettings(next);
-      saveAllSettings(next);
-    } else {
-      setGdriveTestState({ status: 'error', message: result.error || 'Connection failed' });
-    }
-  };
-
-  const handleDisconnectGdrive = async () => {
-    await disconnectGoogleDrive();
-    const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: false, account: '', mainFolderId: '', mainFolderName: '', autoUpload: false } };
-    setSettings(next);
-    saveAllSettings(next);
-    setGdriveTestState({ status: 'idle', message: '' });
-    setGdriveUploadTestState({ status: 'idle', message: '' });
-  };
-
-  const handleReconnectGdrive = async () => {
-    const clientId = VITE_CLIENT_ID;
-    if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
-      return;
-    }
-    setGdriveConnecting(true);
-    setGdriveTestState({ status: 'idle', message: '' });
-    const result = await connectGoogleDrive(clientId);
-    setGdriveConnecting(false);
-    if (result.success) {
-      const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
-      setSettings(next);
-      saveAllSettings(next);
-    } else {
-      setGdriveTestState({ status: 'error', message: result.error || 'Reconnect failed' });
-    }
-  };
-
-  const handleChangeFolder = async () => {
-    const clientId = VITE_CLIENT_ID;
-    if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
-      return;
-    }
-    setGdrivePicking(true);
-    setGdriveTestState({ status: 'idle', message: '' });
-    try {
-      const folder = await pickDriveFolder(clientId);
-      if (folder) {
-        const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: folder.id, mainFolderName: folder.name } };
-        setSettings(next);
-        saveAllSettings(next);
-      }
-    } catch (err) {
-      setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to open folder picker' });
-    }
-    setGdrivePicking(false);
-  };
-
-  const handleApplyManualFolder = async () => {
-    const raw = settings.googleDrive.manualFolderInput;
-    const folderId = parseFolderId(raw);
-    if (!folderId) {
-      setGdriveTestState({ status: 'error', message: 'Invalid folder URL or ID. Paste a Google Drive folder link.' });
-      return;
-    }
-    const clientId = VITE_CLIENT_ID;
-    if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'Connect Google Drive first.' });
-      return;
-    }
-    setGdrivePicking(true);
-    setGdriveTestState({ status: 'running', message: 'Checking folder...' });
-    try {
-      const token = await getValidToken(clientId);
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,mimeType`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `Folder not found (HTTP ${res.status})`);
-      }
-      const data = await res.json() as { id: string; name: string; mimeType: string };
-      if (data.mimeType !== 'application/vnd.google-apps.folder') {
-        throw new Error('That ID is not a folder.');
-      }
-      const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: data.id, mainFolderName: data.name } };
-      setSettings(next);
-      saveAllSettings(next);
-      setGdriveTestState({ status: 'success', message: `Folder set: ${data.name}` });
-    } catch (err) {
-      setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to set folder' });
-    }
-    setGdrivePicking(false);
-  };
-
-  const handleTestGdrive = async () => {
-    setGdriveTestState({ status: 'running', message: 'Testing...' });
-    const result = await testGoogleDriveConnection(VITE_CLIENT_ID);
-    setGdriveTestState({ status: result.success ? 'success' : 'error', message: result.message });
-  };
-
-  const handleTestGdriveUpload = async () => {
-    setGdriveUploadTestState({ status: 'running', message: 'Uploading test file...' });
-    const result = await testGoogleDriveUpload(VITE_CLIENT_ID);
-    setGdriveUploadTestState({ status: result.success ? 'success' : 'error', message: result.message });
-  };
-
-  const handleRunDiagnostics = async () => {
-    setDiagRunning(true);
-    const results = await runDiagnostics();
-    setDiagResults(results);
-    setDiagRunning(false);
-  };
-
-  useEffect(() => {
-    document.documentElement.style.setProperty('--r3a-brightness', `${settings.display.brightness}%`);
-  }, [settings.display.brightness]);
-
-  return (
-    <main className="settings-screen">
-      <div className="settings-grain" aria-hidden="true" /><div className="settings-decoration settings-decoration-top" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div><div className="settings-decoration settings-decoration-bottom" aria-hidden="true"><i /><i /><i /><i /></div>
-      <header className="settings-header"><p>R3A BOOTH</p><h1>SETTINGS</h1><span /></header>
-      <nav className="settings-tabs" aria-label="Settings sections">{tabs.map((tab) => <button className={activeTab === tab.id ? 'settings-tab is-active' : 'settings-tab'} key={tab.id} onClick={() => setActiveTab(tab.id)} type="button">{tab.label}</button>)}</nav>
-      <section className="settings-content">
-        {activeTab === 'camera' ? (
-          <div className="camera-settings-layout">
-            <div className="settings-column">
-              <div className="settings-power">
-                <span>CAMERA</span>
-                <button className={`settings-switch ${settings.camera.cameraOn ? 'on' : ''}`} type="button" onClick={() => updateCam({ cameraOn: !settings.camera.cameraOn })}>{settings.camera.cameraOn ? 'ON' : 'OFF'}</button>
-              </div>
-              <div className="setting-control">
-                <span>CAMERA SOURCE</span>
-                <select className="camera-source-select" value={settings.camera.selectedDeviceId || (cameras[0]?.deviceId ?? '')} onChange={(e) => updateCam({ selectedDeviceId: e.target.value })}>
-                  {cameras.length === 0 ? <option value="">No camera detected</option> : cameras.map((cam) => <option key={cam.deviceId} value={cam.deviceId}>{cam.label}</option>)}
-                </select>
-                <em>{cameraHook.status === 'connected' ? 'CONNECTED' : cameraHook.status === 'connecting' ? 'CONNECTING' : cameraHook.status === 'error' ? 'ERROR' : 'DISCONNECTED'}</em>
-              </div>
-              <div className="setting-control">
-                <span>CAMERA RESOLUTION</span>
-                <select value={settings.camera.resolution} onChange={(e) => updateCam({ resolution: e.target.value })}>
-                  <option>1280 × 720</option>
-                  <option>1920 × 1080</option>
-                  <option>3840 × 2160</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>FRAME RATE</span>
-                <select value={settings.camera.frameRate} onChange={(e) => updateCam({ frameRate: e.target.value })}>
-                  <option>30 FPS</option>
-                  <option>60 FPS</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>ASPECT RATIO</span>
-                <select value={settings.camera.aspectRatio} onChange={(e) => updateCam({ aspectRatio: e.target.value })}>
-                  <option>16:9</option>
-                  <option>4:3</option>
-                  <option>1:1</option>
-                  <option>9:16</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>ORIENTATION</span>
-                <select value={settings.camera.orientation} onChange={(e) => updateCam({ orientation: e.target.value })}>
-                  <option>LANDSCAPE</option>
-                  <option>PORTRAIT</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>MIRROR PREVIEW</span>
-                <button type="button" onClick={() => updateCam({ mirror: !settings.camera.mirror })}>{settings.camera.mirror ? 'ON' : 'OFF'}<b>▼</b></button>
-              </div>
-              <div className="setting-control">
-                <span>PREVIEW QUALITY</span>
-                <select value={settings.camera.previewQuality} onChange={(e) => updateCam({ previewQuality: e.target.value })}>
-                  <option>HIGH</option>
-                  <option>MEDIUM</option>
-                  <option>LOW</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>LOW LATENCY MODE</span>
-                <button type="button" onClick={() => updateCam({ lowLatency: !settings.camera.lowLatency })}>{settings.camera.lowLatency ? 'ON' : 'OFF'}<b>▼</b></button>
-              </div>
-            </div>
-            <div className="settings-column printer-settings">
-              <div className="settings-power">
-                <span>PRINTER</span>
-                <button className={`settings-switch ${settings.printer.printerOn ? 'on' : ''}`} type="button" onClick={() => update('printer', { printerOn: !settings.printer.printerOn })}>{settings.printer.printerOn ? 'ON' : 'OFF'}</button>
-              </div>
-              <div className="setting-control">
-                <span>PRINTER</span>
-                <select value={settings.printer.printer} onChange={(e) => update('printer', { printer: e.target.value })} disabled={printers.length === 0}>
-                  {printers.length === 0 ? <option>No printer detected</option> : printers.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <em>{printers.length > 0 ? 'CONNECTED' : 'DISCONNECTED'}</em>
-              </div>
-              <div className="setting-control">
-                <span>PRINTER STATUS</span>
-                <button type="button">{settings.printer.printerOn ? (printers.length > 0 ? 'READY' : 'OFFLINE') : 'OFF'}<b>▼</b></button>
-              </div>
-              <div className="setting-control">
-                <span>PAPER SIZE</span>
-                <select value={settings.printer.paperSize} onChange={(e) => update('printer', { paperSize: e.target.value })}>
-                  <option>4 × 6 in</option>
-                  <option>5 × 7 in</option>
-                  <option>A4</option>
-                  <option>Letter</option>
-                </select>
-              </div>
-              <div className="photobooth-camera-status" style={{ marginBottom: 12 }}><CameraStatusBadge status={cameraHook.status} error={cameraHook.error} /></div>
-              <div className="test-buttons">
-                <button type="button" onClick={() => setShowTest(true)}>TEST CAMERA</button>
-                <button type="button" onClick={handleTestPrinter} disabled={testPrinterState.status === 'running'}>TEST PRINTER</button>
-              </div>
-              {testPrinterState.status !== 'idle' ? (
-                <div className={`settings-test-result ${testPrinterState.status}`}>
-                  {testPrinterState.status === 'success' ? <Check size={16} /> : testPrinterState.status === 'error' ? <AlertCircle size={16} /> : null}
-                  {testPrinterState.message}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {activeTab === 'storage' ? (
-          <div className="storage-settings-layout">
-            <div className="storage-block">
-              <div className="storage-heading"><span>LOCAL STORAGE</span><em>{settings.storage.autoDownloadResult ? 'AUTO DOWNLOAD' : 'MANUAL'}</em></div>
-              <div className="setting-control">
-                <span>FILE NAMING</span>
-                <input
-                  value={settings.storage.fileNaming}
-                  onChange={(e) => update('storage', { fileNaming: e.target.value })}
-                  placeholder="{event}_{date}_{number}"
-                />
-              </div>
-              <div className="setting-control">
-                <span>SAVE PHOTOS</span>
-                <button className={`toggle-row ${settings.storage.savePhotos ? 'is-on' : ''}`} type="button" onClick={() => update('storage', { savePhotos: !settings.storage.savePhotos })}><i />{settings.storage.savePhotos ? 'ON' : 'OFF'}</button>
-              </div>
-              <div className="setting-control">
-                <span>SAVE VIDEOS</span>
-                <button className={`toggle-row ${settings.storage.saveVideos ? 'is-on' : ''}`} type="button" onClick={() => update('storage', { saveVideos: !settings.storage.saveVideos })}><i />{settings.storage.saveVideos ? 'ON' : 'OFF'}</button>
-              </div>
-              <div className="setting-control">
-                <span>AUTO DOWNLOAD RESULT</span>
-                <button className={`toggle-row ${settings.storage.autoDownloadResult ? 'is-on' : ''}`} type="button" onClick={() => update('storage', { autoDownloadResult: !settings.storage.autoDownloadResult })}><i />{settings.storage.autoDownloadResult ? 'ON' : 'OFF'}</button>
-              </div>
-              <div className="setting-control">
-                <span>KEEP FILES</span>
-                <select value={settings.storage.keepFiles} onChange={(e) => update('storage', { keepFiles: e.target.value })}>
-                  <option>7 DAYS</option>
-                  <option>30 DAYS</option>
-                  <option>90 DAYS</option>
-                  <option>FOREVER</option>
-                </select>
-              </div>
-            </div>
-            <div className="storage-block hub-block">
-              <div className="storage-heading">
-                <span>GOOGLE DRIVE</span>
-                <em className={settings.googleDrive.connected ? '' : 'not-configured'}>
-                  {settings.googleDrive.connected ? 'CONNECTED' : 'DISCONNECTED'}
-                </em>
-              </div>
-
-              {!settings.googleDrive.connected ? (
-                <div className="hub-message">
-                  <strong>Connect to Google Drive</strong>
-                  <p>Connect your Google account to select a main folder for photo storage.</p>
-                  <button type="button" onClick={handleConnectGdrive} disabled={gdriveConnecting}>
-                    {gdriveConnecting ? 'CONNECTING...' : 'CONNECT GOOGLE DRIVE'} <ChevronRight size={19} />
-                  </button>
-                  {gdriveTestState.status === 'error' ? (
-                    <div className="settings-test-result error"><AlertCircle size={16} /> {gdriveTestState.message}</div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="gdrive-connected">
-                  <div className="setting-control">
-                    <span>CONNECTION STATUS</span>
-                    <button type="button" className="gdrive-status-btn"><Cloud size={16} /> CONNECTED</button>
-                  </div>
-                  <div className="setting-control">
-                    <span>GOOGLE ACCOUNT</span>
-                    <button type="button" className="gdrive-account-btn">{settings.googleDrive.account || 'Connected'}</button>
-                  </div>
-
-                  <div className="setting-control">
-                    <span>TOKEN REMINDER ({settings.googleDrive.reminderIntervalMin || 50} MIN)</span>
-                    <button
-                      className={`toggle-row ${settings.googleDrive.reminderEnabled ? 'is-on' : ''}`}
-                      type="button"
-                      onClick={() => update('googleDrive', { reminderEnabled: !settings.googleDrive.reminderEnabled })}
-                    >
-                      <i />{settings.googleDrive.reminderEnabled ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div className="setting-control">
-                    <span>REMINDER INTERVAL (MIN)</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={String(settings.googleDrive.reminderIntervalMin ?? 50)}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9]/g, '');
-                        const num = raw === '' ? 0 : parseInt(raw, 10);
-                        update('googleDrive', { reminderIntervalMin: num });
-                      }}
-                      onBlur={(e) => {
-                        const raw = e.target.value.replace(/[^0-9]/g, '');
-                        const num = raw === '' ? 50 : parseInt(raw, 10);
-                        if (!num || num < 1 || num > 60) {
-                          update('googleDrive', { reminderIntervalMin: 50 });
-                        }
-                      }}
-                      placeholder="50"
-                      style={{ padding: 8, fontSize: 14 }}
-                    />
-                  </div>
-
-                  <div className="setting-control">
-                    <span>MAIN FOLDER (CURRENT)</span>
-                    <button type="button" className="gdrive-folder-display">
-                      <FolderOpen size={16} />
-                      {settings.googleDrive.mainFolderName || 'No folder selected'}
-                    </button>
-                  </div>
-
-                  <div className="setting-control">
-                    <span>OPTION A — PASTE FOLDER LINK / ID</span>
-                    <div className="gdrive-folder-row">
-                      <input
-                        type="text"
-                        value={settings.googleDrive.manualFolderInput}
-                        onChange={(e) => update('googleDrive', { manualFolderInput: e.target.value })}
-                        placeholder="https://drive.google.com/drive/folders/XXXX  or  folder ID"
-                        style={{ flex: 1, padding: 8 }}
-                      />
-                      <button type="button" className="gdrive-change-folder" onClick={handleApplyManualFolder} disabled={gdrivePicking}>
-                        {gdrivePicking ? 'CHECKING...' : 'SET FOLDER'}
-                      </button>
-                    </div>
-                    <em style={{ fontSize: 11, opacity: 0.6 }}>
-                      Buka folder di Google Drive → copy URL → paste di sini.
-                    </em>
-                  </div>
-
-                  <div className="setting-control">
-                    <span>OPTION B — PICK FROM DRIVE</span>
-                    <div className="gdrive-folder-row">
-                      <button type="button" className="gdrive-change-folder" onClick={handleChangeFolder} disabled={gdrivePicking}>
-                        {gdrivePicking ? 'OPENING...' : 'OPEN PICKER'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="gdrive-actions">
-                    <button type="button" onClick={handleTestGdrive} disabled={gdriveTestState.status === 'running'}>
-                      {gdriveTestState.status === 'running' ? 'TESTING...' : 'TEST CONNECTION'}
-                    </button>
-                    <button type="button" onClick={handleReconnectGdrive} disabled={gdriveConnecting}>
-                      <RefreshCw size={14} /> {gdriveConnecting ? 'CONNECTING...' : 'RECONNECT'}
-                    </button>
-                    <button type="button" className="gdrive-disconnect" onClick={handleDisconnectGdrive}>
-                      <CloudOff size={16} /> DISCONNECT
-                    </button>
-                  </div>
-                  {gdriveTestState.status !== 'idle' ? (
-                    <div className={`settings-test-result ${gdriveTestState.status}`}>
-                      {gdriveTestState.status === 'success' ? <Check size={16} /> : gdriveTestState.status === 'error' ? <AlertCircle size={16} /> : null}
-                      {gdriveTestState.message}
+          <section className="photobooth-main">
+            {stream ? (
+              <>
+                <div className="photobooth-video-wrap">
+                  <CameraPreview stream={stream} mirror={cameraSettings.mirror} aspectRatio={cameraSettings.aspectRatio} className="photobooth-video" />
+                  {phase === 'countdown' ? (
+                    <div className="countdown-overlay">
+                      <span className="countdown-number">{countdown}</span>
                     </div>
                   ) : null}
                 </div>
-              )}
-            </div>
-          </div>
-        ) : null}
-
-        {activeTab === 'application' ? (
-          <div className="settings-simple-panel">
-            <div className="simple-panel-heading"><span>APPLICATION</span><p>Global software configuration</p></div>
-            <div className="simple-panel-grid">
-              <div className="setting-control">
-                <span>STARTUP MODE</span>
-                <select value={settings.application.startupMode} onChange={(e) => update('application', { startupMode: e.target.value })}>
-                  <option>HOME SCREEN</option>
-                  <option>PROJECT LIST</option>
-                  <option>PHOTOBOOTH</option>
-                </select>
+                <HiddenVideoCapture videoRef={videoRef} stream={stream} />
+              </>
+            ) : (
+              <div className="photobooth-preview">
+                {status === 'error' ? (
+                  <>
+                    <AlertCircle size={48} strokeWidth={1} />
+                    <span>CAMERA ERROR</span>
+                    <em>{error ? errorMessages[error] : 'Unable to start camera.'}</em>
+                  </>
+                ) : (
+                  <>
+                    <Camera size={64} strokeWidth={1} />
+                    <span>{status === 'connecting' ? 'CONNECTING CAMERA...' : 'CAMERA PREVIEW'}</span>
+                    <em>{status === 'connecting' ? 'Starting camera stream...' : 'Camera not connected.'}</em>
+                  </>
+                )}
               </div>
-              <div className="setting-control">
-                <span>LANGUAGE</span>
-                <select value={settings.application.language} onChange={(e) => update('application', { language: e.target.value })}>
-                  <option>ENGLISH</option>
-                  <option>BAHASA INDONESIA</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>CHECK FOR UPDATES</span>
-                <button className={`toggle-row ${settings.application.checkUpdates ? 'is-on' : ''}`} type="button" onClick={() => update('application', { checkUpdates: !settings.application.checkUpdates })}>
-                  <i />{settings.application.checkUpdates ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="setting-control">
-                <span>ANALYTICS</span>
-                <button className={`toggle-row ${settings.application.analytics ? 'is-on' : ''}`} type="button" onClick={() => update('application', { analytics: !settings.application.analytics })}>
-                  <i />{settings.application.analytics ? 'ON' : 'OFF'}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {activeTab === 'display' ? (
-          <div className="settings-simple-panel">
-            <div className="simple-panel-heading"><span>DISPLAY & INTERFACE</span><p>Screen and touch configuration</p></div>
-            <div className="simple-panel-grid">
-              <div className="setting-control">
-                <span>DISPLAY MODE</span>
-                <select value={settings.display.displayMode} onChange={(e) => update('display', { displayMode: e.target.value })}>
-                  <option>FULLSCREEN</option>
-                  <option>WINDOWED</option>
-                  <option>KIOSK</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>SCREEN BRIGHTNESS</span>
-                <div className="brightness-slider-wrap">
-                  <input type="range" min="20" max="100" value={settings.display.brightness} onChange={(e) => update('display', { brightness: parseInt(e.target.value, 10) })} className="brightness-slider" />
-                  <em>{settings.display.brightness}%</em>
-                </div>
-              </div>
-              <div className="setting-control">
-                <span>TOUCH INPUT</span>
-                <button className={`toggle-row ${settings.display.touchInput ? 'is-on' : ''}`} type="button" onClick={() => update('display', { touchInput: !settings.display.touchInput })}>
-                  <i />{settings.display.touchInput ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="setting-control">
-                <span>IDLE SCREEN</span>
-                <select value={settings.display.idleScreen} onChange={(e) => update('display', { idleScreen: e.target.value })}>
-                  <option>HOME SCREEN</option>
-                  <option>BLANK</option>
-                  <option>LOGO</option>
-                  <option>SLIDESHOW</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>SHOW PRINT BUTTON</span>
-                <button className={`toggle-row ${settings.display.showPrintButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showPrintButton: !settings.display.showPrintButton })}>
-                  <i />{settings.display.showPrintButton ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="setting-control">
-                <span>SHOW QR CODE BUTTON</span>
-                <button className={`toggle-row ${settings.display.showQrButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showQrButton: !settings.display.showQrButton })}>
-                  <i />{settings.display.showQrButton ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="setting-control">
-                <span>SHOW DRIVE QR BUTTON</span>
-                <button className={`toggle-row ${settings.display.showDriveQrButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showDriveQrButton: !settings.display.showDriveQrButton })}>
-                  <i />{settings.display.showDriveQrButton ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="setting-control">
-                <span>IDLE TIMEOUT (MIN)</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={String(settings.display.idleTimeoutMin ?? 3)}
-                  onChange={(e) => {
-                    const raw = e.target.value.replace(/[^0-9]/g, '');
-                    const num = raw === '' ? 0 : parseInt(raw, 10);
-                    update('display', { idleTimeoutMin: num });
-                  }}
-                  onBlur={(e) => {
-                    const raw = e.target.value.replace(/[^0-9]/g, '');
-                    const num = raw === '' ? 3 : parseInt(raw, 10);
-                    if (!num || num < 1 || num > 120) {
-                      update('display', { idleTimeoutMin: 3 });
-                    }
-                  }}
-                  placeholder="3"
-                  style={{ padding: 8, fontSize: 14 }}
-                />
-              </div>
-              <div className="setting-control">
-                <span>SLIDE DURATION (SEC)</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={String(settings.display.slideDurationSec ?? 5)}
-                  onChange={(e) => {
-                    const raw = e.target.value.replace(/[^0-9]/g, '');
-                    const num = raw === '' ? 0 : parseInt(raw, 10);
-                    update('display', { slideDurationSec: num });
-                  }}
-                  onBlur={(e) => {
-                    const raw = e.target.value.replace(/[^0-9]/g, '');
-                    const num = raw === '' ? 5 : parseInt(raw, 10);
-                    if (!num || num < 1 || num > 60) {
-                      update('display', { slideDurationSec: 5 });
-                    }
-                  }}
-                  placeholder="5"
-                  style={{ padding: 8, fontSize: 14 }}
-                />
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {activeTab === 'security' ? (
-          <div className="settings-simple-panel">
-            <div className="simple-panel-heading"><span>SECURITY & ADMIN</span><p>Access control and admin settings</p></div>
-            <div className="simple-panel-grid">
-              <div className="setting-control">
-                <span>ADMIN LOCK</span>
-                <button className={`toggle-row ${settings.security.adminLock ? 'is-on' : ''}`} type="button" onClick={() => update('security', { adminLock: !settings.security.adminLock })}>
-                  <i />{settings.security.adminLock ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className="setting-control">
-                <span>ADMIN PIN</span>
-                <input
-                  type="password"
-                  value={settings.security.adminPin}
-                  onChange={(e) => update('security', { adminPin: e.target.value })}
-                  placeholder={settings.security.adminPin ? '••••' : 'NOT SET'}
-                />
-              </div>
-              <div className="setting-control">
-                <span>AUTO LOCK</span>
-                <select value={settings.security.autoLock} onChange={(e) => update('security', { autoLock: e.target.value })}>
-                  <option>NEVER</option>
-                  <option>5 MINUTES</option>
-                  <option>15 MINUTES</option>
-                  <option>30 MINUTES</option>
-                </select>
-              </div>
-              <div className="setting-control">
-                <span>ACCESS LEVEL</span>
-                <select value={settings.security.accessLevel} onChange={(e) => update('security', { accessLevel: e.target.value })}>
-                  <option>OPERATOR</option>
-                  <option>ADMIN</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {activeTab === 'system' ? (
-          <div className="settings-simple-panel">
-            <div className="simple-panel-heading"><span>SYSTEM & DIAGNOSTICS</span><p>System health and diagnostics</p></div>
-            <div className="simple-panel-grid">
-              <div className="setting-control">
-                <span>APP VERSION</span>
-                <button type="button">{settings.system.appVersion}<b>▼</b></button>
-              </div>
-              <div className="setting-control">
-                <span>ELECTRON STATUS</span>
-                <button type="button">BROWSER MODE<b>▼</b></button>
-              </div>
-              <div className="setting-control">
-                <span>SYSTEM STATUS</span>
-                <button type="button">{diagResults.length > 0 ? (diagResults.every((d) => d.healthy) ? 'HEALTHY' : 'ATTENTION') : 'NOT CHECKED'}<b>▼</b></button>
-              </div>
-            </div>
-            <button className="storage-test" type="button" onClick={handleRunDiagnostics} disabled={diagRunning}>
-              {diagRunning ? 'RUNNING DIAGNOSTICS...' : 'RUN DIAGNOSTICS'} <ChevronRight size={19} />
+            )}
+          </section>
+          <div className="photobooth-controls">
+            <button className="photobooth-capture" type="button" disabled={!stream || phase === 'countdown' || totalCapturesNeeded === 0} onClick={handleCapture}>
+              <Camera size={32} /> {phase === 'countdown' ? 'CAPTURING...' : 'CAPTURE'}
             </button>
-            {diagResults.length > 0 ? (
-              <div className="diag-results">
-                {diagResults.map((d) => (
-                  <div key={d.label} className={`diag-row ${d.healthy ? 'healthy' : 'unhealthy'}`}>
-                    <span>{d.label}</span>
-                    <em>{d.status}</em>
-                    <i className={`diag-dot ${d.healthy ? 'ok' : 'err'}`} />
+          </div>
+          <div className="photobooth-camera-status">
+            <CameraStatusBadge status={status} error={error} />
+          </div>
+          <div className="photobooth-capture-info">
+            <span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span>
+          </div>
+          {captureError ? (
+            <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div>
+          ) : null}
+          {guestError ? (
+            <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div>
+          ) : null}
+          <div className="photobooth-slots">
+            {uniqueSlotsForPreview.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
+            {uniqueSlotsForPreview.map((slot) => {
+              const filled = captureMap.has(slot.captureId);
+              const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
+              return (
+                <div key={slot.id} className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}>
+                  {filled ? (
+                    <img src={captureMap.get(slot.captureId)} alt={slot.captureId} />
+                  ) : (
+                    <span>{slot.captureId}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
+
+      {phase === 'filter' ? (
+        <section className="photobooth-filter-section">
+          <div className="filter-header">
+            <h2>SELECT FILTER</h2>
+            <p>Tap a photo slot to select it, then choose a filter.</p>
+          </div>
+          <div ref={previewAreaRef} className="filter-preview-area">
+            <div
+              ref={previewFrameRef}
+              className="filter-preview-frame"
+              style={{
+                position: 'relative',
+                overflow: 'hidden',
+                background: '#2a2522',
+                margin: '0 auto',
+              }}
+            >
+              <canvas
+                ref={previewCanvasRef}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  display: 'block',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+                }}
+              />
+
+              {allSlots.map((slot) => {
+                const cap = captureMap.get(slot.captureId);
+                if (!cap) return null;
+                const isSelected = selectedCaptureId === slot.captureId;
+                return (
+                  <div
+                    key={slot.id}
+                    onClick={() => setSelectedCaptureId(slot.captureId)}
+                    style={{
+                      position: 'absolute',
+                      left: `${slot.x}%`,
+                      top: `${slot.y}%`,
+                      width: `${slot.w}%`,
+                      height: `${slot.h}%`,
+                      border: isSelected ? '2px solid #ffd94e' : '2px solid transparent',
+                      boxShadow: isSelected ? '0 0 0 2px rgba(255,217,78,.4)' : 'none',
+                      cursor: 'pointer',
+                      zIndex: 10,
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    {isSelected ? (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          bottom: 6,
+                          left: 6,
+                          padding: '3px 10px',
+                          background: '#ffd94e',
+                          color: '#1a1614',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          borderRadius: 4,
+                          letterSpacing: '.08em',
+                        }}
+                      >
+                        SELECTED
+                      </div>
+                    ) : null}
                   </div>
-                ))}
-              </div>
+                );
+              })}
+            </div>
+          </div>
+          {selectedCaptureId ? (
+            <div className="filter-options">
+              {FILTERS.map((f) => {
+                const currentFilter = captureFilters.get(selectedCaptureId) || 'natural';
+                return (
+                  <button
+                    key={f.id}
+                    className={currentFilter === f.id ? 'is-active' : ''}
+                    onClick={() => {
+                      setCaptureFilters((prev) => {
+                        const next = new Map(prev);
+                        next.set(selectedCaptureId, f.id);
+                        return next;
+                      });
+                    }}
+                    type="button"
+                  >
+                    <span className="filter-thumb" style={{ filter: f.css }}><FilterIcon size={18} /></span>
+                    {f.name}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <div className="filter-actions">
+            <button className="filter-back" onClick={() => { resetSession(); setPhase('live'); }} type="button"><RotateCcw size={18} /> RETAKE</button>
+            <button className="filter-compose" onClick={handleComposite} type="button"><ImageIcon size={18} /> COMPOSITE</button>
+          </div>
+        </section>
+      ) : null}
+
+      {phase === 'compositing' ? (
+        <section className="photobooth-compositing">
+          <div className="compositing-spinner" />
+          <span>COMPOSITING...</span>
+        </section>
+      ) : null}
+
+      {phase === 'result' && compositeUrl ? (
+        <section className="photobooth-result-section">
+          <div className="result-header">
+            <h2>YOUR PHOTO IS READY</h2>
+          </div>
+          <div className="result-preview">
+            <img src={compositeUrl} alt="Final result" />
+          </div>
+          <div className="result-actions">
+            <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} disabled={saving} type="button"><RotateCcw size={18} /> RETAKE</button>
+            <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
+              {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
+            </button>
+            {allSettings.display.showPrintButton ? (
+              <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
+                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
+              </button>
+            ) : null}
+            {allSettings.display.showQrButton ? (
+              <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button">
+                <QrCode size={18} /> QR CODE
+              </button>
+            ) : null}
+            {currentGuest && allSettings.display.showDriveQrButton ? (
+              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button">
+                <QrCode size={18} /> DRIVE QR
+              </button>
             ) : null}
           </div>
-        ) : null}
-      </section>
-      <footer className="settings-footer">
-        <button onClick={onHome} type="button">HOME</button>
-        <button className="save-settings-button" type="button" onClick={handleSave}>
-          {saveFlash ? 'SETTINGS SAVED' : 'SAVE SETTINGS'} <span>✓</span>
-        </button>
-      </footer>
-      {showTest ? <CameraTestModal settings={settings.camera} onClose={() => setShowTest(false)} /> : null}
+          <button className="result-new-session" onClick={handleBackToFrameSelect} disabled={saving} type="button">
+            <RefreshCw size={18} /> NEW SESSION
+          </button>
+        </section>
+      ) : null}
+
+      {phase === 'qr' ? (
+        <section className="photobooth-qr-section">
+          <div className="qr-header">
+            <h2>SCAN TO VIEW</h2>
+            <p>Scan this QR code with your phone to view your photo</p>
+          </div>
+          <div className="qr-display">
+            {qrError ? (
+              <div className="qr-error-state">
+                <AlertCircle size={48} strokeWidth={1} />
+                <span>QR GENERATION FAILED</span>
+                <button type="button" onClick={handleShowQr} className="qr-retry">RETRY</button>
+              </div>
+            ) : qrDataUrl ? (
+              <img src={qrDataUrl} alt="QR Code" />
+            ) : (
+              <div className="qr-loading"><div className="compositing-spinner" /></div>
+            )}
+          </div>
+          <div className="qr-actions">
+            <button className="qr-back-result" onClick={() => setPhase('result')} type="button"><ChevronLeft size={18} /> BACK</button>
+            <button className="qr-new-session" onClick={handleBackToFrameSelect} type="button"><RefreshCw size={18} /> NEW SESSION</button>
+          </div>
+        </section>
+      ) : null}
+
+      {phase === 'drive-qr' ? (
+        <section className="photobooth-qr-section">
+          <div className="qr-header">
+            <h2>SCAN TO GET YOUR PHOTOS</h2>
+            <p>Scan untuk mengambil foto</p>
+          </div>
+          <div className="qr-display">
+            {driveQrError ? (
+              <div className="qr-error-state">
+                <AlertCircle size={48} strokeWidth={1} />
+                <span>QR GENERATION FAILED</span>
+                <button type="button" onClick={handleShowDriveQr} className="qr-retry">RETRY</button>
+              </div>
+            ) : driveQrDataUrl ? (
+              <img src={driveQrDataUrl} alt="Google Drive QR Code" />
+            ) : (
+              <div className="qr-loading"><div className="compositing-spinner" /></div>
+            )}
+          </div>
+          <div className="qr-actions">
+            <button className="qr-back-result" onClick={() => setPhase('result')} type="button"><ChevronLeft size={18} /> BACK</button>
+            <button className="qr-new-session" onClick={handleBackToFrameSelect} type="button"><RefreshCw size={18} /> DONE</button>
+          </div>
+        </section>
+      ) : null}
+
+      {showAdminExit ? (
+        <div className="admin-exit-overlay" onClick={() => setShowAdminExit(false)}>
+          <div className="admin-exit-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Exit Event?</h3>
+            <div className="admin-exit-actions">
+              <button onClick={() => setShowAdminExit(false)} type="button">CANCEL</button>
+              <button className="admin-exit-confirm" onClick={() => { setShowAdminExit(false); onExit(); }} type="button">EXIT EVENT</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 };
 
-function App() {
-  const [screen, setScreen] = useState<Screen>('home');
-  const [events, setEvents] = useState<R3aEvent[]>([]);
-  const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
-  const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
-  const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
-  const [hash, setHash] = useState(() =>
-    typeof window !== 'undefined' ? window.location.hash : ''
-  );
-
-  /* ============================================================
-     URL SLUG STATE
-     ============================================================ */
-  const [urlSlug, setUrlSlug] = useState<string>(() => getSlugFromUrl());
-  const [cloudEvent, setCloudEvent] = useState<CloudEvent | null>(null);
-  const [cloudLoading, setCloudLoading] = useState<boolean>(false);
-
-  /* ============================================================
-     SYNC FROM CLOUD STATE
-     ============================================================ */
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-
-  // Ref untuk screen & phase (dibaca dari setInterval)
-  const screenRef = useRef<Screen>(screen);
-  useEffect(() => { screenRef.current = screen; }, [screen]);
-  const photoboothPhaseRef = useRef<string>('frame-select');
-
-  // === Reminder state ===
-  const [reminderVisible, setReminderVisible] = useState(false);
-  const [reminderMinutes, setReminderMinutes] = useState(0);
-  const [reminderRefreshing, setReminderRefreshing] = useState(false);
-  const [needsFullscreen, setNeedsFullscreen] = useState(false);
-  const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastReminderAtRef = useRef<number>(Date.now());
-
-  // === Idle screensaver state ===
-  const [screensaverVisible, setScreensaverVisible] = useState(false);
-  const lastActivityRef = useRef<number>(Date.now());
-  const screensaverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const refreshEvents = async () => { setEvents(await getAllEvents()); };
-  useEffect(() => { void refreshEvents(); }, []);
-
+const HiddenVideoCapture = ({ videoRef, stream }: { videoRef: React.RefObject<HTMLVideoElement | null>; stream: MediaStream | null }) => {
   useEffect(() => {
-    const onHash = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', onHash);
-    onHash();
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-
-  /* ---------- Handle URL changes (popstate) ---------- */
-  useEffect(() => {
-    const onPopState = () => {
-      const slug = getSlugFromUrl();
-      setUrlSlug(slug);
-      if (!slug) {
-        setCloudEvent(null);
-        setCloudLoading(false);
-        setActiveEvent(null);
-      }
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  /* ---------- Trigger cloud load kalau urlSlug bukan reserved ---------- */
-  useEffect(() => {
-    const slug = urlSlug;
-    if (!slug) return;
-    if (RESERVED_PATHS.has(slug)) return;
-    if (cloudEvent || cloudLoading) return;
-    // Kalau activeEvent ada DAN slug cocok → tidak perlu load dari cloud
-    if (activeEvent && activeEvent.slug === slug) return;
-
-    setCloudLoading(true);
-  }, [urlSlug, cloudEvent, cloudLoading, activeEvent]);
-
-  /* ---------- HANDLE SYNC FROM CLOUD ---------- */
-  const handleSyncFromCloud = async () => {
-    setSyncing(true);
-    setSyncMessage(null);
-
-    try {
-      const result: SyncResult = await syncCloudToLocal(saveEventLocal, getAllEvents);
-
-      await refreshEvents();
-
-      if (result.errors.length > 0) {
-        setSyncMessage(`⚠️ ${result.added} baru, ${result.updated} update, ${result.errors.length} error`);
-      } else if (result.total === 0) {
-        setSyncMessage(`Tidak ada event di cloud`);
-      } else {
-        setSyncMessage(`✅ ${result.added} baru, ${result.updated} update, ${result.skipped} skip`);
-      }
-    } catch (err) {
-      setSyncMessage(`❌ Sync gagal: ${err instanceof Error ? err.message : 'unknown'}`);
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncMessage(null), 5000);
-    }
-  };
-
-  // === Reminder timer ===
-  useEffect(() => {
-    if (reminderTimerRef.current) {
-      clearInterval(reminderTimerRef.current);
-      reminderTimerRef.current = null;
-    }
-
-    const gd = settings.googleDrive;
-    if (!gd.reminderEnabled || !gd.connected || !VITE_CLIENT_ID) {
-      setReminderVisible(false);
-      return;
-    }
-
-    const rawInterval = Number(gd.reminderIntervalMin);
-    const intervalMin =
-      Number.isFinite(rawInterval) && rawInterval >= 1 && rawInterval <= 60
-        ? rawInterval
-        : 50;
-    const intervalMs = intervalMin * 60 * 1000;
-
-    lastReminderAtRef.current = Date.now();
-
-    reminderTimerRef.current = setInterval(() => {
-      const now = Date.now();
-      if (now - lastReminderAtRef.current < intervalMs) return;
-
-      const status = getTokenStatus();
-      const msLeft = status.hasToken && status.expiresAt ? status.expiresAt - now : 0;
-      const minutesLeft = Math.max(0, Math.floor(msLeft / 60000));
-
-      setReminderMinutes(minutesLeft);
-      setReminderVisible(true);
-      setNeedsFullscreen(false);
-      lastReminderAtRef.current = now;
-    }, 5 * 1000);
-  }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.reminderIntervalMin]);
-
-  // === Idle screensaver timer ===
-  useEffect(() => {
-    if (screensaverTimerRef.current) {
-      clearInterval(screensaverTimerRef.current);
-      screensaverTimerRef.current = null;
-    }
-
-    const timeoutMin = Number(settings.display.idleTimeoutMin);
-    const timeoutMs =
-      Number.isFinite(timeoutMin) && timeoutMin >= 1 && timeoutMin <= 120
-        ? timeoutMin * 60 * 1000
-        : 3 * 60 * 1000;
-
-    const bumpActivity = () => {
-      lastActivityRef.current = Date.now();
-      setScreensaverVisible(false);
-    };
-
-    window.addEventListener('mousemove', bumpActivity);
-    window.addEventListener('click', bumpActivity);
-    window.addEventListener('touchstart', bumpActivity);
-    window.addEventListener('keydown', bumpActivity);
-
-    lastActivityRef.current = Date.now();
-
-    screensaverTimerRef.current = setInterval(() => {
-      const now = Date.now();
-      if (now - lastActivityRef.current < timeoutMs) return;
-      if (typeof window !== 'undefined' && window.location.hash === '#operator') return;
-
-      if (screenRef.current === 'photobooth-session') {
-        if (photoboothPhaseRef.current !== 'frame-select') return;
-      }
-
-      setScreensaverVisible(true);
-    }, 5 * 1000);
-
-    return () => {
-      window.removeEventListener('mousemove', bumpActivity);
-      window.removeEventListener('click', bumpActivity);
-      window.removeEventListener('touchstart', bumpActivity);
-      window.removeEventListener('keydown', bumpActivity);
-      if (screensaverTimerRef.current) clearInterval(screensaverTimerRef.current);
-    };
-  }, [settings.display.idleTimeoutMin]);
-
-  const handleReminderRefresh = async () => {
-    const clientId = VITE_CLIENT_ID;
-    if (!clientId) {
-      setReminderVisible(false);
-      return;
-    }
-    setReminderRefreshing(true);
-    try {
-      const result = await connectGoogleDrive(clientId);
-      if (result.success) {
-        const next = { ...settings, googleDrive: { ...settings.googleDrive, connected: true, account: result.account || 'Connected' } };
-        setSettings(next);
-        saveAllSettings(next);
-        lastReminderAtRef.current = Date.now();
-        setNeedsFullscreen(true);
-      }
-    } catch { /* ignore */ }
-    setReminderRefreshing(false);
-  };
-
-  const handleGoFullscreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen?.();
-      }
-    } catch { /* ignore */ }
-    setNeedsFullscreen(false);
-    setReminderVisible(false);
-  };
-
-  const reminderProps = {
-    visible: reminderVisible,
-    minutes: reminderMinutes,
-    refreshing: reminderRefreshing,
-    onRefresh: handleReminderRefresh,
-    onDismiss: () => setReminderVisible(false),
-    needsFullscreen,
-    onGoFullscreen: handleGoFullscreen,
-    screensaverVisible,
-    slideDurationSec: settings.display.slideDurationSec || 5,
-    onScreensaverDismiss: () => {
-      lastActivityRef.current = Date.now();
-      setScreensaverVisible(false);
-    },
-  };
-
-  /* ============================================================
-     ROUTING PRIORITY
-     ============================================================ */
-
-  // Priority 1: Operator via hash
-  if (hash === '#operator') {
-    return (
-      <OperatorDashboard
-        allSettings={settings}
-        onClose={() => {
-          window.location.hash = '';
-          setHash('');
-        }}
-      />
-    );
-  }
-
-  // Priority 2: Event via URL slug
-  if (urlSlug && !RESERVED_PATHS.has(urlSlug)) {
-    // ✅ Kalau activeEvent ada DAN slug cocok → pakai LOKAL (frame lengkap)
-    if (activeEvent && activeEvent.slug === urlSlug) {
-      return (
-        <WithReminder {...reminderProps}>
-          <PhotoboothSession
-            event={activeEvent}
-            cameraSettings={settings.camera}
-            allSettings={settings}
-            onExit={() => {
-              window.history.pushState({}, '', '/');
-              setUrlSlug('');
-              setActiveEvent(null);
-              setScreen('project-list');
-            }}
-            onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
-          />
-        </WithReminder>
-      );
-    }
-
-    // Kalau cloudEvent ada → pakai (untuk guest buka URL langsung)
-    if (cloudEvent) {
-      return (
-        <WithReminder {...reminderProps}>
-          <PhotoboothSession
-            event={cloudEvent}
-            cameraSettings={settings.camera}
-            allSettings={settings}
-            onExit={() => {
-              window.history.pushState({}, '', '/');
-              setUrlSlug('');
-              setCloudEvent(null);
-              setCloudLoading(false);
-              setScreen('home');
-            }}
-            onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
-          />
-        </WithReminder>
-      );
-    }
-
-    // Belum load → tampilkan EventLoader
-    return (
-      <WithReminder {...reminderProps}>
-        <EventLoader
-          slug={urlSlug}
-          onLoad={(event) => {
-            setCloudEvent(event);
-            setCloudLoading(false);
-          }}
-          onNotFound={() => {
-            window.history.pushState({}, '', '/');
-            setUrlSlug('');
-            setCloudLoading(false);
-          }}
-        />
-      </WithReminder>
-    );
-  }
-
-  if (screen === 'project-list') {
-    return (
-      <WithReminder {...reminderProps}>
-        <ProjectList
-          events={events}
-          onHome={() => setScreen('home')}
-          onOpen={(event) => {
-            // ✅ Push URL ke /[slug] kalau event punya slug
-            if (event.slug) {
-              window.history.pushState({}, '', `/${event.slug}`);
-              setUrlSlug(event.slug);
-            }
-            setActiveEvent(event);
-            setScreen('photobooth-session');
-          }}
-          onNew={() => { setEditingEvent(createEmptyEvent()); setScreen('event-file'); }}
-          onEditEvent={(event) => { setEditingEvent(event); setScreen('event-file'); }}
-          onSyncFromCloud={handleSyncFromCloud}
-          syncing={syncing}
-          syncMessage={syncMessage}
-        />
-      </WithReminder>
-    );
-  }
-
-  if (screen === 'event-file' && editingEvent) {
-    return (
-      <WithReminder {...reminderProps}>
-        <EventFile event={editingEvent} onSaved={async (saved) => { await refreshEvents(); setEditingEvent(saved); setScreen('project-list'); }} onHome={() => setScreen('project-list')} />
-      </WithReminder>
-    );
-  }
-
-  if (screen === 'photobooth-session' && activeEvent && !urlSlug) {
-    return (
-      <WithReminder {...reminderProps}>
-        <PhotoboothSession
-          event={activeEvent}
-          cameraSettings={settings.camera}
-          allSettings={settings}
-          onExit={() => { setActiveEvent(null); setScreen('project-list'); }}
-          onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
-        />
-      </WithReminder>
-    );
-  }
-
-  if (screen === 'photobooth-session' && !activeEvent) {
-    return (
-      <WithReminder {...reminderProps}>
-        <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-          <AlertCircle size={48} strokeWidth={1} />
-          <h2 style={{ fontSize: 24, margin: 0 }}>Event not found</h2>
-          <p style={{ color: 'rgba(255,255,255,.5)', margin: 0 }}>The event data is missing or malformed.</p>
-          <button onClick={() => setScreen('project-list')} type="button" style={{ marginTop: 8, padding: '10px 24px', background: '#ef3f25', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>BACK</button>
-        </main>
-      </WithReminder>
-    );
-  }
-
-  if (screen === 'settings') {
-    return (
-      <WithReminder {...reminderProps}>
-        <Settings onHome={() => { setSettings(loadAllSettings()); setScreen('home'); }} />
-      </WithReminder>
-    );
-  }
-
-  return (
-    <WithReminder {...reminderProps}>
-      <main className="home-screen">
-        <div className="grain" aria-hidden="true" />
-        <div className="corner-shape corner-shape-left" aria-hidden="true"><i /><i /><i /><i /></div>
-        <div className="corner-shape corner-shape-right" aria-hidden="true"><i /><i /><i /><i /></div>
-        <div className="pattern pattern-top" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div>
-        <div className="pattern pattern-bottom" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div>
-        <button className="fullscreen-button" type="button" title="Toggle fullscreen" onClick={() => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); }}><Maximize2 size={19} /></button>
-        <section className="home-content">
-          <div className="brand-lockup"><span className="brand-r3a">R3A</span><span className="brand-booth">BOOTH</span></div>
-          <p className="home-kicker">EVENT PHOTO EXPERIENCE</p>
-          <div className="home-actions">
-            <button className="primary-button" onClick={() => setScreen('project-list')} type="button"><span>PROJECT</span><ChevronRight size={26} /></button>
-            <button className="primary-button" onClick={() => setScreen('settings')} type="button"><span>SETTINGS</span><ChevronRight size={26} /></button>
-          </div>
-        </section>
-        <div className="home-footer"><span>R3A BOOTH</span><span>READY TO CREATE</span></div>
-      </main>
-    </WithReminder>
-  );
-}
-
-export default App;
+    const video = videoRef.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+    const onLoaded = () => { void video.play().catch(() => {}); };
+    video.addEventListener('loadedmetadata', onLoaded);
+    if (video.readyState >= 2) { void video.play().catch(() => {}); }
+    return () => { video.removeEventListener('loadedmetadata', onLoaded); };
+  }, [stream, videoRef]);
+  return <video ref={videoRef as React.RefObject<HTMLVideoElement>} autoPlay playsInline muted style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 }} />;
+};
