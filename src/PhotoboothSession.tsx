@@ -834,7 +834,17 @@ export const PhotoboothSession = ({
               return (
                 <div key={slot.id} className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}>
                   {filled ? (
-                    <img src={captureMap.get(slot.captureId)} alt={slot.captureId} style={{ objectFit: 'cover' }} />
+                    <img 
+                      src={captureMap.get(slot.captureId)} 
+                      alt={slot.captureId} 
+                      style={{ 
+                        objectFit: 'cover',
+                        objectPosition: 'center',
+                        width: '100%',
+                        height: '100%',
+                        display: 'block'
+                      }} 
+                    />
                   ) : (
                     <span>{slot.captureId}</span>
                   )}
@@ -870,7 +880,18 @@ export const PhotoboothSession = ({
                     style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` }}
                     onClick={() => setSelectedCaptureId(slot.captureId)}
                   >
-                    <img src={cap} alt={slot.captureId} style={{ filter: getFilterCss(filterId), objectFit: 'cover' }} />
+                    <img 
+                      src={cap} 
+                      alt={slot.captureId} 
+                      style={{ 
+                        filter: getFilterCss(filterId), 
+                        objectFit: 'cover',
+                        objectPosition: 'center',
+                        width: '100%',
+                        height: '100%',
+                        display: 'block'
+                      }} 
+                    />
                   </div>
                 );
               })}
@@ -889,7 +910,18 @@ export const PhotoboothSession = ({
                   onClick={() => setSelectedCaptureId(capId)}
                   type="button"
                 >
-                  <img src={cap} alt={capId} style={{ filter: getFilterCss(filterId), objectFit: 'cover' }} />
+                  <img 
+                    src={cap} 
+                    alt={capId} 
+                    style={{ 
+                      filter: getFilterCss(filterId), 
+                      objectFit: 'cover',
+                      objectPosition: 'center',
+                      width: '100%',
+                      height: '100%',
+                      display: 'block'
+                    }} 
+                  />
                   <span>{capId}</span>
                   {filterId !== 'natural' ? <em className="filter-badge">{filterId.toUpperCase()}</em> : null}
                 </button>
