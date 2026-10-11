@@ -12,7 +12,7 @@ import {
   type Unsubscribe,
 } from 'firebase/database';
 import { getFirebaseDb, isFirebaseConfigured } from './firebaseConfig';
-import type { R3aEvent } from './eventTypes';
+import type { R3aEvent } from './eventStore';
 
 /* ---------- TYPE ---------- */
 export type CloudEvent = R3aEvent & {

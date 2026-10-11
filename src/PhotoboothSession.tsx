@@ -13,7 +13,7 @@ import { buildDriveFolderUrl } from './gdriveService';
 import { recordSession } from './sessionStats';
 import { writeStatus, markOfflineOnDisconnect, clearStatus } from './statusSync';
 import type { CameraSettings } from './cameraStore';
-import type { Frame, R3aEvent, Slot } from './eventTypes';
+import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
 
 const VITE_CLIENT_ID =
