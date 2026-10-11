@@ -503,8 +503,18 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
         }
         if (rawSlotPhotos.length > 0) {
           try {
-            const DURATION_PER_SLIDE_MS = 300;
-            slideshowVideo = await generateSlideshowVideo(rawSlotPhotos, DURATION_PER_SLIDE_MS);
+            const DURATION_PER_SLIDE_MS = 300;   // durasi per foto (ms)
+            const LOOP_COUNT = 3;                // berapa kali urutan diulang
+
+            // Duplikasi array foto 3x → [1,2,3,1,2,3,1,2,3]
+            const loopedPhotos: { dataUrl: string }[] = [];
+            for (let loop = 0; loop < LOOP_COUNT; loop++) {
+              for (const p of rawSlotPhotos) {
+                loopedPhotos.push({ dataUrl: p.dataUrl });
+              }
+            }
+
+            slideshowVideo = await generateSlideshowVideo(loopedPhotos, DURATION_PER_SLIDE_MS);
           } catch {
             slideshowVideo = null;
           }
