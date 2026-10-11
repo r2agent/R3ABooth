@@ -3,7 +3,6 @@ import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Chec
 import { EventFile } from './EventFile';
 import { EventLoader } from './EventLoader';
 import { createEmptyEvent, deleteEvent, getAllEvents, saveEvent as saveEventLocal, type R3aEvent } from './eventStore';
-import type { R3aEvent } from './eventStore';
 import { syncCloudToLocal, type SyncResult, type CloudEvent } from './cloudEventSync';
 import { enumerateCameras, type CameraDevice } from './cameraStore';
 import { CameraTestModal, CameraStatusBadge } from './cameraUi';
@@ -1051,10 +1050,8 @@ function App() {
     try {
       const result: SyncResult = await syncCloudToLocal(saveEventLocal, getAllEvents);
 
-      // Refresh list lokal
       await refreshEvents();
 
-      // Format pesan hasil
       if (result.errors.length > 0) {
         setSyncMessage(`⚠️ ${result.added} baru, ${result.updated} update, ${result.errors.length} error`);
       } else if (result.total === 0) {
@@ -1066,12 +1063,11 @@ function App() {
       setSyncMessage(`❌ Sync gagal: ${err instanceof Error ? err.message : 'unknown'}`);
     } finally {
       setSyncing(false);
-      // Auto clear message setelah 5 detik
       setTimeout(() => setSyncMessage(null), 5000);
     }
   };
 
-  // === Reminder timer — MURNI BY INTERVAL ===
+  // === Reminder timer ===
   useEffect(() => {
     if (reminderTimerRef.current) {
       clearInterval(reminderTimerRef.current);
@@ -1202,9 +1198,6 @@ function App() {
 
   /* ============================================================
      ROUTING PRIORITY
-     1. /#operator (hash) → OperatorDashboard
-     2. /:slug (URL) → EventLoader → PhotoboothSession
-     3. Internal screens
      ============================================================ */
 
   // Priority 1: Operator via hash
