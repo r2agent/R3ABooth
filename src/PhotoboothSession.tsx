@@ -342,6 +342,20 @@ export const PhotoboothSession = ({
   const uniqueCaptureIds = useMemo(() => getUniqueCaptureIds(allSlots), [allSlots]);
   const totalCapturesNeeded = uniqueCaptureIds.length;
 
+  /* Slot untuk sidebar live preview — hanya captureId UNIK.
+     Kalau ada slot duplikat (captureId sama), hanya yang pertama ditampilkan. */
+  const uniqueSlotsForPreview = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Slot[] = [];
+    for (const s of allSlots) {
+      if (!seen.has(s.captureId)) {
+        seen.add(s.captureId);
+        result.push(s);
+      }
+    }
+    return result;
+  }, [allSlots]);
+
   useEffect(() => {
     if (!activeFrame?.image) { setFrameAspect(3 / 2); return; }
     const img = new Image();
@@ -958,8 +972,8 @@ export const PhotoboothSession = ({
             <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div>
           ) : null}
           <div className="photobooth-slots">
-            {allSlots.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
-            {allSlots.map((slot) => {
+            {uniqueSlotsForPreview.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
+            {uniqueSlotsForPreview.map((slot) => {
               const filled = captureMap.has(slot.captureId);
               const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
               return (
