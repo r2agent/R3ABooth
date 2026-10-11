@@ -9,7 +9,7 @@ import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './q
 import { printResult } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, getUploadStats, type UploadFileEntry } from './uploadService';
-import { buildDriveFolderUrl, getTokenStatus } from './gdriveService';
+import { buildDriveFolderUrl, getTokenStatus, connectGoogleDrive } from './gdriveService';
 import { recordSession, getTodayStats, resetAppUptime, clearAllStats } from './sessionStats';
 import { downloadLogs } from './deviceDiagnostic';
 import {
@@ -19,6 +19,7 @@ import {
   getDeviceId,
   subscribeCommands,
   clearCommand,
+  getStorageEstimate,
 } from './statusSync';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
@@ -349,6 +350,7 @@ export const PhotoboothSession = ({
       const token = getTokenStatus();
       const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
       const todayStats = getTodayStats();
+      const storage = await getStorageEstimate();
       if (cancelled) return;
 
       void writeStatus({
@@ -365,6 +367,9 @@ export const PhotoboothSession = ({
         failedCount: stats.failed,
         todaySessionCount: todayStats.sessionCount,
         todayPhotoCount: todayStats.photoCount,
+        storageFree: storage.free,
+        storageUsed: storage.used,
+        storageQuota: storage.quota,
       });
     };
 
@@ -413,6 +418,17 @@ export const PhotoboothSession = ({
           case 'download-logs':
             downloadLogs();
             break;
+          case 'reconnect-drive': {
+            if (!VITE_CLIENT_ID) break;
+            void (async () => {
+              try {
+                await connectGoogleDrive(VITE_CLIENT_ID);
+              } catch {
+                /* ignore */
+              }
+            })();
+            break;
+          }
         }
       } catch {
         /* ignore */

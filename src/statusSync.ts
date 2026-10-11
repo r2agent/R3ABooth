@@ -38,9 +38,13 @@ export type TabletStatus = {
   uploadedCount: number;
   pendingCount: number;
   failedCount: number;
-  /* Statistik hari ini (untuk agregat) */
+  /* Statistik hari ini */
   todaySessionCount: number;
   todayPhotoCount: number;
+  /* NEW: storage info */
+  storageFree: number;
+  storageUsed: number;
+  storageQuota: number;
 };
 
 /* ---------- COMMAND TYPE ---------- */
@@ -50,7 +54,8 @@ export type CommandType =
   | 'retry-all'
   | 'reset-uptime'
   | 'clear-stats'
-  | 'download-logs';
+  | 'download-logs'
+  | 'reconnect-drive';
 
 export type DeviceCommand = {
   type: CommandType;
@@ -91,9 +96,7 @@ function commandPath(deviceId: string): string {
   return `commands/${deviceId}`;
 }
 
-/* ============================================================
-   WRITE STATUS
-   ============================================================ */
+/* ---------- WRITE STATUS ---------- */
 export async function writeStatus(partial: Partial<TabletStatus>): Promise<void> {
   if (!isFirebaseConfigured()) return;
 
@@ -124,17 +127,16 @@ export async function writeStatus(partial: Partial<TabletStatus>): Promise<void>
       failedCount: partial.failedCount ?? 0,
       todaySessionCount: partial.todaySessionCount ?? 0,
       todayPhotoCount: partial.todayPhotoCount ?? 0,
+      storageFree: partial.storageFree ?? 0,
+      storageUsed: partial.storageUsed ?? 0,
+      storageQuota: partial.storageQuota ?? 0,
     };
 
     await set(ref(db, statusPath(deviceId)), status);
-  } catch {
-    /* silent fail */
-  }
+  } catch { /* silent fail */ }
 }
 
-/* ============================================================
-   MARK OFFLINE
-   ============================================================ */
+/* ---------- MARK OFFLINE ---------- */
 export function markOfflineOnDisconnect(): void {
   if (!isFirebaseConfigured()) return;
   try {
@@ -164,13 +166,14 @@ export function markOfflineOnDisconnect(): void {
       failedCount: 0,
       todaySessionCount: 0,
       todayPhotoCount: 0,
+      storageFree: 0,
+      storageUsed: 0,
+      storageQuota: 0,
     });
   } catch { /* silent fail */ }
 }
 
-/* ============================================================
-   SUBSCRIBE ALL DEVICES (untuk Operator)
-   ============================================================ */
+/* ---------- SUBSCRIBE ALL DEVICES ---------- */
 export function subscribeAllTablets(
   cb: (tablets: TabletStatus[]) => void,
 ): Unsubscribe {
@@ -189,9 +192,7 @@ export function subscribeAllTablets(
   });
 }
 
-/* ============================================================
-   CLEAR STATUS
-   ============================================================ */
+/* ---------- CLEAR STATUS ---------- */
 export async function clearStatus(): Promise<void> {
   if (!isFirebaseConfigured()) return;
   try {
@@ -201,9 +202,7 @@ export async function clearStatus(): Promise<void> {
   } catch { /* silent fail */ }
 }
 
-/* ============================================================
-   SEND COMMAND (operator → tablet)
-   ============================================================ */
+/* ---------- SEND COMMAND ---------- */
 export async function sendCommand(
   deviceId: string,
   type: CommandType,
@@ -219,9 +218,7 @@ export async function sendCommand(
   }
 }
 
-/* ============================================================
-   SUBSCRIBE COMMANDS (tablet — listen dari operator)
-   ============================================================ */
+/* ---------- SUBSCRIBE COMMANDS ---------- */
 export function subscribeCommands(
   deviceId: string,
   cb: (cmd: DeviceCommand | null) => void,
@@ -237,9 +234,7 @@ export function subscribeCommands(
   });
 }
 
-/* ============================================================
-   CLEAR COMMAND (tablet — setelah eksekusi)
-   ============================================================ */
+/* ---------- CLEAR COMMAND ---------- */
 export async function clearCommand(deviceId: string): Promise<void> {
   if (!isFirebaseConfigured()) return;
   try {
@@ -248,9 +243,7 @@ export async function clearCommand(deviceId: string): Promise<void> {
   } catch { /* silent fail */ }
 }
 
-/* ============================================================
-   WATCH SPECIFIC DEVICE STATUS
-   ============================================================ */
+/* ---------- GET DEVICE STATUS ---------- */
 export async function getDeviceStatus(deviceId: string): Promise<TabletStatus | null> {
   if (!isFirebaseConfigured()) return null;
   try {
@@ -259,6 +252,24 @@ export async function getDeviceStatus(deviceId: string): Promise<TabletStatus | 
     return snap.exists() ? (snap.val() as TabletStatus) : null;
   } catch {
     return null;
+  }
+}
+
+/* ---------- STORAGE ESTIMATE HELPER ---------- */
+export async function getStorageEstimate(): Promise<{ free: number; used: number; quota: number }> {
+  try {
+    type StorageEstimate = { quota?: number; usage?: number };
+    const nav = navigator as Navigator & { storage?: { estimate?: () => Promise<StorageEstimate> } };
+    if (!nav.storage || !nav.storage.estimate) {
+      return { free: 0, used: 0, quota: 0 };
+    }
+    const est = await nav.storage.estimate();
+    const quota = est.quota ?? 0;
+    const used = est.usage ?? 0;
+    const free = quota - used;
+    return { free, used, quota };
+  } catch {
+    return { free: 0, used: 0, quota: 0 };
   }
 }
 
