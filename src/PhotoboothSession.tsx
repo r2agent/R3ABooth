@@ -1,1281 +1,212 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key } from 'lucide-react';
-import { useCamera } from './useCamera';
-import { CameraPreview, CameraStatusBadge, errorMessages } from './cameraUi';
-import { getAspectRatioValue } from './cameraStore';
-import { FILTERS, getFilterCss, isGlowFilter, applyGlowToCanvas } from './filters';
-import { saveCapture, saveResult, type StoredCapture, type StoredResult } from './storage';
-import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
-import { printResult } from './printService';
-import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
-import { autoUploadToGuestFolder, retryFailedUploads, getUploadStats, type UploadFileEntry } from './uploadService';
-import { buildDriveFolderUrl, getTokenStatus, connectGoogleDrive } from './gdriveService';
-import { recordSession, getTodayStats, resetAppUptime, clearAllStats } from './sessionStats';
-import { downloadLogs } from './deviceDiagnostic';
-import {
-  writeStatus,
-  markOfflineOnDisconnect,
-  clearStatus,
-  getDeviceId,
-  subscribeCommands,
-  clearCommand,
-  getDriveQuota,
-} from './statusSync';
-import type { CameraSettings } from './cameraStore';
-import type { Frame, R3aEvent, Slot } from './eventStore';
-import type { AllSettings } from './settingsStore';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getEffectiveResolution, getFrameRateConstraint, getPreviewQualityConstraint, type CameraSettings } from './cameraStore';
 
-const VITE_CLIENT_ID =
-  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
+export type CameraStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
+export type CameraError = 'permission-denied' | 'not-found' | 'in-use' | 'unknown';
 
-/* Event name untuk trigger restart kamera dari mana saja */
-const RESTART_CAMERA_EVENT = 'r3a:restart-camera';
+export function useCamera(settings: CameraSettings | null, enabled: boolean) {
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [status, setStatus] = useState<CameraStatus>('idle');
+  const [error, setError] = useState<CameraError | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enabledRef = useRef(enabled);
+  const settingsRef = useRef(settings);
+  const isRestartingRef = useRef(false);
 
-type SessionPhase = 'frame-select' | 'ready' | 'live' | 'countdown' | 'filter' | 'compositing' | 'result' | 'qr' | 'drive-qr';
+  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
-type CaptureError = { message: string } | null;
-
-type CaptureData = {
-  captureId: string;
-  dataUrl: string;
-};
-
-function getUniqueCaptureIds(slots: Slot[]): string[] {
-  const seen = new Set<string>();
-  const ids: string[] = [];
-  for (const s of slots) {
-    if (!seen.has(s.captureId)) { seen.add(s.captureId); ids.push(s.captureId); }
-  }
-  return ids;
-}
-
-function captureFromVideo(video: HTMLVideoElement, mirror: boolean): string {
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 1920;
-  canvas.height = video.videoHeight || 1080;
-  const ctx = canvas.getContext('2d')!;
-  if (mirror) {
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-  }
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.92);
-}
-
-function pickVideoMimeType(): string {
-  if (typeof MediaRecorder === 'undefined') return '';
-  const candidates = [
-    'video/mp4;codecs=h264',
-    'video/mp4',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
-  for (const type of candidates) {
-    if (MediaRecorder.isTypeSupported(type)) return type;
-  }
-  return '';
-}
-
-function guessVideoExtension(dataUrl: string): string {
-  const match = dataUrl.match(/^data:video\/([a-zA-Z0-9]+)/);
-  if (!match) return 'webm';
-  return match[1].includes('mp4') ? 'mp4' : 'webm';
-}
-
-function loadImageEl(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Failed to load image for video'));
-    img.src = src;
-  });
-}
-
-async function generateSlideshowVideo(
-  photos: { dataUrl: string }[],
-  durationPerPhotoMs: number,
-): Promise<string | null> {
-  if (photos.length === 0) return null;
-  const mimeType = pickVideoMimeType();
-  type CaptureCanvas = HTMLCanvasElement & { captureStream?: (fps?: number) => MediaStream };
-  const canvas = document.createElement('canvas') as CaptureCanvas;
-  if (!mimeType || typeof MediaRecorder === 'undefined' || typeof canvas.captureStream !== 'function') {
-    return null;
-  }
-
-  let images: HTMLImageElement[];
-  try {
-    images = await Promise.all(photos.map((p) => loadImageEl(p.dataUrl)));
-  } catch {
-    return null;
-  }
-
-  const width = images[0].naturalWidth || 1280;
-  const height = images[0].naturalHeight || 720;
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  const stream = canvas.captureStream(10);
-
-  return new Promise<string | null>((resolve) => {
-    const chunks: Blob[] = [];
-    let recorder: MediaRecorder;
-    try {
-      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
-    } catch {
-      resolve(null);
-      return;
+  /* ---------- STOP TRACKS (no state) ---------- */
+  const stopTracks = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => {
+        try { t.stop(); } catch { /* ignore */ }
+      });
+      streamRef.current = null;
     }
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType });
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    };
-
-    ctx.drawImage(images[0], 0, 0, width, height);
-    recorder.start();
-
-    let i = 1;
-    const drawNext = () => {
-      if (i < images.length) {
-        ctx.drawImage(images[i], 0, 0, width, height);
-        i++;
-        setTimeout(drawNext, durationPerPhotoMs);
-      } else {
-        setTimeout(() => recorder.stop(), durationPerPhotoMs);
-      }
-    };
-    setTimeout(drawNext, durationPerPhotoMs);
-  });
-}
-
-function drawPhotoCovered(ctx: CanvasRenderingContext2D, photo: HTMLImageElement, sx: number, sy: number, sw: number, sh: number): void {
-  const scale = Math.max(sw / photo.naturalWidth, sh / photo.naturalHeight);
-  const dw = photo.naturalWidth * scale;
-  const dh = photo.naturalHeight * scale;
-  const dx = sx + (sw - dw) / 2;
-  const dy = sy + (sh - dh) / 2;
-  ctx.drawImage(photo, dx, dy, dw, dh);
-}
-
-async function compositeFrame(frame: Frame, captures: Map<string, string>, captureFilters: Map<string, string>): Promise<string> {
-  const frameImg = frame.image ? await loadImage(frame.image) : null;
-  const fw = frameImg?.naturalWidth || 1800;
-  const fh = frameImg?.naturalHeight || 1200;
-  const canvas = document.createElement('canvas');
-  canvas.width = fw;
-  canvas.height = fh;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = '#2a2522';
-  ctx.fillRect(0, 0, fw, fh);
-
-  for (const slot of frame.slots) {
-    const cap = captures.get(slot.captureId);
-    if (!cap) continue;
-    try {
-      const photo = await loadImage(cap);
-      const sx = (slot.x / 100) * fw;
-      const sy = (slot.y / 100) * fh;
-      const sw = (slot.w / 100) * fw;
-      const sh = (slot.h / 100) * fh;
-      const filterId = captureFilters.get(slot.captureId) || 'natural';
-      const glow = isGlowFilter(filterId);
-      const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(sx, sy, sw, sh);
-      ctx.clip();
-      ctx.filter = baseCss;
-      drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
-      ctx.filter = 'none';
-      if (glow) {
-        applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
-      }
-      ctx.restore();
-    } catch { /* skip failed slot */ }
-  }
-
-  if (frameImg) {
-    ctx.drawImage(frameImg, 0, 0, fw, fh);
-  }
-
-  return canvas.toDataURL('image/jpeg', 0.95);
-}
-
-async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
-  void frame;
-  void slot;
-  const TARGET_ASPECT = 16 / 9;
-
-  const photo = await loadImage(captureDataUrl);
-  const photoAspect = photo.naturalWidth / photo.naturalHeight;
-
-  let cropWidth: number;
-  let cropHeight: number;
-  if (TARGET_ASPECT > photoAspect) {
-    cropWidth = photo.naturalWidth;
-    cropHeight = cropWidth / TARGET_ASPECT;
-  } else {
-    cropHeight = photo.naturalHeight;
-    cropWidth = cropHeight * TARGET_ASPECT;
-  }
-  const cropX = (photo.naturalWidth - cropWidth) / 2;
-  const cropY = (photo.naturalHeight - cropHeight) / 2;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(cropWidth);
-  canvas.height = Math.round(cropHeight);
-  const ctx = canvas.getContext('2d')!;
-
-  const glow = isGlowFilter(filterId);
-  const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
-
-  ctx.save();
-  ctx.filter = baseCss;
-  ctx.drawImage(photo, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
-  ctx.filter = 'none';
-  if (glow) {
-    applyGlowToCanvas(ctx, photo, 0, 0, canvas.width, canvas.height);
-  }
-  ctx.restore();
-
-  return canvas.toDataURL('image/jpeg', 0.95);
-}
-
-function downloadDataUrl(dataUrl: string, fileName: string): void {
-  const link = document.createElement('a');
-  link.href = dataUrl;
-  link.download = fileName;
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-export const PhotoboothSession = ({
-  event,
-  cameraSettings,
-  allSettings,
-  onExit,
-  onPhaseChange,
-}: {
-  event: R3aEvent;
-  cameraSettings: CameraSettings;
-  allSettings: AllSettings;
-  onExit: () => void;
-  onPhaseChange?: (phase: string) => void;
-}) => {
-  const { stream, status, error, forceRestart } = useCamera(cameraSettings, true);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-  const previewAreaRef = useRef<HTMLDivElement>(null);
-  const previewFrameRef = useRef<HTMLDivElement>(null);
-  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
-  const sessionStartedAtRef = useRef<number | null>(null);
-  const isPushingRef = useRef(false);
-  const eventOpenedAtRef = useRef<number>(Date.now());
-  const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
-  const [phase, setPhase] = useState<SessionPhase>('frame-select');
-  const [countdown, setCountdown] = useState(0);
-  const [captures, setCaptures] = useState<CaptureData[]>([]);
-  const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
-  const [captureFilters, setCaptureFilters] = useState<Map<string, string>>(new Map());
-  const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
-  const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [flash, setFlash] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [resultId, setResultId] = useState<string>('');
-  const [printing, setPrinting] = useState(false);
-  const [printed, setPrinted] = useState(false);
-  const [showAdminExit, setShowAdminExit] = useState(false);
-  const [screensaverActive, setScreensaverActive] = useState(false);
-  const [pendingFullscreen, setPendingFullscreen] = useState(false);
-  const [pendingRefreshToken, setPendingRefreshToken] = useState(false);
-  const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
-  const [guestError, setGuestError] = useState<string | null>(null);
-  const [guestAssigning, setGuestAssigning] = useState(false);
-  const logoClickCount = useRef(0);
-  const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [captureError, setCaptureError] = useState<CaptureError>(null);
-  const [qrError, setQrError] = useState(false);
-  const [driveQrDataUrl, setDriveQrDataUrl] = useState<string | null>(null);
-  const [driveQrError, setDriveQrError] = useState(false);
-  const [frameAspect, setFrameAspect] = useState(3 / 2);
-  const [framesReady, setFramesReady] = useState(false);
-
-  /* ============================================================
-     ⚠️ AUTO-RESTART KAMERA
-     1. Saat masuk phase `ready` (prepare) — pastikan kamera jalan
-     2. Saat event `r3a:restart-camera` di-dispatch (mis. setelah OAuth)
-     ============================================================ */
-  useEffect(() => {
-    if (phase !== 'ready') return;
-    if (status === 'connected' || status === 'connecting') return;
-    const t = setTimeout(() => { void forceRestart(); }, 200);
-    return () => clearTimeout(t);
-  }, [phase, status, forceRestart]);
-
-  useEffect(() => {
-    const handler = () => {
-      // Delay 800ms: biar browser release camera handle dari OAuth popup dulu
-      setTimeout(() => { void forceRestart(); }, 800);
-    };
-    window.addEventListener(RESTART_CAMERA_EVENT, handler);
-    return () => window.removeEventListener(RESTART_CAMERA_EVENT, handler);
-  }, [forceRestart]);
-
-  /* ============================================================
-     ⚠️ REMOTE COMMAND OVERLAYS — pure DOM (tanpa React)
-     ============================================================ */
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (!pendingFullscreen) return;
-
-    const host = document.createElement('div');
-    host.setAttribute('data-r3a-overlay', 'fullscreen');
-    host.style.cssText = [
-      'position: fixed',
-      'inset: 0',
-      'z-index: 2147483647',
-      'background: rgba(0,0,0,.85)',
-      'display: flex',
-      'align-items: center',
-      'justify-content: center',
-      'cursor: pointer',
-      'color: #fff',
-      'text-align: center',
-      'padding: 32px',
-      "font-family: 'DM Sans', sans-serif",
-    ].join(';');
-
-    host.innerHTML = `
-      <div>
-        <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin: 0 auto 20px;"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-        <h2 style="margin: 0 0 10px; font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700;">TAP UNTUK FULLSCREEN</h2>
-        <p style="margin: 0; opacity: .7; font-size: 16px;">Browser butuh tap manual di device ini.</p>
-      </div>
-    `;
-
-    const handleClick = async () => {
-      try {
-        if (!document.fullscreenElement) {
-          await document.documentElement.requestFullscreen?.();
-        }
-      } catch { /* ignore */ }
-      setPendingFullscreen(false);
-    };
-
-    host.addEventListener('click', handleClick);
-    document.body.appendChild(host);
-
-    return () => {
-      host.removeEventListener('click', handleClick);
-      host.remove();
-    };
-  }, [pendingFullscreen]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (!pendingRefreshToken) return;
-
-    const host = document.createElement('div');
-    host.setAttribute('data-r3a-overlay', 'refresh-token');
-    host.style.cssText = [
-      'position: fixed',
-      'inset: 0',
-      'z-index: 2147483647',
-      'background: rgba(0,0,0,.85)',
-      'display: flex',
-      'align-items: center',
-      'justify-content: center',
-      'cursor: pointer',
-      'color: #fff',
-      'text-align: center',
-      'padding: 32px',
-      "font-family: 'DM Sans', sans-serif",
-    ].join(';');
-
-    host.innerHTML = `
-      <div>
-        <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin: 0 auto 20px;"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></svg>
-        <h2 style="margin: 0 0 10px; font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700;">TAP UNTUK REFRESH TOKEN</h2>
-        <p style="margin: 0; opacity: .7; font-size: 16px;">Login Google butuh tap manual di device ini.</p>
-      </div>
-    `;
-
-    const handleClick = async () => {
-      let success = false;
-      try {
-        const result = await connectGoogleDrive(VITE_CLIENT_ID);
-        success = result.success;
-      } catch { /* ignore */ }
-      setPendingRefreshToken(false);
-      if (success) {
-        // Trigger auto-restart kamera (browser lepas handle saat OAuth popup)
-        setTimeout(() => {
-          window.dispatchEvent(new Event(RESTART_CAMERA_EVENT));
-        }, 300);
-        // Setelah OAuth popup, browser biasanya keluar dari fullscreen
-        setTimeout(() => setPendingFullscreen(true), 800);
-      }
-    };
-
-    host.addEventListener('click', handleClick);
-    document.body.appendChild(host);
-
-    return () => {
-      host.removeEventListener('click', handleClick);
-      host.remove();
-    };
-  }, [pendingRefreshToken]);
-
-  const frames = event?.frames ?? [];
-  const activeFrame = frames[selectedFrameIndex];
-  const allSlots = activeFrame?.slots ?? [];
-  const uniqueCaptureIds = useMemo(() => getUniqueCaptureIds(allSlots), [allSlots]);
-  const totalCapturesNeeded = uniqueCaptureIds.length;
-
-  const uniqueSlotsForPreview = useMemo(() => {
-    const seen = new Set<string>();
-    const result: Slot[] = [];
-    for (const s of allSlots) {
-      if (!seen.has(s.captureId)) {
-        seen.add(s.captureId);
-        result.push(s);
-      }
-    }
-    return result;
-  }, [allSlots]);
-
-  useEffect(() => {
-    eventOpenedAtRef.current = Date.now();
-  }, [event?.id, event?.slug]);
-
-  /* STATUS SYNC */
-  useEffect(() => {
-    let cancelled = false;
-
-    const push = async () => {
-      if (isPushingRef.current) return;
-      isPushingRef.current = true;
-
-      try {
-        const token = getTokenStatus();
-        const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
-        const todayStats = getTodayStats();
-        const driveQuota = token.hasToken ? await getDriveQuota() : { usage: 0, limit: 0 };
-        if (cancelled) return;
-
-        void writeStatus({
-          currentEventSlug: event?.slug || '',
-          currentEventName: event?.eventName || 'Untitled',
-          currentPhase: screensaverActive ? 'screensaver' : phase,
-          sessionActive: phase !== 'frame-select',
-          photoCount: captures.length,
-          totalCaptures: totalCapturesNeeded,
-          eventOpenedAt: eventOpenedAtRef.current,
-          driveConnected: token.hasToken,
-          driveAccount: token.account || '',
-          driveTokenExpiresAt: token.expiresAt ?? 0,
-          driveUsage: driveQuota.usage,
-          driveLimit: driveQuota.limit,
-          uploadedCount: stats.uploaded,
-          pendingCount: stats.pending,
-          failedCount: stats.failed,
-          todaySessionCount: todayStats.sessionCount,
-          todayPhotoCount: todayStats.photoCount,
-        });
-      } finally {
-        isPushingRef.current = false;
-      }
-    };
-
-    void push();
-    const id = setInterval(push, 5000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName, screensaverActive]);
-
-  useEffect(() => {
-    markOfflineOnDisconnect();
-    return () => { void clearStatus(); };
   }, []);
 
-  /* SCREENSAVER DETECTION */
-  useEffect(() => {
-    const check = () => {
-      const isSaver = document.querySelector('.screensaver-overlay') !== null;
-      setScreensaverActive(isSaver);
-    };
-    const id = setInterval(check, 500);
-    check();
-    return () => clearInterval(id);
-  }, []);
-
-  /* COMMAND LISTENER */
-  useEffect(() => {
-    const deviceId = getDeviceId();
-    const unsubscribe = subscribeCommands(deviceId, (cmd) => {
-      if (!cmd) return;
-
-      try {
-        switch (cmd.type) {
-          case 'reload-app':
-            window.location.reload();
-            break;
-          case 'clear-cache':
-            sessionStorage.clear();
-            break;
-          case 'retry-all':
-            if (VITE_CLIENT_ID) void retryFailedUploads(VITE_CLIENT_ID);
-            break;
-          case 'reset-uptime':
-            resetAppUptime();
-            break;
-          case 'clear-stats':
-            clearAllStats();
-            break;
-          case 'download-logs':
-            downloadLogs();
-            break;
-          case 'reconnect-drive':
-          case 'refresh-token': {
-            if (!VITE_CLIENT_ID) break;
-            setPendingRefreshToken(true);
-            break;
-          }
-          case 'force-fullscreen': {
-            setPendingFullscreen(true);
-            break;
-          }
-        }
-      } catch { /* ignore */ }
-
-      void clearCommand(deviceId);
-    });
-    return unsubscribe;
-  }, []);
-
-  const handleLogoClick = useCallback(() => {
-    logoClickCount.current += 1;
-    if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current);
-    if (logoClickCount.current >= 6) {
-      logoClickCount.current = 0;
-      setShowAdminExit(true);
-      return;
+  /* ---------- STOP ---------- */
+  const stop = useCallback(() => {
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
     }
-    logoClickTimeout.current = setTimeout(() => { logoClickCount.current = 0; }, 2000);
-  }, []);
+    stopTracks();
+    setStream(null);
+    setStatus('idle');
+    setError(null);
+  }, [stopTracks]);
 
-  useEffect(() => {
-    if (onPhaseChange) {
-      onPhaseChange(screensaverActive ? 'screensaver' : phase);
-    }
-  }, [phase, onPhaseChange, screensaverActive]);
-
-  useEffect(() => () => { if (logoClickTimeout.current) clearTimeout(logoClickTimeout.current); }, []);
-
-  useEffect(() => {
-    const handleOnline = () => {
-      const gd = allSettings.googleDrive;
-      if (gd.connected && VITE_CLIENT_ID) {
-        void retryFailedUploads(VITE_CLIENT_ID);
-      }
-    };
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, [allSettings.googleDrive]);
-
-  useEffect(() => {
-    if (!activeFrame?.image) { setFrameAspect(3 / 2); return; }
-    const img = new Image();
-    img.onload = () => setFrameAspect(img.naturalWidth / img.naturalHeight);
-    img.src = activeFrame.image;
-  }, [activeFrame?.image]);
-
-  useEffect(() => {
-    setFramesReady(true);
-  }, [frames.length]);
-
-  const resetSession = useCallback(() => {
-    setFlash(false);
-    setCaptures([]);
-    setCurrentCaptureIndex(0);
-    setCaptureFilters(new Map());
-    setSelectedCaptureId(null);
-    setCompositeUrl(null);
-    setSaved(false);
-    setSaving(false);
-    setQrDataUrl(null);
-    setResultId('');
-    setPrinted(false);
-    setPrinting(false);
-    setCaptureError(null);
-    setQrError(false);
-    setDriveQrDataUrl(null);
-    setDriveQrError(false);
-    sessionStartedAtRef.current = null;
-    imageCacheRef.current.clear();
-  }, []);
-
-  const handleSelectFrame = useCallback((index: number) => {
-    setSelectedFrameIndex(index);
-    resetSession();
-    setPhase('ready');
-  }, [resetSession]);
-
-  const handleStartCapture = useCallback(async () => {
-    resetSession();
-    setGuestError(null);
-    sessionStartedAtRef.current = Date.now();
-
-    const gd = allSettings.googleDrive;
-    if (gd.connected && VITE_CLIENT_ID && gd.mainFolderId) {
-      setGuestAssigning(true);
-      const result = await getOrCreateNextGuestFolder(event.id, gd.mainFolderId, VITE_CLIENT_ID);
-      setGuestAssigning(false);
-      if (result.success && result.guest) {
-        setCurrentGuest(result.guest);
-      } else {
-        setGuestError(result.error || 'Failed to create guest folder');
-      }
+  /* ---------- START ---------- */
+  const start = useCallback(async (): Promise<boolean> => {
+    const s = settingsRef.current;
+    if (!s || !s.cameraOn) {
+      setStatus('disconnected');
+      return false;
     }
 
-    setPhase('live');
-  }, [resetSession, allSettings.googleDrive, event.id]);
-
-  const isVideoReady = useCallback((video: HTMLVideoElement | null): boolean => {
-    return !!(video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0);
-  }, []);
-
-  const handleCapture = useCallback(() => {
-    if (phase !== 'live') return;
-    const video = videoRef.current;
-    if (!isVideoReady(video)) {
-      setCaptureError({ message: 'Camera not ready. Please wait for the video feed to load.' });
-      setTimeout(() => setCaptureError(null), 3000);
-      return;
+    // ⚠️ Force-stop lama + tunggu OS release handle (300ms)
+    if (streamRef.current) {
+      stopTracks();
+      setStream(null);
+      await new Promise((r) => setTimeout(r, 300));
     }
-    setCaptureError(null);
-    setPhase('countdown');
-    setCountdown(5);
-  }, [phase, isVideoReady]);
 
-  useEffect(() => {
-    if (phase !== 'countdown' || countdown === 0) return;
-    let preFlashTimer: ReturnType<typeof setTimeout> | null = null;
-    if (countdown === 1) {
-      preFlashTimer = setTimeout(() => { setFlash(true); }, 700);
-    }
-    const timer = setTimeout(() => {
-      if (countdown <= 1) {
-        const video = videoRef.current;
-        if (video && isVideoReady(video)) {
-          const dataUrl = captureFromVideo(video, cameraSettings.mirror);
-          const capId = uniqueCaptureIds[currentCaptureIndex];
-          const newCapture: CaptureData = { captureId: capId, dataUrl };
-          setCaptures((prev) => [...prev, newCapture]);
-          void saveCapture({
-            id: `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            eventId: event.id,
-            captureId: capId,
-            dataUrl,
-            filterId: 'natural',
-            createdAt: Date.now(),
-          } as StoredCapture);
-        } else {
-          setCaptureError({ message: 'Camera not ready at capture time. Please retry.' });
-          setTimeout(() => setCaptureError(null), 3000);
-        }
-        if (currentCaptureIndex + 1 >= totalCapturesNeeded) {
-          setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
-          setPhase('filter');
-        } else {
-          setCurrentCaptureIndex((i) => i + 1);
-          setPhase('live');
-        }
-        setCountdown(0);
-      } else {
-        setCountdown((c) => c - 1);
-      }
-    }, 1000);
-    return () => { clearTimeout(timer); if (preFlashTimer) clearTimeout(preFlashTimer); };
-  }, [phase, countdown, currentCaptureIndex, totalCapturesNeeded, uniqueCaptureIds, cameraSettings.mirror, event.id, isVideoReady]);
-
-  useEffect(() => {
-    if (!flash) return;
-    const t = setTimeout(() => setFlash(false), 600);
-    return () => clearTimeout(t);
-  }, [flash]);
-
-  useEffect(() => () => { setFlash(false); }, []);
-
-  const handleComposite = useCallback(async () => {
-    if (!activeFrame) return;
-    setPhase('compositing');
-    const captureMap = new Map<string, string>();
-    for (const c of captures) captureMap.set(c.captureId, c.dataUrl);
-    try {
-      const result = await compositeFrame(activeFrame, captureMap, captureFilters);
-      setCompositeUrl(result);
-      setPhase('result');
-    } catch {
-      setPhase('filter');
-    }
-  }, [activeFrame, captures, captureFilters]);
-
-  const handleSave = useCallback(async () => {
-    if (!compositeUrl || !activeFrame) return;
-    if (saving) return;
-    setSaving(true);
+    setStatus('connecting');
+    setError(null);
 
     try {
-      const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const result: StoredResult = {
-        id, eventId: event.id, frameId: activeFrame.id, dataUrl: compositeUrl, filterId: 'multi', createdAt: Date.now(),
+      const { width, height } = getEffectiveResolution(s);
+      const fps = getFrameRateConstraint(s.frameRate);
+      const previewConstraint = getPreviewQualityConstraint(s.previewQuality);
+
+      const idealWidth = previewConstraint?.width ?? width;
+      const idealHeight = previewConstraint?.height ?? height;
+
+      const constraints: MediaStreamConstraints = {
+        video: s.selectedDeviceId
+          ? { deviceId: { exact: s.selectedDeviceId }, width: { ideal: idealWidth }, height: { ideal: idealHeight }, frameRate: { ideal: fps } }
+          : { width: { ideal: idealWidth }, height: { ideal: idealHeight }, frameRate: { ideal: fps } },
+        audio: false,
       };
-      await saveResult(result);
-      setResultId(id);
 
-      const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
-      const slotPhotos: { index: number; dataUrl: string }[] = [];
-      for (let i = 0; i < allSlots.length; i++) {
-        const slot = allSlots[i];
-        const cap = captureMap.get(slot.captureId);
-        if (!cap) continue;
-        try {
-          const slotDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
-          slotPhotos.push({ index: i + 1, dataUrl: slotDataUrl });
-        } catch { /* skip */ }
-      }
-
-      let slideshowVideo: string | null = null;
-      if (allSettings.storage.saveVideos) {
-        const rawSlotPhotos: { index: number; dataUrl: string }[] = [];
-        for (let i = 0; i < allSlots.length; i++) {
-          const cap = captureMap.get(allSlots[i].captureId);
-          if (cap) rawSlotPhotos.push({ index: i + 1, dataUrl: cap });
-        }
-        if (rawSlotPhotos.length > 0) {
-          try {
-            const DURATION_PER_SLIDE_MS = 300;
-            const LOOP_COUNT = 3;
-            const loopedPhotos: { dataUrl: string }[] = [];
-            for (let loop = 0; loop < LOOP_COUNT; loop++) {
-              for (const p of rawSlotPhotos) loopedPhotos.push({ dataUrl: p.dataUrl });
-            }
-            slideshowVideo = await generateSlideshowVideo(loopedPhotos, DURATION_PER_SLIDE_MS);
-          } catch { slideshowVideo = null; }
-        }
-      }
-
-      if (allSettings.storage.autoDownloadResult) {
-        for (const sp of slotPhotos) {
-          downloadDataUrl(sp.dataUrl, `slot-${String(sp.index).padStart(2, '0')}.jpg`);
-        }
-        if (slideshowVideo) {
-          downloadDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
-        }
-        downloadDataUrl(compositeUrl, 'final-result.jpg');
-      }
-
-      const gd = allSettings.googleDrive;
-      let uploadSuccessCount = 0;
-      const uploadFailCount = 0;
-
-      if (gd.connected && VITE_CLIENT_ID && currentGuest) {
-        const uploadFiles: UploadFileEntry[] = [
-          { fileName: 'final.jpg', dataUrl: compositeUrl },
-          ...slotPhotos.map((sp) => ({ fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`, dataUrl: sp.dataUrl })),
-          ...(slideshowVideo ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }] : []),
-        ];
-        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
-        uploadSuccessCount = uploadFiles.length;
-      }
-
-      try {
-        const startedAt = sessionStartedAtRef.current ?? (Date.now() - 60000);
-        recordSession({ id, eventId: event.id, startedAt, finishedAt: Date.now(), photoCount: slotPhotos.length, uploadSuccess: uploadSuccessCount, uploadFail: uploadFailCount });
-      } catch { /* ignore */ }
-
-      setSaved(true);
-    } catch { /* ignore */ } finally {
-      setSaving(false);
+      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = newStream;
+      setStream(newStream);
+      setStatus('connected');
+      return true;
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') setError('permission-denied');
+      else if (name === 'NotFoundError' || name === 'OverconstrainedError') setError('not-found');
+      else if (name === 'NotReadableError') setError('in-use');
+      else setError('unknown');
+      setStatus('error');
+      return false;
     }
-  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
+  }, [stopTracks]);
 
-  const handleShowQr = useCallback(async () => {
-    if (!currentGuest) return;
-    setQrError(false); setQrDataUrl(null); setPhase('qr');
-    const payload = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
+  /* ---------- FORCE RESTART (retry backoff) ---------- */
+  const forceRestart = useCallback(async () => {
+    if (isRestartingRef.current) return;
+    isRestartingRef.current = true;
     try {
-      const qr = await generateQrCode(payload);
-      if (qr.qrDataUrl) setQrDataUrl(qr.qrDataUrl);
-      else setQrError(true);
-    } catch { setQrError(true); }
-  }, [currentGuest, event.name]);
+      stopTracks();
+      setStream(null);
+      setStatus('connecting');
+      setError(null);
 
-  const handleShowDriveQr = useCallback(async () => {
-    if (!currentGuest) return;
-    setDriveQrError(false); setDriveQrDataUrl(null); setPhase('drive-qr');
-    try {
-      const url = buildDriveFolderUrl(currentGuest.guestFolderId);
-      const qr = await generateQrCode(url);
-      if (qr.qrDataUrl) setDriveQrDataUrl(qr.qrDataUrl);
-      else setDriveQrError(true);
-    } catch { setDriveQrError(true); }
-  }, [currentGuest]);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const ok = await start();
+        if (ok) {
+          isRestartingRef.current = false;
+          return;
+        }
+        const delay = 500 + attempt * 400; // 500, 900, 1300, 1700, 2100
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    } finally {
+      isRestartingRef.current = false;
+    }
+  }, [start, stopTracks]);
 
-  const handlePrint = useCallback(async () => {
-    if (!compositeUrl || printing) return;
-    setPrinting(true);
-    try {
-      const copies = event.printerSettings.copies || 1;
-      await printResult({ copies, paperSize: event.printerSettings.paperSize, dataUrl: compositeUrl, printerName: allSettings.printer.printer });
-      setPrinted(true);
-    } catch { /* ignore */ }
-    setPrinting(false);
-  }, [compositeUrl, printing, event.printerSettings, allSettings.printer.printer]);
-
-  const handleBackToFrameSelect = useCallback(() => {
-    resetSession();
-    setCurrentGuest(null);
-    setGuestError(null);
-    setPhase('frame-select');
-  }, [resetSession]);
-
+  /* ---------- INITIAL MOUNT ---------- */
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (phase === 'frame-select') { onExit(); }
-        else { setShowAdminExit(true); }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [phase, onExit]);
+    if (!enabled) {
+      stop();
+      return;
+    }
+    void start();
+    return () => { stop(); };
+  }, [enabled, start, stop]);
 
-  const captureMap = useMemo(() => new Map(captures.map((c) => [c.captureId, c.dataUrl])), [captures]);
-
-  const ensureImagesCached = useCallback(async (sources: string[]): Promise<void> => {
-    const cache = imageCacheRef.current;
-    const missing = sources.filter((src) => src && !cache.has(src));
-    if (missing.length === 0) return;
-    await Promise.all(
-      missing.map((src) =>
-        new Promise<void>((resolve) => {
-          const img = new Image();
-          img.onload = () => { cache.set(src, img); resolve(); };
-          img.onerror = () => resolve();
-          img.src = src;
-        }),
-      ),
-    );
-  }, []);
-
+  /* ---------- TRACK HEALTH HANDLERS ---------- */
   useEffect(() => {
-    if (phase !== 'filter') return;
-    const area = previewAreaRef.current;
-    const frame = previewFrameRef.current;
-    const canvas = previewCanvasRef.current;
-    if (!area || !frame || !canvas) return;
-    if (!activeFrame) return;
+    if (!enabled || !stream) return;
+    const track = stream.getVideoTracks()[0];
+    if (!track) return;
 
-    let cancelled = false;
-    let rafId: number;
-
-    const render = () => {
-      if (cancelled) return;
-      const areaRect = area.getBoundingClientRect();
-      const availW = Math.max(50, areaRect.width);
-      const availH = Math.max(50, areaRect.height - 60);
-
-      let frameW = availW;
-      let frameH = frameW / frameAspect;
-      if (frameH > availH) { frameH = availH; frameW = frameH * frameAspect; }
-      frameW = Math.floor(frameW);
-      frameH = Math.floor(frameH);
-
-      frame.style.width = `${frameW}px`;
-      frame.style.height = `${frameH}px`;
-      frame.style.aspectRatio = 'auto';
-
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const canvasW = Math.max(1, Math.floor(frameW * dpr));
-      const canvasH = Math.max(1, Math.floor(frameH * dpr));
-      if (canvas.width !== canvasW || canvas.height !== canvasH) {
-        canvas.width = canvasW; canvas.height = canvasH;
-      }
-      canvas.style.width = `${frameW}px`;
-      canvas.style.height = `${frameH}px`;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, frameW, frameH);
-      ctx.fillStyle = '#2a2522';
-      ctx.fillRect(0, 0, frameW, frameH);
-
-      const cache = imageCacheRef.current;
-      for (const slot of allSlots) {
-        const cap = captureMap.get(slot.captureId);
-        if (!cap) continue;
-        const photo = cache.get(cap);
-        if (!photo) continue;
-
-        const sx = (slot.x / 100) * frameW;
-        const sy = (slot.y / 100) * frameH;
-        const sw = (slot.w / 100) * frameW;
-        const sh = (slot.h / 100) * frameH;
-        const filterId = captureFilters.get(slot.captureId) || 'natural';
-        const glow = isGlowFilter(filterId);
-        const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(sx, sy, sw, sh);
-        ctx.clip();
-        ctx.filter = baseCss;
-        drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
-        ctx.filter = 'none';
-        if (glow) applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
-        ctx.restore();
-      }
-
-      if (activeFrame.image) {
-        const frameImg = cache.get(activeFrame.image);
-        if (frameImg) ctx.drawImage(frameImg, 0, 0, frameW, frameH);
-      }
+    const scheduleRestart = () => {
+      if (!enabledRef.current) return;
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = setTimeout(() => {
+        if (enabledRef.current && settingsRef.current?.cameraOn) {
+          void forceRestart();
+        }
+      }, 800);
     };
 
-    const sources = [activeFrame.image, ...allSlots.map((s) => captureMap.get(s.captureId) || '')].filter(Boolean);
+    const onEnded = () => { setStatus('disconnected'); scheduleRestart(); };
+    const onMute = () => { setStatus('disconnected'); scheduleRestart(); };
+    const onUnmute = () => { setStatus('connected'); };
 
-    const run = async () => {
-      await ensureImagesCached(sources);
-      if (cancelled) return;
-      rafId = requestAnimationFrame(render);
-    };
-
-    void run();
-    const onResize = () => { if (!cancelled) rafId = requestAnimationFrame(render); };
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
+    track.addEventListener('ended', onEnded);
+    track.addEventListener('mute', onMute);
+    track.addEventListener('unmute', onUnmute);
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
+      track.removeEventListener('ended', onEnded);
+      track.removeEventListener('mute', onMute);
+      track.removeEventListener('unmute', onUnmute);
     };
-  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached]);
+  }, [stream, enabled, forceRestart]);
 
-  const LoadingOverlay = saving ? (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 999999, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, color: '#fff', backdropFilter: 'blur(4px)' }}>
-      <div className="compositing-spinner" style={{ width: 72, height: 72, borderWidth: 5 }} />
-      <span style={{ fontSize: 32, fontWeight: 700, letterSpacing: '.25em', textTransform: 'uppercase', color: '#fff' }}>PROSES FOTO</span>
-    </div>
-  ) : null;
-
-  if (!event || !event.frames) {
-    return (
-      <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-        <AlertCircle size={48} strokeWidth={1} />
-        <h2 style={{ fontSize: 24, margin: 0 }}>Event not found</h2>
-        <p style={{ color: 'rgba(255,255,255,.5)', margin: 0 }}>The event data is missing or malformed.</p>
-        <button onClick={onExit} type="button" style={{ marginTop: 8, padding: '10px 24px', background: '#ef3f25', color: '#fff', border: 'none', fontWeight: 600, cursor: 'pointer' }}>BACK</button>
-      </main>
-    );
-  }
-
-  if (!framesReady) {
-    return (
-      <main className="photobooth-screen photobooth-kiosk" style={{ display: 'grid', placeItems: 'center' }}>
-        <div className="compositing-spinner" />
-        <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 14, fontWeight: 600, letterSpacing: '.1em' }}>LOADING EVENT...</span>
-      </main>
-    );
-  }
-
-  if (phase === 'frame-select') {
-    return (
-      <main className="photobooth-screen photobooth-kiosk">
-        {LoadingOverlay}
-        <div className="photobooth-kiosk-header">
-          <div className="photobooth-project"><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
-          <div className="hidden-exit-trigger" onClick={handleLogoClick} />
-        </div>
-        <section className="frame-select-section">
-          <h1>CHOOSE A FRAME</h1>
-          <p>Select a frame layout to begin your photo session</p>
-          {frames.length === 0 ? (
-            <div className="frame-select-empty">
-              <ImageIcon size={48} strokeWidth={1} />
-              <strong>No frames available</strong>
-              <p>This event has no frames configured. Ask the operator to add frames.</p>
-            </div>
-          ) : (
-            <div className="frame-select-grid">
-              {frames.map((frame, i) => (
-                <button key={frame.id} className="frame-select-card" onClick={() => handleSelectFrame(i)} type="button">
-                  <div className="frame-select-thumb" style={frame.image ? { background: `url(${frame.image}) center/contain no-repeat #2a2522` } : undefined}>
-                    {!frame.image ? <ImageIcon size={32} strokeWidth={1} /> : null}
-                  </div>
-                  <div className="frame-select-info">
-                    <strong>{frame.name}</strong>
-                    <span>{frame.slots.length} SLOTS</span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-      </main>
-    );
-  }
-
-  if (phase === 'ready') {
-    return (
-      <main className="photobooth-screen photobooth-kiosk">
-        {LoadingOverlay}
-        <div className="photobooth-kiosk-header">
-          <div className="photobooth-project" onClick={handleLogoClick}><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
-          <button className="photobooth-exit" onClick={handleBackToFrameSelect} type="button"><X size={24} /> BACK</button>
-        </div>
-        <section className="ready-section">
-          <div className="ready-frame-preview" style={{ aspectRatio: frameAspect }}>
-            {activeFrame?.image ? <img src={activeFrame.image} alt={activeFrame.name} /> : <div className="ready-frame-placeholder"><ImageIcon size={48} strokeWidth={1} /></div>}
-            {allSlots.map((slot) => (
-              <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` }}>
-                <span>{slot.captureId}</span>
-              </div>
-            ))}
-          </div>
-          <div className="ready-info">
-            <h2>{activeFrame?.name || 'FRAME'}</h2>
-            <p>{totalCapturesNeeded} PHOTO{totalCapturesNeeded !== 1 ? 'S' : ''} TO CAPTURE</p>
-            <button className="ready-start" onClick={handleStartCapture} type="button" disabled={guestAssigning}>
-              <Camera size={28} /> {guestAssigning ? 'PREPARING...' : 'START SESSION'}
-            </button>
-            <button className="ready-back" onClick={handleBackToFrameSelect} type="button">
-              <ChevronLeft size={18} /> CHANGE FRAME
-            </button>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className={`photobooth-screen ${phase === 'live' || phase === 'countdown' ? '' : 'photobooth-kiosk'}`}>
-      {LoadingOverlay}
-      {flash ? <div className="capture-flash" /> : null}
-
-      {phase === 'live' || phase === 'countdown' ? (
-        <>
-          <div className="photobooth-header photobooth-guest-header">
-            <button className="photobooth-back-btn" onClick={handleBackToFrameSelect} type="button"><ChevronLeft size={20} /> BACK</button>
-            <div className="photobooth-project" onClick={handleLogoClick}><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
-            {currentGuest ? <span className="photobooth-guest-badge">{currentGuest.guestName}</span> : null}
-          </div>
-          <section className="photobooth-main">
-            {stream ? (
-              <>
-                <div className="photobooth-video-wrap">
-                  <CameraPreview stream={stream} mirror={cameraSettings.mirror} aspectRatio={cameraSettings.aspectRatio} className="photobooth-video" />
-                  {phase === 'countdown' ? (
-                    <div className="countdown-overlay"><span className="countdown-number">{countdown}</span></div>
-                  ) : null}
-                </div>
-                <HiddenVideoCapture videoRef={videoRef} stream={stream} />
-              </>
-            ) : (
-              <div className="photobooth-preview">
-                {status === 'error' ? (
-                  <><AlertCircle size={48} strokeWidth={1} /><span>CAMERA ERROR</span><em>{error ? errorMessages[error] : 'Unable to start camera.'}</em></>
-                ) : (
-                  <><Camera size={64} strokeWidth={1} /><span>{status === 'connecting' ? 'CONNECTING CAMERA...' : 'CAMERA PREVIEW'}</span><em>{status === 'connecting' ? 'Starting camera stream...' : 'Camera not connected.'}</em></>
-                )}
-              </div>
-            )}
-          </section>
-          <div className="photobooth-controls">
-            <button className="photobooth-capture" type="button" disabled={!stream || phase === 'countdown' || totalCapturesNeeded === 0} onClick={handleCapture}>
-              <Camera size={32} /> {phase === 'countdown' ? 'CAPTURING...' : 'CAPTURE'}
-            </button>
-          </div>
-          <div className="photobooth-camera-status"><CameraStatusBadge status={status} error={error} /></div>
-          <div className="photobooth-capture-info"><span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span></div>
-          {captureError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div> : null}
-          {guestError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div> : null}
-          <div className="photobooth-slots">
-            {uniqueSlotsForPreview.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
-            {uniqueSlotsForPreview.map((slot) => {
-              const filled = captureMap.has(slot.captureId);
-              const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
-              return (
-                <div key={slot.id} className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}>
-                  {filled ? <img src={captureMap.get(slot.captureId)} alt={slot.captureId} /> : <span>{slot.captureId}</span>}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      ) : null}
-
-      {phase === 'filter' ? (
-        <section className="photobooth-filter-section">
-          <div className="filter-header">
-            <h2>SELECT FILTER</h2>
-            <p>Tap a photo slot to select it, then choose a filter.</p>
-          </div>
-          <div ref={previewAreaRef} className="filter-preview-area">
-            <div ref={previewFrameRef} className="filter-preview-frame" style={{ position: 'relative', overflow: 'hidden', background: '#2a2522', margin: '0 auto' }}>
-              <canvas ref={previewCanvasRef} style={{ position: 'absolute', top: 0, left: 0, display: 'block', zIndex: 1, pointerEvents: 'none' }} />
-              {allSlots.map((slot) => {
-                const cap = captureMap.get(slot.captureId);
-                if (!cap) return null;
-                const isSelected = selectedCaptureId === slot.captureId;
-                return (
-                  <div key={slot.id} onClick={() => setSelectedCaptureId(slot.captureId)}
-                    style={{ position: 'absolute', left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%`, border: isSelected ? '2px solid #ffd94e' : '2px solid transparent', boxShadow: isSelected ? '0 0 0 2px rgba(255,217,78,.4)' : 'none', cursor: 'pointer', zIndex: 10, boxSizing: 'border-box' }}>
-                    {isSelected ? (
-                      <div style={{ position: 'absolute', bottom: 6, left: 6, padding: '3px 10px', background: '#ffd94e', color: '#1a1614', fontSize: 10, fontWeight: 800, borderRadius: 4, letterSpacing: '.08em' }}>SELECTED</div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          {selectedCaptureId ? (
-            <div className="filter-options">
-              {FILTERS.map((f) => {
-                const currentFilter = captureFilters.get(selectedCaptureId) || 'natural';
-                return (
-                  <button key={f.id} className={currentFilter === f.id ? 'is-active' : ''}
-                    onClick={() => { setCaptureFilters((prev) => { const next = new Map(prev); next.set(selectedCaptureId, f.id); return next; }); }}
-                    type="button">
-                    <span className="filter-thumb" style={{ filter: f.css }}><FilterIcon size={18} /></span>
-                    {f.name}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          <div className="filter-actions">
-            <button className="filter-back" onClick={() => { resetSession(); setPhase('live'); }} type="button"><RotateCcw size={18} /> RETAKE</button>
-            <button className="filter-compose" onClick={handleComposite} type="button"><ImageIcon size={18} /> COMPOSITE</button>
-          </div>
-        </section>
-      ) : null}
-
-      {phase === 'compositing' ? (
-        <section className="photobooth-compositing"><div className="compositing-spinner" /><span>COMPOSITING...</span></section>
-      ) : null}
-
-      {phase === 'result' && compositeUrl ? (
-        <section className="photobooth-result-section">
-          <div className="result-header"><h2>YOUR PHOTO IS READY</h2></div>
-          <div className="result-preview"><img src={compositeUrl} alt="Final result" /></div>
-          <div className="result-actions">
-            <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} disabled={saving} type="button"><RotateCcw size={18} /> RETAKE</button>
-            <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
-              {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
-            </button>
-            {allSettings.display.showPrintButton ? (
-              <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
-                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
-              </button>
-            ) : null}
-            {allSettings.display.showQrButton ? (
-              <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button"><QrCode size={18} /> QR CODE</button>
-            ) : null}
-            {currentGuest && allSettings.display.showDriveQrButton ? (
-              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button"><QrCode size={18} /> DRIVE QR</button>
-            ) : null}
-          </div>
-          <button className="result-new-session" onClick={handleBackToFrameSelect} disabled={saving} type="button"><RefreshCw size={18} /> NEW SESSION</button>
-        </section>
-      ) : null}
-
-      {phase === 'qr' ? (
-        <section className="photobooth-qr-section">
-          <div className="qr-header"><h2>SCAN TO VIEW</h2><p>Scan this QR code with your phone to view your photo</p></div>
-          <div className="qr-display">
-            {qrError ? (
-              <div className="qr-error-state"><AlertCircle size={48} strokeWidth={1} /><span>QR GENERATION FAILED</span><button type="button" onClick={handleShowQr} className="qr-retry">RETRY</button></div>
-            ) : qrDataUrl ? <img src={qrDataUrl} alt="QR Code" /> : <div className="qr-loading"><div className="compositing-spinner" /></div>}
-          </div>
-          <div className="qr-actions">
-            <button className="qr-back-result" onClick={() => setPhase('result')} type="button"><ChevronLeft size={18} /> BACK</button>
-            <button className="qr-new-session" onClick={handleBackToFrameSelect} type="button"><RefreshCw size={18} /> NEW SESSION</button>
-          </div>
-        </section>
-      ) : null}
-
-      {phase === 'drive-qr' ? (
-        <section className="photobooth-qr-section">
-          <div className="qr-header"><h2>SCAN TO GET YOUR PHOTOS</h2><p>Scan untuk mengambil foto</p></div>
-          <div className="qr-display">
-            {driveQrError ? (
-              <div className="qr-error-state"><AlertCircle size={48} strokeWidth={1} /><span>QR GENERATION FAILED</span><button type="button" onClick={handleShowDriveQr} className="qr-retry">RETRY</button></div>
-            ) : driveQrDataUrl ? <img src={driveQrDataUrl} alt="Google Drive QR Code" /> : <div className="qr-loading"><div className="compositing-spinner" /></div>}
-          </div>
-          <div className="qr-actions">
-            <button className="qr-back-result" onClick={() => setPhase('result')} type="button"><ChevronLeft size={18} /> BACK</button>
-            <button className="qr-new-session" onClick={handleBackToFrameSelect} type="button"><RefreshCw size={18} /> DONE</button>
-          </div>
-        </section>
-      ) : null}
-
-      {showAdminExit ? (
-        <div className="admin-exit-overlay" onClick={() => setShowAdminExit(false)}>
-          <div className="admin-exit-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Exit Event?</h3>
-            <div className="admin-exit-actions">
-              <button onClick={() => setShowAdminExit(false)} type="button">CANCEL</button>
-              <button className="admin-exit-confirm" onClick={() => { setShowAdminExit(false); onExit(); }} type="button">EXIT EVENT</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </main>
-  );
-};
-
-const HiddenVideoCapture = ({ videoRef, stream }: { videoRef: React.RefObject<HTMLVideoElement | null>; stream: MediaStream | null }) => {
+  /* ============================================================
+     HEALTH MONITOR — cek tiap 2s, restart kalau track bad
+     Ini yang bikin kamera "always on" selama event
+     ============================================================ */
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !stream) return;
-    video.srcObject = stream;
-    const onLoaded = () => { void video.play().catch(() => {}); };
-    video.addEventListener('loadedmetadata', onLoaded);
-    if (video.readyState >= 2) { void video.play().catch(() => {}); }
-    return () => { video.removeEventListener('loadedmetadata', onLoaded); };
-  }, [stream, videoRef]);
-  return <video ref={videoRef as React.RefObject<HTMLVideoElement>} autoPlay playsInline muted style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 }} />;
-};
+    if (!enabled) return;
+    const id = setInterval(() => {
+      if (isRestartingRef.current) return;
+      if (!enabledRef.current || !settingsRef.current?.cameraOn) return;
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (!track) {
+        // Stream hilang — restart
+        if (!isRestartingRef.current) void forceRestart();
+        return;
+      }
+      if (track.readyState === 'ended' || track.muted) {
+        if (!isRestartingRef.current) void forceRestart();
+      }
+    }, 2000);
+    return () => clearInterval(id);
+  }, [enabled, forceRestart]);
+
+  /* ---------- VISIBILITY + FOCUS ---------- */
+  useEffect(() => {
+    if (!enabled) return;
+    const onWake = () => {
+      if (document.visibilityState !== 'visible') return;
+      setTimeout(() => {
+        if (isRestartingRef.current) return;
+        const track = streamRef.current?.getVideoTracks()[0];
+        const isBad = !track || track.readyState === 'ended' || track.muted;
+        if (isBad) void forceRestart();
+      }, 700);
+    };
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+    return () => {
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+    };
+  }, [enabled, forceRestart]);
+
+  /* ---------- DEVICE CHANGE ---------- */
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = async () => {
+      if (isRestartingRef.current) return;
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (!track || track.readyState === 'ended') {
+        await forceRestart();
+      }
+    };
+    navigator.mediaDevices?.addEventListener?.('devicechange', handler);
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', handler);
+  }, [enabled, forceRestart]);
+
+  return { stream, status, error, start, stop, forceRestart };
+}
