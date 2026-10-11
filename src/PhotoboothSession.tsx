@@ -12,6 +12,8 @@ import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } fro
 import { buildDriveFolderUrl } from './gdriveService';
 import { recordSession } from './sessionStats';
 import { writeStatus, markOfflineOnDisconnect, clearStatus } from './statusSync';
+import { getTokenStatus } from './gdriveService';
+import { getUploadStats } from './uploadService';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
@@ -335,19 +337,37 @@ export const PhotoboothSession = ({
      STATUS SYNC — tulis status ke Firebase setiap phase berubah
      (DIPINDAH KE SINI, setelah totalCapturesNeeded)
      ============================================================ */
-  useEffect(() => {
-    const activeSlug = event?.slug || '';
-    const activeName = event?.eventName || 'Untitled';
+useEffect(() => {
+  let cancelled = false;
+
+  const push = async () => {
+    const token = getTokenStatus();
+    const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
+    if (cancelled) return;
 
     void writeStatus({
-      currentEventSlug: activeSlug,
-      currentEventName: activeName,
+      currentEventSlug: event?.slug || '',
+      currentEventName: event?.eventName || 'Untitled',
       currentPhase: phase,
       sessionActive: phase !== 'frame-select',
       photoCount: captures.length,
       totalCaptures: totalCapturesNeeded,
+      driveConnected: token.hasToken,
+      driveAccount: token.account || '',
+      uploadedCount: stats.uploaded,
+      pendingCount: stats.pending,
+      failedCount: stats.failed,
     });
-  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
+  };
+
+  void push();
+  const id = setInterval(push, 5000);
+
+  return () => {
+    cancelled = true;
+    clearInterval(id);
+  };
+}, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
 
   /* Mark offline saat tab ditutup */
   useEffect(() => {

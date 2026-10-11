@@ -1,6 +1,5 @@
 /* ============================================================
-   STATUS SYNC — tulis & baca status tablet ke Firebase
-   Dipakai untuk monitoring real-time di Web Operator
+   STATUS SYNC — tulis & baca status device ke Firebase
    ============================================================ */
 import {
   ref,
@@ -11,11 +10,18 @@ import {
   type Unsubscribe,
 } from 'firebase/database';
 import { getFirebaseDb, isFirebaseConfigured } from './firebaseConfig';
+import { getDeviceInfo } from './deviceInfo';
 
 /* ---------- TYPE ---------- */
 export type TabletStatus = {
   deviceId: string;
   deviceName: string;
+  /* NEW: identitas device */
+  deviceType: string;
+  browser: string;
+  os: string;
+  screenSize: string;
+  /* Event & session */
   currentEventSlug: string;
   currentEventName: string;
   currentPhase: string;
@@ -24,10 +30,15 @@ export type TabletStatus = {
   totalCaptures: number;
   lastActivity: number;
   online: boolean;
+  /* NEW: drive & upload status */
+  driveConnected: boolean;
+  driveAccount: string;
+  uploadedCount: number;
+  pendingCount: number;
+  failedCount: number;
 };
 
 /* ---------- DEVICE ID ---------- */
-/* Generate device ID unik per browser (persist di localStorage) */
 export function getDeviceId(): string {
   if (typeof window === 'undefined') return 'unknown';
   const KEY = 'r3a-device-id';
@@ -42,10 +53,8 @@ export function getDeviceId(): string {
 /* ---------- DEVICE NAME ---------- */
 export function getDeviceName(): string {
   const id = getDeviceId();
-  // Coba ambil dari localStorage, kalau tidak ada pakai device ID
   const saved = localStorage.getItem('r3a-device-name');
   if (saved) return saved;
-  // Default: "Tablet {short-id}"
   return `Tablet ${id.slice(-4).toUpperCase()}`;
 }
 
@@ -59,19 +68,22 @@ function statusPath(deviceId: string): string {
   return `status/${deviceId}`;
 }
 
-/* ============================================================
-   WRITE STATUS — dipanggil dari PhotoboothSession
-   ============================================================ */
+/* ---------- WRITE STATUS ---------- */
 export async function writeStatus(partial: Partial<TabletStatus>): Promise<void> {
   if (!isFirebaseConfigured()) return;
 
   try {
     const db = getFirebaseDb();
     const deviceId = getDeviceId();
+    const info = getDeviceInfo();
 
     const status: TabletStatus = {
       deviceId,
       deviceName: getDeviceName(),
+      deviceType: partial.deviceType ?? info.deviceType,
+      browser: partial.browser ?? info.browser,
+      os: partial.os ?? info.os,
+      screenSize: partial.screenSize ?? info.screenSize,
       currentEventSlug: partial.currentEventSlug ?? '',
       currentEventName: partial.currentEventName ?? '',
       currentPhase: partial.currentPhase ?? 'idle',
@@ -80,27 +92,34 @@ export async function writeStatus(partial: Partial<TabletStatus>): Promise<void>
       totalCaptures: partial.totalCaptures ?? 0,
       lastActivity: Date.now(),
       online: true,
+      driveConnected: partial.driveConnected ?? false,
+      driveAccount: partial.driveAccount ?? '',
+      uploadedCount: partial.uploadedCount ?? 0,
+      pendingCount: partial.pendingCount ?? 0,
+      failedCount: partial.failedCount ?? 0,
     };
 
     await set(ref(db, statusPath(deviceId)), status);
   } catch {
-    /* silent fail — jangan ganggu photobooth */
+    /* silent fail */
   }
 }
 
-/* ============================================================
-   MARK OFFLINE — saat tab ditutup
-   ============================================================ */
+/* ---------- MARK OFFLINE ---------- */
 export function markOfflineOnDisconnect(): void {
   if (!isFirebaseConfigured()) return;
   try {
     const db = getFirebaseDb();
     const deviceId = getDeviceId();
+    const info = getDeviceInfo();
     const statusRef = ref(db, statusPath(deviceId));
-    // Firebase otomatis set online: false saat client disconnect
     onDisconnect(statusRef).set({
       deviceId,
       deviceName: getDeviceName(),
+      deviceType: info.deviceType,
+      browser: info.browser,
+      os: info.os,
+      screenSize: info.screenSize,
       currentEventSlug: '',
       currentEventName: '',
       currentPhase: 'offline',
@@ -109,21 +128,20 @@ export function markOfflineOnDisconnect(): void {
       totalCaptures: 0,
       lastActivity: Date.now(),
       online: false,
+      driveConnected: false,
+      driveAccount: '',
+      uploadedCount: 0,
+      pendingCount: 0,
+      failedCount: 0,
     });
-  } catch {
-    /* silent fail */
-  }
+  } catch { /* silent fail */ }
 }
 
-/* ============================================================
-   SUBSCRIBE ALL TABLETS — dipanggil dari OperatorDashboard
-   ============================================================ */
+/* ---------- SUBSCRIBE ALL DEVICES ---------- */
 export function subscribeAllTablets(
   cb: (tablets: TabletStatus[]) => void,
 ): Unsubscribe {
-  if (!isFirebaseConfigured()) {
-    return () => {};
-  }
+  if (!isFirebaseConfigured()) return () => {};
   const db = getFirebaseDb();
   return onValue(ref(db, 'status'), (snapshot) => {
     if (!snapshot.exists()) {
@@ -138,21 +156,17 @@ export function subscribeAllTablets(
   });
 }
 
-/* ============================================================
-   CLEAR STATUS — saat tablet exit
-   ============================================================ */
+/* ---------- CLEAR STATUS ---------- */
 export async function clearStatus(): Promise<void> {
   if (!isFirebaseConfigured()) return;
   try {
     const db = getFirebaseDb();
     const deviceId = getDeviceId();
     await set(ref(db, statusPath(deviceId)), null);
-  } catch {
-    /* silent fail */
-  }
+  } catch { /* silent fail */ }
 }
 
-/* ---------- SERVER TIMESTAMP (kalau butuh) ---------- */
+/* ---------- SERVER TIMESTAMP ---------- */
 export function getServerTimestamp() {
   if (!isFirebaseConfigured()) return null;
   try {
