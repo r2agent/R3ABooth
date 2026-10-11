@@ -125,13 +125,15 @@ const SyncButton = ({
   <div
     style={{
       position: 'absolute',
-      top: 100,
-      left: '6%',
+      top: 68,
+      right: '6%',
       display: 'flex',
       gap: 10,
       alignItems: 'center',
-      zIndex: 5,
+      zIndex: 10,
       flexWrap: 'wrap',
+      justifyContent: 'flex-end',
+      maxWidth: '40%',
     }}
   >
     <button
@@ -165,9 +167,9 @@ const SyncButton = ({
       <span
         style={{
           color: '#fff',
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: 600,
-          padding: '8px 14px',
+          padding: '6px 12px',
           background: 'rgba(0,0,0,.5)',
           border: '1px solid rgba(255,255,255,.25)',
           maxWidth: '100%',
