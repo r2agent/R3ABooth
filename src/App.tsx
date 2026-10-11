@@ -7,6 +7,7 @@ import { syncCloudToLocal, type SyncResult, type CloudEvent } from './cloudEvent
 import { enumerateCameras, type CameraDevice } from './cameraStore';
 import { CameraTestModal, CameraStatusBadge } from './cameraUi';
 import { useCamera } from './useCamera';
+import { PhotoboothSession } from './PhotoboothSession';
 import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
 import { OperatorDashboard } from './operator/OperatorDashboard';
 import { ReminderPopup } from './ReminderPopup';
