@@ -163,6 +163,20 @@ export const OperatorDashboard = ({
     ? tablets.filter((t) => t.currentEventSlug === eventSlug)
     : tablets;
 
+  /* ============================================================
+     RESPONSIVE FIX — override body min-width saat operator open
+     ============================================================ */
+  useEffect(() => {
+    const originalMinWidth = document.body.style.minWidth;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.minWidth = '0';
+    document.body.style.overflow = 'auto';
+    return () => {
+      document.body.style.minWidth = originalMinWidth;
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const [s, p] = await Promise.all([
@@ -342,464 +356,550 @@ export const OperatorDashboard = ({
 
   /* ---------- RENDER ---------- */
   return (
-    <main
-      className="photobooth-screen photobooth-kiosk"
-      style={{ padding: 24, overflow: 'auto', minHeight: '100vh' }}
-    >
-      <div className="photobooth-kiosk-header">
-        <div className="photobooth-project">
-          <span>R3A BOOTH</span>
-          <strong>
-            OPERATOR DASHBOARD
-            {eventSlug ? (
-              <span style={{ color: '#ffd94e', marginLeft: 8 }}>— {eventSlug}</span>
+    <>
+      {/* ============================================================
+          RESPONSIVE STYLES — khusus operator dashboard
+          ============================================================ */}
+      <style>{`
+        body:has(.operator-dashboard) { min-width: 0 !important; overflow: auto !important; }
+
+        .operator-dashboard {
+          padding: 24px;
+          overflow: auto;
+          min-height: 100vh;
+        }
+
+        @media (max-width: 768px) {
+          .operator-dashboard {
+            padding: 12px !important;
+          }
+          .operator-dashboard .photobooth-kiosk-header {
+            padding: 12px 14px !important;
+            flex-wrap: wrap;
+            gap: 10px;
+          }
+          .operator-dashboard .photobooth-kiosk-header .photobooth-project strong {
+            font-size: 13px !important;
+          }
+          .operator-dashboard .photobooth-kiosk-header .photobooth-project span {
+            font-size: 9px !important;
+          }
+          .operator-dashboard .photobooth-kiosk-header .photobooth-exit {
+            padding: 8px 12px !important;
+            font-size: 11px !important;
+            gap: 4px !important;
+          }
+          .operator-dashboard .photobooth-kiosk-header .photobooth-exit svg {
+            width: 16px !important;
+            height: 16px !important;
+          }
+          .operator-dashboard h3 {
+            font-size: 12px !important;
+          }
+          .operator-dashboard .op-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .operator-dashboard .op-grid-stats {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .operator-dashboard .op-grid-device {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .operator-dashboard .op-grid-tablets {
+            grid-template-columns: 1fr !important;
+          }
+          .operator-dashboard .op-stat-value {
+            font-size: 18px !important;
+          }
+          .operator-dashboard .op-log-list {
+            font-size: 10px !important;
+          }
+          .operator-dashboard .op-action-btn {
+            padding: 8px 12px !important;
+            font-size: 11px !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .operator-dashboard .op-grid-stats {
+            grid-template-columns: 1fr !important;
+          }
+          .operator-dashboard .op-grid-device {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+
+      <main className="photobooth-screen photobooth-kiosk operator-dashboard">
+        <div className="photobooth-kiosk-header">
+          <div className="photobooth-project">
+            <span>R3A BOOTH</span>
+            <strong>
+              OPERATOR DASHBOARD
+              {eventSlug ? (
+                <span style={{ color: '#ffd94e', marginLeft: 8 }}>— {eventSlug}</span>
+              ) : null}
+            </strong>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {onBackToPhotobooth && eventSlug ? (
+              <button
+                className="photobooth-exit"
+                onClick={onBackToPhotobooth}
+                type="button"
+                style={{ background: '#4ade80', color: '#000', borderColor: 'transparent' }}
+              >
+                <ChevronLeft size={24} /> BACK TO PHOTOBOOTH
+              </button>
             ) : null}
-          </strong>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {onBackToPhotobooth && eventSlug ? (
-            <button
-              className="photobooth-exit"
-              onClick={onBackToPhotobooth}
-              type="button"
-              style={{ background: '#4ade80', color: '#000', borderColor: 'transparent' }}
-            >
-              <ChevronLeft size={24} /> BACK TO PHOTOBOOTH
+            <button className="photobooth-exit" onClick={onClose} type="button">
+              <X size={24} /> CLOSE
             </button>
-          ) : null}
-          <button className="photobooth-exit" onClick={onClose} type="button">
-            <X size={24} /> CLOSE
-          </button>
+          </div>
         </div>
-      </div>
 
-      <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: '0 0 16px' }}>
-        Last update: {lastUpdate.toLocaleTimeString()} • Uptime: {formatDuration(uptimeMs)}
-      </p>
+        <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 12, margin: '0 0 16px' }}>
+          Last update: {lastUpdate.toLocaleTimeString()} • Uptime: {formatDuration(uptimeMs)}
+        </p>
 
-      {actionMessage ? (
-        <div
-          style={{
-            padding: '10px 14px',
-            background: 'rgba(239,63,37,.15)',
-            border: '1px solid rgba(239,63,37,.4)',
-            marginBottom: 16,
-            fontSize: 13,
-          }}
-        >
-          {actionMessage}
-        </div>
-      ) : null}
-
-      {/* ============ LIVE TABLETS ============ */}
-      <section style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-          LIVE TABLETS ({filteredTablets.length})
-          {eventSlug ? (
-            <span style={{ color: '#ffd94e', marginLeft: 8, fontSize: 12 }}>
-              • Event: {eventSlug}
-            </span>
-          ) : null}
-        </h3>
-        {filteredTablets.length === 0 ? (
-          <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
-            {eventSlug
-              ? `Tidak ada tablet online untuk event "${eventSlug}".`
-              : 'Tidak ada tablet online.'}
-          </p>
-        ) : (
+        {actionMessage ? (
           <div
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-              gap: 10,
+              padding: '10px 14px',
+              background: 'rgba(239,63,37,.15)',
+              border: '1px solid rgba(239,63,37,.4)',
+              marginBottom: 16,
+              fontSize: 13,
+              wordBreak: 'break-word',
             }}
           >
-            {filteredTablets.map((t) => {
-              const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
-              const isStale = lastActivityAgo > 60;
-              const isOnline = t.online && !isStale;
-
-              return (
-                <div
-                  key={t.deviceId}
-                  style={{
-                    border: `1px solid ${isOnline ? 'rgba(74,222,128,.4)' : 'rgba(255,255,255,.1)'}`,
-                    padding: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                    background: isOnline ? 'rgba(74,222,128,.05)' : 'transparent',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: isOnline ? '#4ade80' : '#6b7280',
-                      }}
-                    />
-                    <strong style={{ fontSize: 13, color: '#fff' }}>{t.deviceName}</strong>
-                  </div>
-
-                  {t.currentEventName ? (
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>
-                      📸 {t.currentEventName}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
-                      Belum ada event
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                    <span style={{ color: 'rgba(255,255,255,.5)' }}>Phase:</span>
-                    <span style={{ color: '#ffd94e', fontWeight: 600 }}>
-                      {t.currentPhase.toUpperCase()}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                    <span style={{ color: 'rgba(255,255,255,.5)' }}>Foto:</span>
-                    <span style={{ color: '#fff' }}>
-                      {t.photoCount} / {t.totalCaptures}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
-                    {isStale
-                      ? `⚠️ ${lastActivityAgo}s tidak aktif`
-                      : `✅ Aktif ${lastActivityAgo}s lalu`}
-                  </div>
-                </div>
-              );
-            })}
+            {actionMessage}
           </div>
-        )}
-      </section>
+        ) : null}
 
-      {/* ============ DEVICE STATUS ============ */}
-      <section style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 14, letterSpacing: '.1em' }}>
-            DEVICE STATUS
+        {/* ============ LIVE TABLETS ============ */}
+        <section style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            LIVE TABLETS ({filteredTablets.length})
+            {eventSlug ? (
+              <span style={{ color: '#ffd94e', marginLeft: 8, fontSize: 12 }}>
+                • Event: {eventSlug}
+              </span>
+            ) : null}
           </h3>
-          <button
-            onClick={handleDiagnostic}
-            disabled={diagnosing}
-            type="button"
-            style={{
-              padding: '8px 16px',
-              background: '#2563eb',
-              color: '#fff',
-              border: 'none',
-              fontWeight: 600,
-              fontSize: 12,
-              cursor: diagnosing ? 'wait' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <Activity size={14} /> {diagnosing ? 'CHECKING...' : 'RUN FULL DIAGNOSTIC'}
-          </button>
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: 10,
-          }}
-        >
-          {devices.map((d) => (
+          {filteredTablets.length === 0 ? (
+            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
+              {eventSlug
+                ? `Tidak ada tablet online untuk event "${eventSlug}".`
+                : 'Tidak ada tablet online.'}
+            </p>
+          ) : (
             <div
-              key={d.id}
+              className="op-grid-tablets"
               style={{
-                border: '1px solid rgba(255,255,255,.1)',
-                padding: 12,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                gap: 10,
+              }}
+            >
+              {filteredTablets.map((t) => {
+                const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
+                const isStale = lastActivityAgo > 60;
+                const isOnline = t.online && !isStale;
+
+                return (
+                  <div
+                    key={t.deviceId}
+                    style={{
+                      border: `1px solid ${isOnline ? 'rgba(74,222,128,.4)' : 'rgba(255,255,255,.1)'}`,
+                      padding: 12,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                      background: isOnline ? 'rgba(74,222,128,.05)' : 'transparent',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: isOnline ? '#4ade80' : '#6b7280',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <strong style={{ fontSize: 13, color: '#fff', wordBreak: 'break-word' }}>
+                        {t.deviceName}
+                      </strong>
+                    </div>
+
+                    {t.currentEventName ? (
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)', wordBreak: 'break-word' }}>
+                        📸 {t.currentEventName}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>
+                        Belum ada event
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                      <span style={{ color: 'rgba(255,255,255,.5)' }}>Phase:</span>
+                      <span style={{ color: '#ffd94e', fontWeight: 600 }}>
+                        {t.currentPhase.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                      <span style={{ color: 'rgba(255,255,255,.5)' }}>Foto:</span>
+                      <span style={{ color: '#fff' }}>
+                        {t.photoCount} / {t.totalCaptures}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
+                      {isStale
+                        ? `⚠️ ${lastActivityAgo}s tidak aktif`
+                        : `✅ Aktif ${lastActivityAgo}s lalu`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* ============ DEVICE STATUS ============ */}
+        <section style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 14, letterSpacing: '.1em' }}>
+              DEVICE STATUS
+            </h3>
+            <button
+              onClick={handleDiagnostic}
+              disabled={diagnosing}
+              type="button"
+              className="op-action-btn"
+              style={{
+                padding: '8px 16px',
+                background: '#2563eb',
+                color: '#fff',
+                border: 'none',
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: diagnosing ? 'wait' : 'pointer',
                 display: 'flex',
-                flexDirection: 'column',
+                alignItems: 'center',
                 gap: 6,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ color: 'rgba(255,255,255,.6)' }}>{deviceIcon(d.id)}</span>
-                <span style={{ fontSize: 12, letterSpacing: '.08em', color: 'rgba(255,255,255,.6)' }}>
-                  {d.label.toUpperCase()}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: statusColor(d.status), fontSize: 14, fontWeight: 600 }}>
-                {statusIcon(d.status)}
-                {d.status === 'ok' ? 'OK' : d.status === 'warning' ? 'WARN' : d.status === 'error' ? 'ERROR' : '—'}
-              </div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.5)' }}>{d.detail}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ============ TODAY STATS ============ */}
-      <section style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-          STATISTIK HARI INI
-        </h3>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: 10,
-          }}
-        >
-          <StatCard label="Sesi" value={String(todayStats.sessionCount)} color="#60a5fa" />
-          <StatCard label="Foto" value={String(todayStats.photoCount)} color="#a78bfa" />
-          <StatCard label="Uploaded" value={String(todayStats.uploadSuccess)} color="#4ade80" />
-          <StatCard label="Upload Fail" value={String(todayStats.uploadFail)} color="#ef4444" />
-          <StatCard
-            label="Avg Durasi"
-            value={todayStats.avgDurationMs > 0 ? formatDuration(todayStats.avgDurationMs) : '—'}
-            color="#facc15"
-          />
-        </div>
-        {lastSession ? (
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
-            Sesi terakhir: {new Date(lastSession.finishedAt).toLocaleTimeString()} • {lastSession.photoCount} foto • {formatDuration(lastSession.finishedAt - lastSession.startedAt)}
-          </p>
-        ) : null}
-      </section>
-
-      {/* ============ DRIVE + UPLOAD STATUS ============ */}
-      <section style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr', marginBottom: 16 }}>
-        <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-            DRIVE STATUS
-          </h3>
-          <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            {token.hasToken ? (
-              <><CheckCircle2 size={14} color="#4ade80" /> Connected</>
-            ) : (
-              <><AlertCircle size={14} color="#ef4444" /> Not connected</>
-            )}
-          </p>
-          <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)' }}>
-            Account: {token.account || '—'}
-          </p>
-          <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)' }}>
-            Token expires in: {token.hasToken ? `${tokenExpiresIn} min` : '—'}
-          </p>
-        </div>
-
-        <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-            UPLOAD STATUS
-          </h3>
-          <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <CheckCircle2 size={14} color="#4ade80" /> Uploaded: {stats.uploaded}
-          </p>
-          <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Clock size={14} color="#facc15" /> Pending: {stats.pending}
-          </p>
-          <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <AlertCircle size={14} color="#ef4444" /> Failed: {stats.failed}
-          </p>
-        </div>
-      </section>
-
-      {/* ============ PENDING LIST ============ */}
-      <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-          PENDING LIST ({pending.length})
-        </h3>
-        {pending.length === 0 ? (
-          <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
-            No pending uploads. All good.
-          </p>
-        ) : (
-          <ul
+              <Activity size={14} /> {diagnosing ? 'CHECKING...' : 'RUN FULL DIAGNOSTIC'}
+            </button>
+          </div>
+          <div
+            className="op-grid-device"
             style={{
-              listStyle: 'none',
-              padding: 0,
-              margin: 0,
-              maxHeight: 240,
-              overflow: 'auto',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 10,
             }}
           >
-            {pending.slice(0, 50).map((p) => (
-              <li
-                key={p.id}
+            {devices.map((d) => (
+              <div
+                key={d.id}
                 style={{
+                  border: '1px solid rgba(255,255,255,.1)',
+                  padding: 12,
                   display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '6px 0',
-                  borderBottom: '1px solid rgba(255,255,255,.05)',
-                  fontSize: 13,
+                  flexDirection: 'column',
+                  gap: 6,
                 }}
               >
-                <span>{p.fileName}</span>
-                <span style={{ color: 'rgba(255,255,255,.5)' }}>
-                  {new Date(p.createdAt).toLocaleTimeString()}
-                </span>
-              </li>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: 'rgba(255,255,255,.6)' }}>{deviceIcon(d.id)}</span>
+                  <span style={{ fontSize: 12, letterSpacing: '.08em', color: 'rgba(255,255,255,.6)' }}>
+                    {d.label.toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: statusColor(d.status), fontSize: 14, fontWeight: 600 }}>
+                  {statusIcon(d.status)}
+                  {d.status === 'ok' ? 'OK' : d.status === 'warning' ? 'WARN' : d.status === 'error' ? 'ERROR' : '—'}
+                </div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,.5)', wordBreak: 'break-word' }}>{d.detail}</div>
+              </div>
             ))}
-          </ul>
-        )}
-      </section>
+          </div>
+        </section>
 
-      {/* ============ QUICK ACTIONS ============ */}
-      <section style={{ marginBottom: 16 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-          QUICK ACTIONS
-        </h3>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <ActionButton
-            icon={<RefreshCw size={16} />}
-            label={retrying ? 'RETRYING...' : 'RETRY ALL'}
-            onClick={handleRetryAll}
-            disabled={retrying || pending.length === 0}
-            color="#ef3f25"
-          />
-          <ActionButton
-            icon={<Plug size={16} />}
-            label={reconnecting ? 'CONNECTING...' : 'RECONNECT DRIVE'}
-            onClick={handleReconnect}
-            disabled={reconnecting}
-            color="#2563eb"
-          />
-          <ActionButton
-            icon={<Camera size={16} />}
-            label="CHECK CAMERA"
-            onClick={handleQuickCheckCamera}
-            color="#0ea5e9"
-          />
-          <ActionButton
-            icon={<Wifi size={16} />}
-            label="CHECK INTERNET"
-            onClick={handleQuickCheckInternet}
-            color="#0ea5e9"
-          />
-          <ActionButton
-            icon={<HardDrive size={16} />}
-            label="CHECK STORAGE"
-            onClick={handleQuickCheckStorage}
-            color="#0ea5e9"
-          />
-          <ActionButton
-            icon={<Printer size={16} />}
-            label="CHECK PRINTER"
-            onClick={handleQuickCheckPrinter}
-            color="#0ea5e9"
-          />
-          <ActionButton
-            icon={<Cpu size={16} />}
-            label="CHECK MEMORY"
-            onClick={handleQuickCheckMemory}
-            color="#0ea5e9"
-          />
-          <ActionButton
-            icon={<Trash2 size={16} />}
-            label="CLEAR CACHE"
-            onClick={handleClearCache}
-            color="#6b7280"
-          />
-          <ActionButton
-            icon={<RotateCcw size={16} />}
-            label="RESET UPTIME"
-            onClick={handleResetUptime}
-            color="#6b7280"
-          />
-          <ActionButton
-            icon={<Trash2 size={16} />}
-            label="CLEAR STATS"
-            onClick={handleClearStats}
-            color="#6b7280"
-          />
-          <ActionButton
-            icon={<Download size={16} />}
-            label="DOWNLOAD LOGS"
-            onClick={handleDownloadLogs}
-            color="#6b7280"
-          />
-          <ActionButton
-            icon={<FileText size={16} />}
-            label="CLEAR LOGS"
-            onClick={handleClearLogs}
-            color="#6b7280"
-          />
-          <ActionButton
-            icon={<Play size={16} />}
-            label="RELOAD APP"
-            onClick={handleReloadApp}
-            color="#dc2626"
-          />
-        </div>
-      </section>
-
-      {/* ============ SYSTEM INFO ============ */}
-      <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-          SYSTEM INFO
-        </h3>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 8,
-          }}
-        >
-          {systemInfo.map((info) => (
-            <div key={info.label} style={{ fontSize: 12, display: 'flex', gap: 8 }}>
-              <span style={{ color: 'rgba(255,255,255,.5)', minWidth: 90 }}>
-                {info.label}:
-              </span>
-              <span style={{ color: 'rgba(255,255,255,.8)' }}>{info.value}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ============ LOGS ============ */}
-      <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-          RECENT LOGS ({logs.length})
-        </h3>
-        {logs.length === 0 ? (
-          <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
-            Belum ada log.
-          </p>
-        ) : (
-          <ul
+        {/* ============ TODAY STATS ============ */}
+        <section style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            STATISTIK HARI INI
+          </h3>
+          <div
+            className="op-grid-stats"
             style={{
-              listStyle: 'none',
-              padding: 0,
-              margin: 0,
-              maxHeight: 240,
-              overflow: 'auto',
-              fontFamily: 'monospace',
-              fontSize: 12,
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+              gap: 10,
             }}
           >
-            {logs.slice(0, 50).map((l, i) => (
-              <li
-                key={i}
-                style={{
-                  padding: '4px 0',
-                  borderBottom: '1px solid rgba(255,255,255,.05)',
-                  color:
-                    l.level === 'error'
-                      ? '#ef4444'
-                      : l.level === 'warn'
-                      ? '#facc15'
-                      : 'rgba(255,255,255,.7)',
-                }}
-              >
-                [{new Date(l.time).toLocaleTimeString()}] [{l.level.toUpperCase()}] {l.message}
-              </li>
+            <StatCard label="Sesi" value={String(todayStats.sessionCount)} color="#60a5fa" />
+            <StatCard label="Foto" value={String(todayStats.photoCount)} color="#a78bfa" />
+            <StatCard label="Uploaded" value={String(todayStats.uploadSuccess)} color="#4ade80" />
+            <StatCard label="Upload Fail" value={String(todayStats.uploadFail)} color="#ef4444" />
+            <StatCard
+              label="Avg Durasi"
+              value={todayStats.avgDurationMs > 0 ? formatDuration(todayStats.avgDurationMs) : '—'}
+              color="#facc15"
+            />
+          </div>
+          {lastSession ? (
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
+              Sesi terakhir: {new Date(lastSession.finishedAt).toLocaleTimeString()} • {lastSession.photoCount} foto • {formatDuration(lastSession.finishedAt - lastSession.startedAt)}
+            </p>
+          ) : null}
+        </section>
+
+        {/* ============ DRIVE + UPLOAD STATUS ============ */}
+        <section className="op-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr', marginBottom: 16 }}>
+          <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+              DRIVE STATUS
+            </h3>
+            <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {token.hasToken ? (
+                <><CheckCircle2 size={14} color="#4ade80" /> Connected</>
+              ) : (
+                <><AlertCircle size={14} color="#ef4444" /> Not connected</>
+              )}
+            </p>
+            <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)', wordBreak: 'break-word' }}>
+              Account: {token.account || '—'}
+            </p>
+            <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)' }}>
+              Token expires in: {token.hasToken ? `${tokenExpiresIn} min` : '—'}
+            </p>
+          </div>
+
+          <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+              UPLOAD STATUS
+            </h3>
+            <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <CheckCircle2 size={14} color="#4ade80" /> Uploaded: {stats.uploaded}
+            </p>
+            <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Clock size={14} color="#facc15" /> Pending: {stats.pending}
+            </p>
+            <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <AlertCircle size={14} color="#ef4444" /> Failed: {stats.failed}
+            </p>
+          </div>
+        </section>
+
+        {/* ============ PENDING LIST ============ */}
+        <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            PENDING LIST ({pending.length})
+          </h3>
+          {pending.length === 0 ? (
+            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
+              No pending uploads. All good.
+            </p>
+          ) : (
+            <ul
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                maxHeight: 240,
+                overflow: 'auto',
+              }}
+            >
+              {pending.slice(0, 50).map((p) => (
+                <li
+                  key={p.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: '6px 0',
+                    borderBottom: '1px solid rgba(255,255,255,.05)',
+                    fontSize: 13,
+                    gap: 10,
+                  }}
+                >
+                  <span style={{ wordBreak: 'break-all' }}>{p.fileName}</span>
+                  <span style={{ color: 'rgba(255,255,255,.5)', flexShrink: 0 }}>
+                    {new Date(p.createdAt).toLocaleTimeString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* ============ QUICK ACTIONS ============ */}
+        <section style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            QUICK ACTIONS
+          </h3>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <ActionButton
+              icon={<RefreshCw size={16} />}
+              label={retrying ? 'RETRYING...' : 'RETRY ALL'}
+              onClick={handleRetryAll}
+              disabled={retrying || pending.length === 0}
+              color="#ef3f25"
+            />
+            <ActionButton
+              icon={<Plug size={16} />}
+              label={reconnecting ? 'CONNECTING...' : 'RECONNECT DRIVE'}
+              onClick={handleReconnect}
+              disabled={reconnecting}
+              color="#2563eb"
+            />
+            <ActionButton
+              icon={<Camera size={16} />}
+              label="CHECK CAMERA"
+              onClick={handleQuickCheckCamera}
+              color="#0ea5e9"
+            />
+            <ActionButton
+              icon={<Wifi size={16} />}
+              label="CHECK INTERNET"
+              onClick={handleQuickCheckInternet}
+              color="#0ea5e9"
+            />
+            <ActionButton
+              icon={<HardDrive size={16} />}
+              label="CHECK STORAGE"
+              onClick={handleQuickCheckStorage}
+              color="#0ea5e9"
+            />
+            <ActionButton
+              icon={<Printer size={16} />}
+              label="CHECK PRINTER"
+              onClick={handleQuickCheckPrinter}
+              color="#0ea5e9"
+            />
+            <ActionButton
+              icon={<Cpu size={16} />}
+              label="CHECK MEMORY"
+              onClick={handleQuickCheckMemory}
+              color="#0ea5e9"
+            />
+            <ActionButton
+              icon={<Trash2 size={16} />}
+              label="CLEAR CACHE"
+              onClick={handleClearCache}
+              color="#6b7280"
+            />
+            <ActionButton
+              icon={<RotateCcw size={16} />}
+              label="RESET UPTIME"
+              onClick={handleResetUptime}
+              color="#6b7280"
+            />
+            <ActionButton
+              icon={<Trash2 size={16} />}
+              label="CLEAR STATS"
+              onClick={handleClearStats}
+              color="#6b7280"
+            />
+            <ActionButton
+              icon={<Download size={16} />}
+              label="DOWNLOAD LOGS"
+              onClick={handleDownloadLogs}
+              color="#6b7280"
+            />
+            <ActionButton
+              icon={<FileText size={16} />}
+              label="CLEAR LOGS"
+              onClick={handleClearLogs}
+              color="#6b7280"
+            />
+            <ActionButton
+              icon={<Play size={16} />}
+              label="RELOAD APP"
+              onClick={handleReloadApp}
+              color="#dc2626"
+            />
+          </div>
+        </section>
+
+        {/* ============ SYSTEM INFO ============ */}
+        <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            SYSTEM INFO
+          </h3>
+          <div
+            className="op-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: 8,
+            }}
+          >
+            {systemInfo.map((info) => (
+              <div key={info.label} style={{ fontSize: 12, display: 'flex', gap: 8 }}>
+                <span style={{ color: 'rgba(255,255,255,.5)', minWidth: 80, flexShrink: 0 }}>
+                  {info.label}:
+                </span>
+                <span style={{ color: 'rgba(255,255,255,.8)', wordBreak: 'break-word', overflow: 'hidden' }}>
+                  {info.value}
+                </span>
+              </div>
             ))}
-          </ul>
-        )}
-      </section>
-    </main>
+          </div>
+        </section>
+
+        {/* ============ LOGS ============ */}
+        <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            RECENT LOGS ({logs.length})
+          </h3>
+          {logs.length === 0 ? (
+            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
+              Belum ada log.
+            </p>
+          ) : (
+            <ul
+              className="op-log-list"
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                maxHeight: 240,
+                overflow: 'auto',
+                fontFamily: 'monospace',
+                fontSize: 12,
+              }}
+            >
+              {logs.slice(0, 50).map((l, i) => (
+                <li
+                  key={i}
+                  style={{
+                    padding: '4px 0',
+                    borderBottom: '1px solid rgba(255,255,255,.05)',
+                    color:
+                      l.level === 'error'
+                        ? '#ef4444'
+                        : l.level === 'warn'
+                        ? '#facc15'
+                        : 'rgba(255,255,255,.7)',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  [{new Date(l.time).toLocaleTimeString()}] [{l.level.toUpperCase()}] {l.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </main>
+    </>
   );
 };
 
@@ -825,7 +925,7 @@ const StatCard = ({
     <span style={{ fontSize: 11, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
       {label.toUpperCase()}
     </span>
-    <span style={{ fontSize: 22, fontWeight: 700, color }}>{value}</span>
+    <span className="op-stat-value" style={{ fontSize: 22, fontWeight: 700, color }}>{value}</span>
   </div>
 );
 
@@ -846,6 +946,7 @@ const ActionButton = ({
     onClick={onClick}
     disabled={disabled}
     type="button"
+    className="op-action-btn"
     style={{
       padding: '10px 16px',
       background: disabled ? '#555' : color,
