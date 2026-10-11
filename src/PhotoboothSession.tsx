@@ -831,17 +831,7 @@ export const PhotoboothSession = ({
               return (
                 <div key={slot.id} className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}>
                   {filled ? (
-                    <img 
-                      src={captureMap.get(slot.captureId)} 
-                      alt={slot.captureId} 
-                      style={{ 
-                        objectFit: 'cover',
-                        objectPosition: 'center',
-                        width: '100%',
-                        height: '100%',
-                        display: 'block'
-                      }} 
-                    />
+                    <img src={captureMap.get(slot.captureId)} alt={slot.captureId} />
                   ) : (
                     <span>{slot.captureId}</span>
                   )}
@@ -856,7 +846,7 @@ export const PhotoboothSession = ({
         <section className="photobooth-filter-section">
           <div className="filter-header">
             <h2>SELECT FILTER</h2>
-            <p>Select a photo, then choose a filter.</p>
+            <p>Tap a photo slot to select it, then choose a filter.</p>
           </div>
           <div className="filter-preview-area">
             <div className="filter-preview-frame" style={{ ['--frame-aspect' as string]: String(frameAspect), aspectRatio: String(frameAspect) }}>
@@ -879,8 +869,6 @@ export const PhotoboothSession = ({
                       top: `${slot.y}%`, 
                       width: `${slot.w}%`, 
                       height: `${slot.h}%`,
-                      position: 'absolute',
-                      overflow: 'hidden'
                     }}
                     onClick={() => setSelectedCaptureId(slot.captureId)}
                   >
@@ -888,51 +876,29 @@ export const PhotoboothSession = ({
                       src={cap} 
                       alt={slot.captureId} 
                       style={{ 
-                        filter: getFilterCss(filterId), 
-                        objectFit: 'cover',
-                        objectPosition: 'center',
-                        width: '100%',
-                        height: '100%',
-                        display: 'block',
-                        position: 'absolute',
-                        inset: 0
+                        filter: getFilterCss(filterId),
                       }} 
                     />
+                    {isSelected ? (
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 6,
+                        left: 6,
+                        padding: '3px 10px',
+                        background: '#ffd94e',
+                        color: '#1a1614',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        borderRadius: 4,
+                        letterSpacing: '.08em',
+                      }}>
+                        SELECTED
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
             </div>
-          </div>
-          <div className="filter-slot-selector">
-            {uniqueCaptureIds.map((capId) => {
-              const cap = captureMap.get(capId);
-              if (!cap) return null;
-              const filterId = captureFilters.get(capId) || 'natural';
-              const isSelected = selectedCaptureId === capId;
-              return (
-                <button
-                  key={capId}
-                  className={`filter-slot-thumb ${isSelected ? 'is-selected' : ''}`}
-                  onClick={() => setSelectedCaptureId(capId)}
-                  type="button"
-                >
-                  <img 
-                    src={cap} 
-                    alt={capId} 
-                    style={{ 
-                      filter: getFilterCss(filterId), 
-                      objectFit: 'cover',
-                      objectPosition: 'center',
-                      width: '100%',
-                      height: '100%',
-                      display: 'block'
-                    }} 
-                  />
-                  <span>{capId}</span>
-                  {filterId !== 'natural' ? <em className="filter-badge">{filterId.toUpperCase()}</em> : null}
-                </button>
-              );
-            })}
           </div>
           {selectedCaptureId ? (
             <div className="filter-options">
