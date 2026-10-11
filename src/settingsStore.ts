@@ -35,8 +35,8 @@ export type GoogleDriveSettingsShape = {
   autoUpload: boolean;
   useManualFolder: boolean;
   manualFolderInput: string;
-  reminderEnabled: boolean;      // NEW
-  reminderIntervalMin: number;   // NEW
+  reminderEnabled: boolean;
+  reminderIntervalMin: number;
 };
 
 export type ApplicationSettingsShape = {
@@ -54,6 +54,8 @@ export type DisplaySettingsShape = {
   showPrintButton: boolean;
   showQrButton: boolean;
   showDriveQrButton: boolean;
+  idleTimeoutMin: number;       // NEW
+  slideDurationSec: number;     // NEW
 };
 
 export type SecuritySettingsShape = {
@@ -126,10 +128,12 @@ const DEFAULT_SETTINGS: AllSettings = {
     displayMode: 'KIOSK',
     brightness: 100,
     touchInput: true,
-    idleScreen: 'HOME SCREEN',
+    idleScreen: 'SLIDESHOW',
     showPrintButton: true,
     showQrButton: true,
     showDriveQrButton: true,
+    idleTimeoutMin: 3,
+    slideDurationSec: 5,
   },
   security: {
     adminLock: false,

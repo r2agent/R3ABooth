@@ -9,6 +9,7 @@ import { PhotoboothSession } from './PhotoboothSession';
 import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
 import { OperatorDashboard } from './operator/OperatorDashboard';
 import { ReminderPopup } from './ReminderPopup';
+import { ScreensaverSlideshow } from './ScreensaverSlideshow';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -45,7 +46,7 @@ function parseFolderId(input: string): string {
   return '';
 }
 
-// === Wrapper popup untuk semua screen ===
+// === Wrapper popup + screensaver untuk semua screen ===
 const WithReminder = ({
   visible,
   minutes,
@@ -54,6 +55,9 @@ const WithReminder = ({
   onDismiss,
   needsFullscreen,
   onGoFullscreen,
+  screensaverVisible,
+  slideDurationSec,
+  onScreensaverDismiss,
   children,
 }: {
   visible: boolean;
@@ -63,10 +67,19 @@ const WithReminder = ({
   onDismiss: () => void;
   needsFullscreen: boolean;
   onGoFullscreen: () => void;
+  screensaverVisible: boolean;
+  slideDurationSec: number;
+  onScreensaverDismiss: () => void;
   children: React.ReactNode;
 }) => (
   <>
     {children}
+    {screensaverVisible ? (
+      <ScreensaverSlideshow
+        slideDurationSec={slideDurationSec}
+        onDismiss={onScreensaverDismiss}
+      />
+    ) : null}
     {visible ? (
       <ReminderPopup
         minutesUntilExpiry={minutes}
@@ -669,6 +682,7 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                   <option>HOME SCREEN</option>
                   <option>BLANK</option>
                   <option>LOGO</option>
+                  <option>SLIDESHOW</option>
                 </select>
               </div>
               <div className="setting-control">
@@ -688,6 +702,52 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
                 <button className={`toggle-row ${settings.display.showDriveQrButton ? 'is-on' : ''}`} type="button" onClick={() => update('display', { showDriveQrButton: !settings.display.showDriveQrButton })}>
                   <i />{settings.display.showDriveQrButton ? 'ON' : 'OFF'}
                 </button>
+              </div>
+              <div className="setting-control">
+                <span>IDLE TIMEOUT (MIN)</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={String(settings.display.idleTimeoutMin ?? 3)}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    const num = raw === '' ? 0 : parseInt(raw, 10);
+                    update('display', { idleTimeoutMin: num });
+                  }}
+                  onBlur={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    const num = raw === '' ? 3 : parseInt(raw, 10);
+                    if (!num || num < 1 || num > 120) {
+                      update('display', { idleTimeoutMin: 3 });
+                    }
+                  }}
+                  placeholder="3"
+                  style={{ padding: 8, fontSize: 14 }}
+                />
+              </div>
+              <div className="setting-control">
+                <span>SLIDE DURATION (SEC)</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={String(settings.display.slideDurationSec ?? 5)}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    const num = raw === '' ? 0 : parseInt(raw, 10);
+                    update('display', { slideDurationSec: num });
+                  }}
+                  onBlur={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    const num = raw === '' ? 5 : parseInt(raw, 10);
+                    if (!num || num < 1 || num > 60) {
+                      update('display', { slideDurationSec: 5 });
+                    }
+                  }}
+                  placeholder="5"
+                  style={{ padding: 8, fontSize: 14 }}
+                />
               </div>
             </div>
           </div>
@@ -795,6 +855,11 @@ function App() {
   const reminderTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastReminderAtRef = useRef<number>(Date.now());
 
+  // === Idle screensaver state ===
+  const [screensaverVisible, setScreensaverVisible] = useState(false);
+  const lastActivityRef = useRef<number>(Date.now());
+  const screensaverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const refreshEvents = async () => { setEvents(await getAllEvents()); };
   useEffect(() => { void refreshEvents(); }, []);
 
@@ -842,6 +907,47 @@ function App() {
     }, 5 * 1000);
   }, [settings.googleDrive.reminderEnabled, settings.googleDrive.connected, settings.googleDrive.reminderIntervalMin]);
 
+  // === Idle screensaver timer ===
+  useEffect(() => {
+    if (screensaverTimerRef.current) {
+      clearInterval(screensaverTimerRef.current);
+      screensaverTimerRef.current = null;
+    }
+
+    const timeoutMin = Number(settings.display.idleTimeoutMin);
+    const timeoutMs =
+      Number.isFinite(timeoutMin) && timeoutMin >= 1 && timeoutMin <= 120
+        ? timeoutMin * 60 * 1000
+        : 3 * 60 * 1000;
+
+    const bumpActivity = () => {
+      lastActivityRef.current = Date.now();
+      setScreensaverVisible(false);
+    };
+
+    window.addEventListener('mousemove', bumpActivity);
+    window.addEventListener('click', bumpActivity);
+    window.addEventListener('touchstart', bumpActivity);
+    window.addEventListener('keydown', bumpActivity);
+
+    lastActivityRef.current = Date.now();
+
+    screensaverTimerRef.current = setInterval(() => {
+      const now = Date.now();
+      if (now - lastActivityRef.current < timeoutMs) return;
+      if (typeof window !== 'undefined' && window.location.hash === '#operator') return;
+      setScreensaverVisible(true);
+    }, 5 * 1000);
+
+    return () => {
+      window.removeEventListener('mousemove', bumpActivity);
+      window.removeEventListener('click', bumpActivity);
+      window.removeEventListener('touchstart', bumpActivity);
+      window.removeEventListener('keydown', bumpActivity);
+      if (screensaverTimerRef.current) clearInterval(screensaverTimerRef.current);
+    };
+  }, [settings.display.idleTimeoutMin]);
+
   const handleReminderRefresh = async () => {
     const clientId = VITE_CLIENT_ID;
     if (!clientId) {
@@ -856,7 +962,6 @@ function App() {
         setSettings(next);
         saveAllSettings(next);
         lastReminderAtRef.current = Date.now();
-        // Token sukses → ubah popup jadi mode "FULLSCREEN NOW"
         setNeedsFullscreen(true);
       }
     } catch { /* ignore */ }
@@ -881,6 +986,12 @@ function App() {
     onDismiss: () => setReminderVisible(false),
     needsFullscreen,
     onGoFullscreen: handleGoFullscreen,
+    screensaverVisible,
+    slideDurationSec: settings.display.slideDurationSec || 5,
+    onScreensaverDismiss: () => {
+      lastActivityRef.current = Date.now();
+      setScreensaverVisible(false);
+    },
   };
 
   if (hash === '#operator') {
