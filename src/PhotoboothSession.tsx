@@ -284,7 +284,7 @@ export const PhotoboothSession = ({
   onExit: () => void;
   onPhaseChange?: (phase: string) => void;
 }) => {
-  const { stream, status, error, start: startCamera } = useCamera(cameraSettings, true);
+  const { stream, status, error, forceRestart } = useCamera(cameraSettings, true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
@@ -333,19 +333,18 @@ export const PhotoboothSession = ({
   useEffect(() => {
     if (phase !== 'ready') return;
     if (status === 'connected' || status === 'connecting') return;
-    // Delay sedikit biar UI siap dulu
-    const t = setTimeout(() => { void startCamera(); }, 200);
+    const t = setTimeout(() => { void forceRestart(); }, 200);
     return () => clearTimeout(t);
-  }, [phase, status, startCamera]);
+  }, [phase, status, forceRestart]);
 
   useEffect(() => {
     const handler = () => {
-      // Delay 500ms: biar browser lepas handle camera dari OAuth popup dulu
-      setTimeout(() => { void startCamera(); }, 500);
+      // Delay 800ms: biar browser release camera handle dari OAuth popup dulu
+      setTimeout(() => { void forceRestart(); }, 800);
     };
     window.addEventListener(RESTART_CAMERA_EVENT, handler);
     return () => window.removeEventListener(RESTART_CAMERA_EVENT, handler);
-  }, [startCamera]);
+  }, [forceRestart]);
 
   /* ============================================================
      ⚠️ REMOTE COMMAND OVERLAYS — pure DOM (tanpa React)

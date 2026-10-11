@@ -13,38 +13,45 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enabledRef = useRef(enabled);
   const settingsRef = useRef(settings);
+  const isRestartingRef = useRef(false);
 
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
+
+  /* Paksa stop semua track lama */
+  const stopTracks = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => {
+        try { t.stop(); } catch { /* ignore */ }
+      });
+      streamRef.current = null;
+    }
+  }, []);
 
   const stop = useCallback(() => {
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      setStream(null);
-    }
+    stopTracks();
+    setStream(null);
     setStatus('idle');
     setError(null);
-  }, []);
+  }, [stopTracks]);
 
-  const start = useCallback(async () => {
+  /* Start tunggal — SELALU force-release stream lama dulu */
+  const start = useCallback(async (): Promise<boolean> => {
     const s = settingsRef.current;
     if (!s || !s.cameraOn) {
       setStatus('disconnected');
-      return;
+      return false;
     }
+
+    // ⚠️ Force stop old stream dulu — ini kunci recovery
+    stopTracks();
+    setStream(null);
     setStatus('connecting');
     setError(null);
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      setStream(null);
-    }
 
     try {
       const { width, height } = getEffectiveResolution(s);
@@ -65,6 +72,7 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
       streamRef.current = newStream;
       setStream(newStream);
       setStatus('connected');
+      return true;
     } catch (err) {
       const name = err instanceof DOMException ? err.name : '';
       if (name === 'NotAllowedError' || name === 'SecurityError') setError('permission-denied');
@@ -72,9 +80,39 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
       else if (name === 'NotReadableError') setError('in-use');
       else setError('unknown');
       setStatus('error');
+      return false;
     }
-  }, []);
+  }, [stopTracks]);
 
+  /* ============================================================
+     FORCE RESTART — stop + retry up to 5x dengan backoff
+     Dipakai untuk recovery setelah OAuth popup / device suspend
+     ============================================================ */
+  const forceRestart = useCallback(async () => {
+    if (isRestartingRef.current) return;
+    isRestartingRef.current = true;
+    try {
+      stopTracks();
+      setStream(null);
+      setStatus('connecting');
+      setError(null);
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const ok = await start();
+        if (ok) {
+          isRestartingRef.current = false;
+          return;
+        }
+        // Backoff: 500, 900, 1300, 1700, 2100 ms
+        const delay = 500 + attempt * 400;
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    } finally {
+      isRestartingRef.current = false;
+    }
+  }, [start, stopTracks]);
+
+  /* Initial mount + enabled toggling */
   useEffect(() => {
     if (!enabled) {
       stop();
@@ -84,6 +122,7 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
     return () => { stop(); };
   }, [enabled, start, stop]);
 
+  /* Track ended/mute handlers */
   useEffect(() => {
     if (!enabled || !stream) return;
     const track = stream.getVideoTracks()[0];
@@ -92,12 +131,11 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
     const scheduleRestart = () => {
       if (!enabledRef.current) return;
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      // Delay 800ms supaya OAuth popup / device suspend selesai dulu
       restartTimerRef.current = setTimeout(() => {
         if (enabledRef.current && settingsRef.current?.cameraOn) {
-          void start();
+          void forceRestart();
         }
-      }, 800);
+      }, 1000);
     };
 
     const onEnded = () => {
@@ -105,7 +143,11 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
       scheduleRestart();
     };
     const onUnmute = () => { setStatus('connected'); };
-    const onMute = () => { setStatus('disconnected'); };
+    const onMute = () => {
+      setStatus('disconnected');
+      // ⚠️ Mute juga trigger restart — kalau browser ambil kamera (OAuth popup)
+      scheduleRestart();
+    };
 
     track.addEventListener('ended', onEnded);
     track.addEventListener('unmute', onUnmute);
@@ -115,39 +157,46 @@ export function useCamera(settings: CameraSettings | null, enabled: boolean) {
       track.removeEventListener('unmute', onUnmute);
       track.removeEventListener('mute', onMute);
     };
-  }, [stream, enabled, start]);
+  }, [stream, enabled, forceRestart]);
 
+  /* Device change */
   useEffect(() => {
     if (!enabled) return;
     const handler = async () => {
-      if (streamRef.current) {
-        const track = streamRef.current.getVideoTracks()[0];
-        if (!track || track.readyState === 'ended') {
-          setStatus('disconnected');
-          await start();
-        }
-      } else if (settingsRef.current?.cameraOn) {
-        await start();
+      if (isRestartingRef.current) return;
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (!track || track.readyState === 'ended') {
+        await forceRestart();
       }
     };
     navigator.mediaDevices?.addEventListener?.('devicechange', handler);
     return () => navigator.mediaDevices?.removeEventListener?.('devicechange', handler);
-  }, [enabled, start]);
+  }, [enabled, forceRestart]);
 
-  // ⚠️ Auto-restart saat device kembali visible (setelah OAuth popup close, minimize, dll)
+  /* ============================================================
+     VISIBILITY + FOCUS — setelah OAuth popup close, tab kembali
+     visible/focus → cek track, kalau bad → force restart
+     ============================================================ */
   useEffect(() => {
     if (!enabled) return;
     const onVisible = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState !== 'visible') return;
+      // Delay biar browser settle dulu (popup close animation, dll)
+      setTimeout(() => {
         const track = streamRef.current?.getVideoTracks()[0];
-        if (!track || track.readyState === 'ended') {
-          void start();
+        const isBad = !track || track.readyState === 'ended' || track.muted;
+        if (isBad) {
+          void forceRestart();
         }
-      }
+      }, 600);
     };
     document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [enabled, start]);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [enabled, forceRestart]);
 
-  return { stream, status, error, start, stop };
+  return { stream, status, error, start, stop, forceRestart };
 }
