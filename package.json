@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.57.4",
+    "firebase": "^11.0.2",
     "lucide-react": "^0.446.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

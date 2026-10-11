@@ -1,7 +1,8 @@
-import { useEffect, useState, type CSSProperties } from 'react';
-import { ChevronRight, Image as ImageIcon, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronRight, Image as ImageIcon, Plus, Trash2, Cloud, Copy, Check, AlertCircle, ExternalLink } from 'lucide-react';
 import { FrameEditor } from './FrameEditor';
 import { createFrame, createSlot, duplicateSlot, saveEvent, type R3aEvent, type Frame, type Slot } from './eventStore';
+import { publishEventToCloud, buildEventUrl, generateSlug } from './cloudEventSync';
 
 type EventFileTab = 'event' | 'frame' | 'status';
 
@@ -12,7 +13,20 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => { setDraft(event); setActiveFrameIndex(0); }, [event]);
+  // Publish state
+  const [publishing, setPublishing] = useState(false);
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  const [publishMessage, setPublishMessage] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setDraft(event);
+    setActiveFrameIndex(0);
+    setPublishedSlug(event.slug || null);
+    setPublishMessage(null);
+    setPublishError(null);
+  }, [event]);
 
   const tabs: { id: EventFileTab; label: string }[] = [
     { id: 'event', label: 'EVENT INFORMATION' },
@@ -79,6 +93,74 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
       setSaving(false);
     }
   };
+
+  /* ============================================================
+     PUBLISH TO CLOUD — simpan event ke Firebase
+     ============================================================ */
+  const handlePublish = async () => {
+    setPublishing(true);
+    setPublishError(null);
+    setPublishMessage(null);
+
+    try {
+      // Pastikan event punya slug
+      const slug = draft.slug || generateSlug(draft.eventName || 'untitled');
+      if (!slug) {
+        setPublishError('Nama event tidak valid. Isi nama event dulu.');
+        setPublishing(false);
+        return;
+      }
+
+      // Simpan event dulu ke lokal (biar slug tersimpan)
+      const toSave: R3aEvent = { ...draft, slug, updatedAt: Date.now() };
+      await saveEvent(toSave);
+      setDraft(toSave);
+
+      // Publish ke Firebase
+      const result = await publishEventToCloud(toSave);
+
+      if (result.success && result.slug) {
+        setPublishedSlug(result.slug);
+        setPublishMessage(`Berhasil publish! Event bisa diakses di URL di bawah.`);
+        onSaved(toSave);
+      } else {
+        setPublishError(result.error || 'Gagal publish ke cloud.');
+      }
+    } catch (err) {
+      setPublishError(err instanceof Error ? err.message : 'Gagal publish');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleCopyUrl = async () => {
+    if (!publishedSlug) return;
+    const url = buildEventUrl(publishedSlug);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback untuk browser yang tidak support clipboard
+      const input = document.createElement('input');
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleOpenUrl = () => {
+    if (!publishedSlug) return;
+    const url = buildEventUrl(publishedSlug);
+    window.open(url, '_blank');
+  };
+
+  const slugPreview = draft.slug || generateSlug(draft.eventName || 'untitled');
+  const fullUrl = slugPreview ? buildEventUrl(slugPreview) : '';
 
   return (
     <main className="new-project-screen">
@@ -160,6 +242,187 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
             <div className="status-actions">
               <button className="status-action" type="button" onClick={() => setDraft({ ...draft, eventStatus: 'Active' })}>START EVENT <ChevronRight size={20} /></button>
               <button className="status-action muted" type="button" onClick={() => setDraft({ ...draft, eventStatus: 'Ended' })}>END EVENT <ChevronRight size={20} /></button>
+            </div>
+
+            {/* ============ PUBLISH TO CLOUD SECTION ============ */}
+            <div
+              style={{
+                marginTop: 32,
+                paddingTop: 24,
+                borderTop: '2px solid rgba(255,255,255,.35)',
+                maxWidth: 760,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                <Cloud size={22} color="#ffd94e" />
+                <h3 style={{ margin: 0, fontSize: 18, letterSpacing: '.06em', color: '#fff' }}>
+                  PUBLISH TO CLOUD
+                </h3>
+              </div>
+
+              <p style={{ color: 'rgba(255,245,227,.7)', fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+                Publish event ke Firebase supaya bisa diakses dari device lain via URL unik.
+                Guest bisa scan QR atau buka link di HP mereka.
+              </p>
+
+              {/* Slug preview */}
+              <div style={{ marginBottom: 16 }}>
+                <span style={{ color: 'rgba(255,244,220,.75)', fontSize: 11, fontWeight: 700, letterSpacing: '.18em' }}>
+                  EVENT SLUG
+                </span>
+                <div
+                  style={{
+                    marginTop: 6,
+                    padding: '10px 14px',
+                    background: 'rgba(0,0,0,.3)',
+                    border: '1px solid rgba(255,255,255,.15)',
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    color: '#ffd94e',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  {slugPreview || '—'}
+                </div>
+              </div>
+
+              {/* URL preview */}
+              {slugPreview ? (
+                <div style={{ marginBottom: 16 }}>
+                  <span style={{ color: 'rgba(255,244,220,.75)', fontSize: 11, fontWeight: 700, letterSpacing: '.18em' }}>
+                    SHARE URL
+                  </span>
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: '10px 14px',
+                      background: 'rgba(0,0,0,.3)',
+                      border: '1px solid rgba(255,255,255,.15)',
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      color: '#fff',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {fullUrl}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Publish message */}
+              {publishMessage ? (
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    background: 'rgba(74,222,128,.15)',
+                    border: '1px solid rgba(74,222,128,.4)',
+                    color: '#4ade80',
+                    fontSize: 13,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Check size={16} /> {publishMessage}
+                </div>
+              ) : null}
+
+              {/* Publish error */}
+              {publishError ? (
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    background: 'rgba(239,63,37,.15)',
+                    border: '1px solid rgba(239,63,37,.4)',
+                    color: '#ff9f7a',
+                    fontSize: 13,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <AlertCircle size={16} /> {publishError}
+                </div>
+              ) : null}
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button
+                  onClick={handlePublish}
+                  disabled={publishing || !draft.eventName}
+                  type="button"
+                  style={{
+                    padding: '12px 20px',
+                    background: publishing || !draft.eventName ? '#555' : '#ef3f25',
+                    color: '#fff',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    letterSpacing: '.06em',
+                    cursor: publishing || !draft.eventName ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Cloud size={16} />
+                  {publishing ? 'PUBLISHING...' : publishedSlug ? 'RE-PUBLISH' : 'PUBLISH NOW'}
+                </button>
+
+                {publishedSlug ? (
+                  <>
+                    <button
+                      onClick={handleCopyUrl}
+                      type="button"
+                      style={{
+                        padding: '12px 20px',
+                        background: copied ? '#4ade80' : 'rgba(255,255,255,.1)',
+                        color: copied ? '#000' : '#fff',
+                        border: '1px solid rgba(255,255,255,.25)',
+                        fontWeight: 700,
+                        fontSize: 13,
+                        letterSpacing: '.06em',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      {copied ? <Check size={16} /> : <Copy size={16} />}
+                      {copied ? 'COPIED!' : 'COPY URL'}
+                    </button>
+
+                    <button
+                      onClick={handleOpenUrl}
+                      type="button"
+                      style={{
+                        padding: '12px 20px',
+                        background: 'rgba(255,255,255,.1)',
+                        color: '#fff',
+                        border: '1px solid rgba(255,255,255,.25)',
+                        fontWeight: 700,
+                        fontSize: 13,
+                        letterSpacing: '.06em',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <ExternalLink size={16} />
+                      OPEN URL
+                    </button>
+                  </>
+                ) : null}
+              </div>
+
+              {!draft.eventName ? (
+                <p style={{ marginTop: 12, color: '#ff9f7a', fontSize: 12 }}>
+                  ⚠️ Isi nama event dulu sebelum publish.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}

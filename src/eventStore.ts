@@ -31,6 +31,7 @@ export type EventStatus = 'Ready' | 'Active' | 'Ended';
 
 export type R3aEvent = {
   id: string;
+  slug?: string;           // ← TAMBAH: slug untuk URL unik
   eventName: string;
   clientName: string;
   date: string;
@@ -82,6 +83,7 @@ function normalizeEvent(value: Partial<R3aEvent> | null | undefined): R3aEvent {
   const now = Date.now();
   return {
     id: typeof value?.id === 'string' && value.id ? value.id : `evt-legacy-${now}`,
+    slug: typeof value?.slug === 'string' && value.slug ? value.slug : undefined,
     eventName: typeof value?.eventName === 'string' ? value.eventName : '',
     clientName: typeof value?.clientName === 'string' ? value.clientName : '',
     date: typeof value?.date === 'string' ? value.date : '',
@@ -184,6 +186,7 @@ export function createEmptyEvent(): R3aEvent {
   const now = Date.now();
   return {
     id: `evt-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    slug: undefined,
     eventName: '',
     clientName: '',
     date: '',
@@ -233,4 +236,51 @@ export function duplicateSlot(slot: Slot): Slot {
     x: Math.min(slot.x + 5, 100 - slot.w),
     y: Math.min(slot.y + 5, 100 - slot.h),
   };
+}
+
+/* ============================================================
+   CLOUD SYNC FUNCTIONS — proxy ke cloudEventSync.ts
+   ============================================================ */
+import {
+  saveEventToCloud,
+  generateSlug,
+  type CloudEvent,
+} from './cloudEventSync';
+
+/* ---------- PUBLISH EVENT KE CLOUD ---------- */
+export async function publishEventToCloud(
+  event: R3aEvent,
+): Promise<{ success: boolean; slug?: string; error?: string }> {
+  // Pastikan ada slug
+  const slug = event.slug || generateSlug(event.eventName || 'untitled');
+  if (!slug) {
+    return { success: false, error: 'Nama event tidak valid' };
+  }
+
+  // Update event dengan slug
+  const eventWithSlug: R3aEvent = { ...event, slug, updatedAt: Date.now() };
+
+  // Simpan lokal
+  await saveEvent(eventWithSlug);
+
+  // Publish ke Firebase
+  return await saveEventToCloud(eventWithSlug);
+}
+
+/* ---------- FETCH EVENT DARI CLOUD ---------- */
+export async function fetchEventFromCloud(slug: string): Promise<CloudEvent | null> {
+  const { loadEventFromCloud } = await import('./cloudEventSync');
+  return await loadEventFromCloud(slug);
+}
+
+/* ---------- FETCH ALL EVENTS DARI CLOUD ---------- */
+export async function fetchAllEventsFromCloud(): Promise<CloudEvent[]> {
+  const { listEventsFromCloud } = await import('./cloudEventSync');
+  return await listEventsFromCloud();
+}
+
+/* ---------- DELETE EVENT DARI CLOUD ---------- */
+export async function removeEventFromCloud(slug: string): Promise<boolean> {
+  const { deleteEventFromCloud } = await import('./cloudEventSync');
+  return await deleteEventFromCloud(slug);
 }

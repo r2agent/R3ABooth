@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
+import { EventLoader } from './EventLoader';
 import { createEmptyEvent, deleteEvent, getAllEvents, type R3aEvent } from './eventStore';
 import { enumerateCameras, type CameraDevice } from './cameraStore';
 import { CameraTestModal, CameraStatusBadge } from './cameraUi';
@@ -10,6 +11,7 @@ import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsSt
 import { OperatorDashboard } from './operator/OperatorDashboard';
 import { ReminderPopup } from './ReminderPopup';
 import { ScreensaverSlideshow } from './ScreensaverSlideshow';
+import { type CloudEvent } from './cloudEventSync';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -28,6 +30,15 @@ const VITE_CLIENT_ID =
 
 type Screen = 'home' | 'project-list' | 'new-event' | 'event-file' | 'photobooth-session' | 'settings';
 
+/* ---------- RESERVED PATHS (bukan slug event) ---------- */
+const RESERVED_PATHS = new Set([
+  '',
+  'operator',
+  'settings',
+  'home',
+  'project',
+]);
+
 function statusToAccent(status: string): string {
   if (status === 'Active') return '#44a96f';
   if (status === 'Ended') return '#837a73';
@@ -43,6 +54,18 @@ function parseFolderId(input: string): string {
   if (m2) return m2[1];
   if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
   return '';
+}
+
+/* ============================================================
+   HELPER: extract slug dari URL path
+   /                     → '' (home)
+   /perpisahan-dan-pelepasan → 'perpisahan-dan-pelepasan'
+   /operator             → 'operator'
+   ============================================================ */
+function getSlugFromUrl(): string {
+  if (typeof window === 'undefined') return '';
+  const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+  return path;
 }
 
 const WithReminder = ({
@@ -845,6 +868,13 @@ function App() {
     typeof window !== 'undefined' ? window.location.hash : ''
   );
 
+  /* ============================================================
+     URL SLUG STATE — handle /:slug untuk load event dari cloud
+     ============================================================ */
+  const [urlSlug, setUrlSlug] = useState<string>(() => getSlugFromUrl());
+  const [cloudEvent, setCloudEvent] = useState<CloudEvent | null>(null);
+  const [cloudLoading, setCloudLoading] = useState<boolean>(false);
+
   // Ref untuk screen & phase (dibaca dari setInterval)
   const screenRef = useRef<Screen>(screen);
   useEffect(() => { screenRef.current = screen; }, [screen]);
@@ -872,6 +902,30 @@ function App() {
     onHash();
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+
+  /* ---------- Handle URL changes (popstate) ---------- */
+  useEffect(() => {
+    const onPopState = () => {
+      const slug = getSlugFromUrl();
+      setUrlSlug(slug);
+      if (!slug) {
+        setCloudEvent(null);
+        setCloudLoading(false);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  /* ---------- Trigger cloud load kalau urlSlug bukan reserved ---------- */
+  useEffect(() => {
+    const slug = urlSlug;
+    if (!slug) return;
+    if (RESERVED_PATHS.has(slug)) return;
+    if (cloudEvent || cloudLoading) return;
+
+    setCloudLoading(true);
+  }, [urlSlug, cloudEvent, cloudLoading]);
 
   // === Reminder timer — MURNI BY INTERVAL ===
   useEffect(() => {
@@ -940,10 +994,6 @@ function App() {
       if (now - lastActivityRef.current < timeoutMs) return;
       if (typeof window !== 'undefined' && window.location.hash === '#operator') return;
 
-      // Screensaver muncul di:
-      // - Semua screen menu (home, project-list, event-file, settings)
-      // - Photobooth HANYA saat phase = frame-select
-      // TIDAK muncul saat photobooth di phase selain frame-select (ready/live/filter/result/qr)
       if (screenRef.current === 'photobooth-session') {
         if (photoboothPhaseRef.current !== 'frame-select') return;
       }
@@ -1006,6 +1056,14 @@ function App() {
     },
   };
 
+  /* ============================================================
+     ROUTING PRIORITY
+     1. /#operator (hash) → OperatorDashboard
+     2. /:slug (URL) → EventLoader → PhotoboothSession
+     3. Internal screens (home, project-list, event-file, etc)
+     ============================================================ */
+
+  // Priority 1: Operator via hash
   if (hash === '#operator') {
     return (
       <OperatorDashboard
@@ -1015,6 +1073,49 @@ function App() {
           setHash('');
         }}
       />
+    );
+  }
+
+  // Priority 2: Event via URL slug (Firebase)
+  if (urlSlug && !RESERVED_PATHS.has(urlSlug)) {
+    if (cloudEvent) {
+      // Event loaded — langsung buka photobooth session
+      return (
+        <WithReminder {...reminderProps}>
+          <PhotoboothSession
+            event={cloudEvent}
+            cameraSettings={settings.camera}
+            allSettings={settings}
+            onExit={() => {
+              // Balik ke home, reset URL
+              window.history.pushState({}, '', '/');
+              setUrlSlug('');
+              setCloudEvent(null);
+              setCloudLoading(false);
+              setScreen('home');
+            }}
+            onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
+          />
+        </WithReminder>
+      );
+    }
+    // Belum load — tampilkan EventLoader
+    return (
+      <WithReminder {...reminderProps}>
+        <EventLoader
+          slug={urlSlug}
+          onLoad={(event) => {
+            setCloudEvent(event);
+            setCloudLoading(false);
+          }}
+          onNotFound={() => {
+            // Slug tidak ketemu → balik ke home
+            window.history.pushState({}, '', '/');
+            setUrlSlug('');
+            setCloudLoading(false);
+          }}
+        />
+      </WithReminder>
     );
   }
 
