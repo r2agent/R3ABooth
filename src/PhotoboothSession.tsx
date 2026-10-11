@@ -891,6 +891,7 @@ export const PhotoboothSession = ({
                         fontWeight: 800,
                         borderRadius: 4,
                         letterSpacing: '.08em',
+                        zIndex: 10,
                       }}>
                         SELECTED
                       </div>
