@@ -273,6 +273,8 @@ export const PhotoboothSession = ({
   const { stream, status, error } = useCamera(cameraSettings, true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const previewAreaRef = useRef<HTMLDivElement>(null);
+  const previewFrameRef = useRef<HTMLDivElement>(null);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
   const [countdown, setCountdown] = useState(0);
@@ -641,51 +643,71 @@ export const PhotoboothSession = ({
   );
 
   /* ============================================================
-     PREVIEW CANVAS — gambar foto slot ke canvas dengan logika
-     IDENTIK dengan compositeFrame(). Tidak bergantung CSS.
+     PREVIEW CANVAS — Hitung ukuran eksplisit & render foto
+     pakai logika IDENTIK dengan compositeFrame().
+     TIDAK bergantung pada aspect-ratio CSS.
      ============================================================ */
   useEffect(() => {
     if (phase !== 'filter') return;
+    const area = previewAreaRef.current;
+    const frame = previewFrameRef.current;
     const canvas = previewCanvasRef.current;
-    if (!canvas) return;
+    if (!area || !frame || !canvas) return;
     if (!activeFrame) return;
 
     let cancelled = false;
 
     const render = async () => {
-      const parent = canvas.parentElement;
-      if (!parent) return;
-      const pw = parent.clientWidth;
-      const ph = parent.clientHeight;
-      if (pw < 1 || ph < 1) return;
+      if (cancelled) return;
 
+      // Ukur area (kurangi padding atas 60px)
+      const areaRect = area.getBoundingClientRect();
+      const availW = Math.max(50, areaRect.width);
+      const availH = Math.max(50, areaRect.height - 60);
+
+      // Hitung ukuran frame berdasarkan aspect ratio
+      let frameW = availW;
+      let frameH = frameW / frameAspect;
+      if (frameH > availH) {
+        frameH = availH;
+        frameW = frameH * frameAspect;
+      }
+      frameW = Math.floor(frameW);
+      frameH = Math.floor(frameH);
+
+      // Set ukuran frame secara EKSPLISIT (pakai px)
+      frame.style.width = `${frameW}px`;
+      frame.style.height = `${frameH}px`;
+      frame.style.aspectRatio = 'auto'; // matikan aspect-ratio CSS
+
+      // Set ukuran canvas
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.max(1, Math.floor(pw * dpr));
-      canvas.height = Math.max(1, Math.floor(ph * dpr));
-      canvas.style.width = `${pw}px`;
-      canvas.style.height = `${ph}px`;
+      canvas.width = Math.max(1, Math.floor(frameW * dpr));
+      canvas.height = Math.max(1, Math.floor(frameH * dpr));
+      canvas.style.width = `${frameW}px`;
+      canvas.style.height = `${frameH}px`;
 
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, pw, ph);
+      ctx.clearRect(0, 0, frameW, frameH);
 
-      // Fill background
+      // Background
       ctx.fillStyle = '#2a2522';
-      ctx.fillRect(0, 0, pw, ph);
+      ctx.fillRect(0, 0, frameW, frameH);
 
-      // Draw each slot — SAMA PERSIS logika compositeFrame()
+      // Gambar tiap slot — LOGIKA IDENTIK dengan compositeFrame()
       for (const slot of allSlots) {
         const cap = captureMap.get(slot.captureId);
         if (!cap) continue;
         try {
           const photo = await loadImage(cap);
           if (cancelled) return;
-          const sx = (slot.x / 100) * pw;
-          const sy = (slot.y / 100) * ph;
-          const sw = (slot.w / 100) * pw;
-          const sh = (slot.h / 100) * ph;
+          const sx = (slot.x / 100) * frameW;
+          const sy = (slot.y / 100) * frameH;
+          const sw = (slot.w / 100) * frameW;
+          const sh = (slot.h / 100) * frameH;
           const filterId = captureFilters.get(slot.captureId) || 'natural';
           const glow = isGlowFilter(filterId);
           const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
@@ -704,20 +726,31 @@ export const PhotoboothSession = ({
         } catch { /* skip failed slot */ }
       }
 
-      // Draw frame overlay di atas (kalau tidak ada frame, biarkan)
+      // Frame overlay di atas
       if (activeFrame.image) {
         try {
           const frameImg = await loadImage(activeFrame.image);
           if (cancelled) return;
-          ctx.drawImage(frameImg, 0, 0, pw, ph);
+          ctx.drawImage(frameImg, 0, 0, frameW, frameH);
         } catch { /* ignore */ }
       }
     };
 
-    // Delay sebentar supaya layout settle
-    const timer = setTimeout(render, 0);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [phase, activeFrame, allSlots, captureMap, captureFilters]);
+    // Delay sebentar supaya layout settle, lalu render
+    const t1 = setTimeout(render, 0);
+    const t2 = setTimeout(render, 100);
+    const t3 = setTimeout(render, 300);
+    window.addEventListener('resize', render);
+    window.addEventListener('orientationchange', render);
+    return () => {
+      cancelled = true;
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      window.removeEventListener('resize', render);
+      window.removeEventListener('orientationchange', render);
+    };
+  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect]);
 
   const LoadingOverlay = saving ? (
     <div
@@ -920,23 +953,20 @@ export const PhotoboothSession = ({
             <h2>SELECT FILTER</h2>
             <p>Tap a photo slot to select it, then choose a filter.</p>
           </div>
-          <div className="filter-preview-area">
+          <div ref={previewAreaRef} className="filter-preview-area">
             <div
+              ref={previewFrameRef}
               className="filter-preview-frame"
               style={{
-                ['--frame-aspect' as string]: String(frameAspect),
-                aspectRatio: String(frameAspect),
                 position: 'relative',
                 overflow: 'hidden',
-                width: '100%',
-                maxWidth: '100%',
-                maxHeight: '100%',
-                margin: '0 auto',
                 background: '#2a2522',
+                margin: '0 auto',
               }}
             >
               {/* ============================================================
                   CANVAS — gambar foto + frame dengan logika IDENTIK composite
+                  Ukuran di-set EKSPLISIT pakai JavaScript, tidak pakai aspect-ratio CSS
                   ============================================================ */}
               <canvas
                 ref={previewCanvasRef}
@@ -944,18 +974,13 @@ export const PhotoboothSession = ({
                   position: 'absolute',
                   top: 0,
                   left: 0,
-                  width: '100%',
-                  height: '100%',
+                  display: 'block',
                   zIndex: 1,
                   pointerEvents: 'none',
-                  display: 'block',
                 }}
               />
 
-              {/* ============================================================
-                  SLOT OVERLAYS — hanya untuk klik + border kuning
-                  (foto sudah digambar di canvas di bawahnya)
-                  ============================================================ */}
+              {/* Slot overlays — hanya untuk klik + border kuning */}
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
                 if (!cap) return null;
