@@ -28,6 +28,9 @@ import type { AllSettings } from './settingsStore';
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
+/* Event name untuk trigger restart kamera dari mana saja */
+const RESTART_CAMERA_EVENT = 'r3a:restart-camera';
+
 type SessionPhase = 'frame-select' | 'ready' | 'live' | 'countdown' | 'filter' | 'compositing' | 'result' | 'qr' | 'drive-qr';
 
 type CaptureError = { message: string } | null;
@@ -281,7 +284,7 @@ export const PhotoboothSession = ({
   onExit: () => void;
   onPhaseChange?: (phase: string) => void;
 }) => {
-  const { stream, status, error } = useCamera(cameraSettings, true);
+  const { stream, status, error, start: startCamera } = useCamera(cameraSettings, true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
@@ -307,7 +310,6 @@ export const PhotoboothSession = ({
   const [printed, setPrinted] = useState(false);
   const [showAdminExit, setShowAdminExit] = useState(false);
   const [screensaverActive, setScreensaverActive] = useState(false);
-  // ⚠️ Overlay tap untuk command yang butuh user gesture
   const [pendingFullscreen, setPendingFullscreen] = useState(false);
   const [pendingRefreshToken, setPendingRefreshToken] = useState(false);
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
@@ -324,11 +326,29 @@ export const PhotoboothSession = ({
   const [framesReady, setFramesReady] = useState(false);
 
   /* ============================================================
+     ⚠️ AUTO-RESTART KAMERA
+     1. Saat masuk phase `ready` (prepare) — pastikan kamera jalan
+     2. Saat event `r3a:restart-camera` di-dispatch (mis. setelah OAuth)
+     ============================================================ */
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    if (status === 'connected' || status === 'connecting') return;
+    // Delay sedikit biar UI siap dulu
+    const t = setTimeout(() => { void startCamera(); }, 200);
+    return () => clearTimeout(t);
+  }, [phase, status, startCamera]);
+
+  useEffect(() => {
+    const handler = () => {
+      // Delay 500ms: biar browser lepas handle camera dari OAuth popup dulu
+      setTimeout(() => { void startCamera(); }, 500);
+    };
+    window.addEventListener(RESTART_CAMERA_EVENT, handler);
+    return () => window.removeEventListener(RESTART_CAMERA_EVENT, handler);
+  }, [startCamera]);
+
+  /* ============================================================
      ⚠️ REMOTE COMMAND OVERLAYS — pure DOM (tanpa React)
-     Render langsung ke document.body pakai DOM API.
-     Tujuan:
-     1. Muncul di SEMUA phase (frame-select, ready, live, dll)
-     2. TIDAK ganggu React tree → kamera tidak restart/disconnect
      ============================================================ */
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -413,9 +433,13 @@ export const PhotoboothSession = ({
         success = result.success;
       } catch { /* ignore */ }
       setPendingRefreshToken(false);
-      // Setelah OAuth popup, browser biasanya keluar dari fullscreen
       if (success) {
-        setTimeout(() => setPendingFullscreen(true), 400);
+        // Trigger auto-restart kamera (browser lepas handle saat OAuth popup)
+        setTimeout(() => {
+          window.dispatchEvent(new Event(RESTART_CAMERA_EVENT));
+        }, 300);
+        // Setelah OAuth popup, browser biasanya keluar dari fullscreen
+        setTimeout(() => setPendingFullscreen(true), 800);
       }
     };
 
@@ -446,7 +470,6 @@ export const PhotoboothSession = ({
     return result;
   }, [allSlots]);
 
-  /* Reset event opened time saat event berubah */
   useEffect(() => {
     eventOpenedAtRef.current = Date.now();
   }, [event?.id, event?.slug]);
@@ -544,12 +567,10 @@ export const PhotoboothSession = ({
           case 'reconnect-drive':
           case 'refresh-token': {
             if (!VITE_CLIENT_ID) break;
-            // ⚠️ OAuth popup butuh user gesture → tampilkan overlay tap
             setPendingRefreshToken(true);
             break;
           }
           case 'force-fullscreen': {
-            // ⚠️ Fullscreen butuh user gesture → tampilkan overlay tap
             setPendingFullscreen(true);
             break;
           }
