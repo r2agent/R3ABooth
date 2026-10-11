@@ -34,7 +34,7 @@ function eventPath(slug: string): string {
   return `events/${slug}`;
 }
 
-/* ---------- SAVE EVENT ---------- */
+/* ---------- SAVE EVENT TO CLOUD ---------- */
 export async function saveEventToCloud(
   event: R3aEvent,
 ): Promise<{ success: boolean; slug?: string; error?: string }> {
@@ -70,6 +70,13 @@ export async function saveEventToCloud(
       error: e instanceof Error ? e.message : 'Unknown error',
     };
   }
+}
+
+/* ---------- PUBLISH EVENT TO CLOUD (alias, dipakai EventFile.tsx) ---------- */
+export async function publishEventToCloud(
+  event: R3aEvent,
+): Promise<{ success: boolean; slug?: string; error?: string }> {
+  return await saveEventToCloud(event);
 }
 
 /* ---------- LOAD EVENT ---------- */
@@ -177,23 +184,19 @@ export async function syncCloudToLocal(
   }
 
   try {
-    // 1. Fetch semua event dari Firebase
     const cloudEvents = await listEventsFromCloud();
     result.total = cloudEvents.length;
 
     if (cloudEvents.length === 0) return result;
 
-    // 2. Ambil event lokal untuk compare
     const localEvents = await getAllLocalFn();
     const localById = new Map(localEvents.map((e) => [e.id, e]));
     const localBySlug = new Map(
       localEvents.filter((e) => e.slug).map((e) => [e.slug!, e]),
     );
 
-    // 3. Merge satu per satu
     for (const cloudEvent of cloudEvents) {
       try {
-        // Convert CloudEvent → R3aEvent (drop field cloud-only)
         const eventToSave: R3aEvent = {
           id: cloudEvent.id,
           slug: cloudEvent.slug,
@@ -209,7 +212,6 @@ export async function syncCloudToLocal(
           updatedAt: cloudEvent.updatedAt,
         };
 
-        // Cek by ID dulu, lalu by slug
         const existingById = localById.get(eventToSave.id);
         const existingBySlug = eventToSave.slug
           ? localBySlug.get(eventToSave.slug)
@@ -217,15 +219,12 @@ export async function syncCloudToLocal(
         const existing = existingById || existingBySlug;
 
         if (!existing) {
-          // Event baru → tambahkan
           await saveLocalFn(eventToSave);
           result.added++;
         } else if ((eventToSave.updatedAt || 0) > (existing.updatedAt || 0)) {
-          // Cloud lebih baru → update
           await saveLocalFn(eventToSave);
           result.updated++;
         } else {
-          // Lokal lebih baru atau sama → skip
           result.skipped++;
         }
       } catch (e) {
