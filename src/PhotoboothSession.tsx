@@ -286,13 +286,9 @@ export const PhotoboothSession = ({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
-  /* Cache gambar — supaya tidak load ulang setiap render */
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
-  /* Track waktu mulai sesi untuk statistik */
   const sessionStartedAtRef = useRef<number | null>(null);
-  /* Flag untuk prevent race condition saat push status */
   const isPushingRef = useRef(false);
-  /* Track waktu buka event — untuk durasi akurat */
   const eventOpenedAtRef = useRef<number>(Date.now());
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
@@ -310,7 +306,6 @@ export const PhotoboothSession = ({
   const [printing, setPrinting] = useState(false);
   const [printed, setPrinted] = useState(false);
   const [showAdminExit, setShowAdminExit] = useState(false);
-  /* Screensaver state — track screensaver */
   const [screensaverActive, setScreensaverActive] = useState(false);
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
@@ -331,9 +326,6 @@ export const PhotoboothSession = ({
   const uniqueCaptureIds = useMemo(() => getUniqueCaptureIds(allSlots), [allSlots]);
   const totalCapturesNeeded = uniqueCaptureIds.length;
 
-  /* ============================================================
-     SLOT UNIK untuk sidebar live preview
-     ============================================================ */
   const uniqueSlotsForPreview = useMemo(() => {
     const seen = new Set<string>();
     const result: Slot[] = [];
@@ -346,21 +338,16 @@ export const PhotoboothSession = ({
     return result;
   }, [allSlots]);
 
-  /* ============================================================
-     TRACK EVENT OPENED TIME — reset saat event berubah
-     ============================================================ */
+  /* Reset event opened time saat event berubah */
   useEffect(() => {
     eventOpenedAtRef.current = Date.now();
   }, [event?.id, event?.slug]);
 
-  /* ============================================================
-     STATUS SYNC — tulis status ke Firebase setiap phase berubah
-     ============================================================ */
+  /* STATUS SYNC */
   useEffect(() => {
     let cancelled = false;
 
     const push = async () => {
-      // Prevent race condition — skip kalau push sebelumnya belum selesai
       if (isPushingRef.current) return;
       isPushingRef.current = true;
 
@@ -404,32 +391,23 @@ export const PhotoboothSession = ({
     };
   }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName, screensaverActive]);
 
-  /* Mark offline saat tab ditutup */
   useEffect(() => {
     markOfflineOnDisconnect();
-    return () => {
-      void clearStatus();
-    };
+    return () => { void clearStatus(); };
   }, []);
 
-  /* ============================================================
-     SCREENSAVER DETECTION — track screensaver phase
-     ============================================================ */
+  /* SCREENSAVER DETECTION */
   useEffect(() => {
-    const checkScreensaver = () => {
-      const isSaver = document.querySelector('.screensaver-overlay') !== null
-        || document.body.classList.contains('screensaver-active');
-      setScreensaverActive(!!isSaver);
+    const check = () => {
+      const isSaver = document.querySelector('.screensaver-overlay') !== null;
+      setScreensaverActive(isSaver);
     };
-
-    const id = setInterval(checkScreensaver, 2000);
-    checkScreensaver();
+    const id = setInterval(check, 500);
+    check();
     return () => clearInterval(id);
   }, []);
 
-  /* ============================================================
-     COMMAND LISTENER — terima perintah dari operator dashboard
-     ============================================================ */
+  /* COMMAND LISTENER */
   useEffect(() => {
     const deviceId = getDeviceId();
     const unsubscribe = subscribeCommands(deviceId, (cmd) => {
@@ -455,14 +433,13 @@ export const PhotoboothSession = ({
           case 'download-logs':
             downloadLogs();
             break;
-          case 'reconnect-drive': {
+          case 'reconnect-drive':
+          case 'refresh-token': {
             if (!VITE_CLIENT_ID) break;
             void (async () => {
               try {
                 await connectGoogleDrive(VITE_CLIENT_ID);
-              } catch {
-                /* ignore */
-              }
+              } catch { /* ignore */ }
             })();
             break;
           }
@@ -472,16 +449,12 @@ export const PhotoboothSession = ({
                 if (!document.fullscreenElement) {
                   await document.documentElement.requestFullscreen?.();
                 }
-              } catch {
-                /* ignore */
-              }
+              } catch { /* ignore */ }
             })();
             break;
           }
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
 
       void clearCommand(deviceId);
     });
@@ -526,10 +499,6 @@ export const PhotoboothSession = ({
   }, [activeFrame?.image]);
 
   useEffect(() => {
-    if (frames.length > 0) {
-      setFramesReady(true);
-      return;
-    }
     setFramesReady(true);
   }, [frames.length]);
 
@@ -601,9 +570,7 @@ export const PhotoboothSession = ({
     if (phase !== 'countdown' || countdown === 0) return;
     let preFlashTimer: ReturnType<typeof setTimeout> | null = null;
     if (countdown === 1) {
-      preFlashTimer = setTimeout(() => {
-        setFlash(true);
-      }, 700);
+      preFlashTimer = setTimeout(() => { setFlash(true); }, 700);
     }
     const timer = setTimeout(() => {
       if (countdown <= 1) {
@@ -652,9 +619,7 @@ export const PhotoboothSession = ({
     if (!activeFrame) return;
     setPhase('compositing');
     const captureMap = new Map<string, string>();
-    for (const c of captures) {
-      captureMap.set(c.captureId, c.dataUrl);
-    }
+    for (const c of captures) captureMap.set(c.captureId, c.dataUrl);
     try {
       const result = await compositeFrame(activeFrame, captureMap, captureFilters);
       setCompositeUrl(result);
@@ -667,18 +632,12 @@ export const PhotoboothSession = ({
   const handleSave = useCallback(async () => {
     if (!compositeUrl || !activeFrame) return;
     if (saving) return;
-
     setSaving(true);
 
     try {
       const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const result: StoredResult = {
-        id,
-        eventId: event.id,
-        frameId: activeFrame.id,
-        dataUrl: compositeUrl,
-        filterId: 'multi',
-        createdAt: Date.now(),
+        id, eventId: event.id, frameId: activeFrame.id, dataUrl: compositeUrl, filterId: 'multi', createdAt: Date.now(),
       };
       await saveResult(result);
       setResultId(id);
@@ -692,7 +651,7 @@ export const PhotoboothSession = ({
         try {
           const slotDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
           slotPhotos.push({ index: i + 1, dataUrl: slotDataUrl });
-        } catch { /* skip failed slot */ }
+        } catch { /* skip */ }
       }
 
       let slideshowVideo: string | null = null;
@@ -708,21 +667,16 @@ export const PhotoboothSession = ({
             const LOOP_COUNT = 3;
             const loopedPhotos: { dataUrl: string }[] = [];
             for (let loop = 0; loop < LOOP_COUNT; loop++) {
-              for (const p of rawSlotPhotos) {
-                loopedPhotos.push({ dataUrl: p.dataUrl });
-              }
+              for (const p of rawSlotPhotos) loopedPhotos.push({ dataUrl: p.dataUrl });
             }
             slideshowVideo = await generateSlideshowVideo(loopedPhotos, DURATION_PER_SLIDE_MS);
-          } catch {
-            slideshowVideo = null;
-          }
+          } catch { slideshowVideo = null; }
         }
       }
 
       if (allSettings.storage.autoDownloadResult) {
         for (const sp of slotPhotos) {
-          const slotName = `slot-${String(sp.index).padStart(2, '0')}.jpg`;
-          downloadDataUrl(sp.dataUrl, slotName);
+          downloadDataUrl(sp.dataUrl, `slot-${String(sp.index).padStart(2, '0')}.jpg`);
         }
         if (slideshowVideo) {
           downloadDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
@@ -732,18 +686,13 @@ export const PhotoboothSession = ({
 
       const gd = allSettings.googleDrive;
       let uploadSuccessCount = 0;
-      let uploadFailCount = 0;
+      const uploadFailCount = 0;
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
-          ...slotPhotos.map((sp) => ({
-            fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`,
-            dataUrl: sp.dataUrl,
-          })),
-          ...(slideshowVideo
-            ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }]
-            : []),
+          ...slotPhotos.map((sp) => ({ fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`, dataUrl: sp.dataUrl })),
+          ...(slideshowVideo ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }] : []),
         ];
         void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
         uploadSuccessCount = uploadFiles.length;
@@ -751,61 +700,35 @@ export const PhotoboothSession = ({
 
       try {
         const startedAt = sessionStartedAtRef.current ?? (Date.now() - 60000);
-        recordSession({
-          id: id,
-          eventId: event.id,
-          startedAt,
-          finishedAt: Date.now(),
-          photoCount: slotPhotos.length,
-          uploadSuccess: uploadSuccessCount,
-          uploadFail: uploadFailCount,
-        });
-      } catch {
-        /* ignore stats error */
-      }
+        recordSession({ id, eventId: event.id, startedAt, finishedAt: Date.now(), photoCount: slotPhotos.length, uploadSuccess: uploadSuccessCount, uploadFail: uploadFailCount });
+      } catch { /* ignore */ }
 
       setSaved(true);
-    } catch {
-      /* ignore */
-    } finally {
+    } catch { /* ignore */ } finally {
       setSaving(false);
     }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
 
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
-    setQrError(false);
-    setQrDataUrl(null);
-    setPhase('qr');
+    setQrError(false); setQrDataUrl(null); setPhase('qr');
     const payload = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
     try {
       const qr = await generateQrCode(payload);
-      if (qr.qrDataUrl) {
-        setQrDataUrl(qr.qrDataUrl);
-      } else {
-        setQrError(true);
-      }
-    } catch {
-      setQrError(true);
-    }
+      if (qr.qrDataUrl) setQrDataUrl(qr.qrDataUrl);
+      else setQrError(true);
+    } catch { setQrError(true); }
   }, [currentGuest, event.name]);
 
   const handleShowDriveQr = useCallback(async () => {
     if (!currentGuest) return;
-    setDriveQrError(false);
-    setDriveQrDataUrl(null);
-    setPhase('drive-qr');
+    setDriveQrError(false); setDriveQrDataUrl(null); setPhase('drive-qr');
     try {
       const url = buildDriveFolderUrl(currentGuest.guestFolderId);
       const qr = await generateQrCode(url);
-      if (qr.qrDataUrl) {
-        setDriveQrDataUrl(qr.qrDataUrl);
-      } else {
-        setDriveQrError(true);
-      }
-    } catch {
-      setDriveQrError(true);
-    }
+      if (qr.qrDataUrl) setDriveQrDataUrl(qr.qrDataUrl);
+      else setDriveQrError(true);
+    } catch { setDriveQrError(true); }
   }, [currentGuest]);
 
   const handlePrint = useCallback(async () => {
@@ -837,10 +760,7 @@ export const PhotoboothSession = ({
     return () => window.removeEventListener('keydown', handler);
   }, [phase, onExit]);
 
-  const captureMap = useMemo(
-    () => new Map(captures.map((c) => [c.captureId, c.dataUrl])),
-    [captures],
-  );
+  const captureMap = useMemo(() => new Map(captures.map((c) => [c.captureId, c.dataUrl])), [captures]);
 
   const ensureImagesCached = useCallback(async (sources: string[]): Promise<void> => {
     const cache = imageCacheRef.current;
@@ -871,17 +791,13 @@ export const PhotoboothSession = ({
 
     const render = () => {
       if (cancelled) return;
-
       const areaRect = area.getBoundingClientRect();
       const availW = Math.max(50, areaRect.width);
       const availH = Math.max(50, areaRect.height - 60);
 
       let frameW = availW;
       let frameH = frameW / frameAspect;
-      if (frameH > availH) {
-        frameH = availH;
-        frameW = frameH * frameAspect;
-      }
+      if (frameH > availH) { frameH = availH; frameW = frameH * frameAspect; }
       frameW = Math.floor(frameW);
       frameH = Math.floor(frameH);
 
@@ -893,8 +809,7 @@ export const PhotoboothSession = ({
       const canvasW = Math.max(1, Math.floor(frameW * dpr));
       const canvasH = Math.max(1, Math.floor(frameH * dpr));
       if (canvas.width !== canvasW || canvas.height !== canvasH) {
-        canvas.width = canvasW;
-        canvas.height = canvasH;
+        canvas.width = canvasW; canvas.height = canvasH;
       }
       canvas.style.width = `${frameW}px`;
       canvas.style.height = `${frameH}px`;
@@ -904,12 +819,10 @@ export const PhotoboothSession = ({
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, frameW, frameH);
-
       ctx.fillStyle = '#2a2522';
       ctx.fillRect(0, 0, frameW, frameH);
 
       const cache = imageCacheRef.current;
-
       for (const slot of allSlots) {
         const cap = captureMap.get(slot.captureId);
         if (!cap) continue;
@@ -931,24 +844,17 @@ export const PhotoboothSession = ({
         ctx.filter = baseCss;
         drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
         ctx.filter = 'none';
-        if (glow) {
-          applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
-        }
+        if (glow) applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
         ctx.restore();
       }
 
       if (activeFrame.image) {
         const frameImg = cache.get(activeFrame.image);
-        if (frameImg) {
-          ctx.drawImage(frameImg, 0, 0, frameW, frameH);
-        }
+        if (frameImg) ctx.drawImage(frameImg, 0, 0, frameW, frameH);
       }
     };
 
-    const sources = [
-      activeFrame.image,
-      ...allSlots.map((s) => captureMap.get(s.captureId) || ''),
-    ].filter(Boolean);
+    const sources = [activeFrame.image, ...allSlots.map((s) => captureMap.get(s.captureId) || '')].filter(Boolean);
 
     const run = async () => {
       await ensureImagesCached(sources);
@@ -957,11 +863,7 @@ export const PhotoboothSession = ({
     };
 
     void run();
-
-    const onResize = () => {
-      if (cancelled) return;
-      rafId = requestAnimationFrame(render);
-    };
+    const onResize = () => { if (!cancelled) rafId = requestAnimationFrame(render); };
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
     return () => {
@@ -973,25 +875,9 @@ export const PhotoboothSession = ({
   }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached]);
 
   const LoadingOverlay = saving ? (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 999999,
-        background: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 28,
-        color: '#fff',
-        backdropFilter: 'blur(4px)',
-      }}
-    >
+    <div style={{ position: 'fixed', inset: 0, zIndex: 999999, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, color: '#fff', backdropFilter: 'blur(4px)' }}>
       <div className="compositing-spinner" style={{ width: 72, height: 72, borderWidth: 5 }} />
-      <span style={{ fontSize: 32, fontWeight: 700, letterSpacing: '.25em', textTransform: 'uppercase', color: '#fff' }}>
-        PROSES FOTO
-      </span>
+      <span style={{ fontSize: 32, fontWeight: 700, letterSpacing: '.25em', textTransform: 'uppercase', color: '#fff' }}>PROSES FOTO</span>
     </div>
   ) : null;
 
@@ -1062,11 +948,7 @@ export const PhotoboothSession = ({
         </div>
         <section className="ready-section">
           <div className="ready-frame-preview" style={{ aspectRatio: frameAspect }}>
-            {activeFrame?.image ? (
-              <img src={activeFrame.image} alt={activeFrame.name} />
-            ) : (
-              <div className="ready-frame-placeholder"><ImageIcon size={48} strokeWidth={1} /></div>
-            )}
+            {activeFrame?.image ? <img src={activeFrame.image} alt={activeFrame.name} /> : <div className="ready-frame-placeholder"><ImageIcon size={48} strokeWidth={1} /></div>}
             {allSlots.map((slot) => (
               <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` }}>
                 <span>{slot.captureId}</span>
@@ -1106,9 +988,7 @@ export const PhotoboothSession = ({
                 <div className="photobooth-video-wrap">
                   <CameraPreview stream={stream} mirror={cameraSettings.mirror} aspectRatio={cameraSettings.aspectRatio} className="photobooth-video" />
                   {phase === 'countdown' ? (
-                    <div className="countdown-overlay">
-                      <span className="countdown-number">{countdown}</span>
-                    </div>
+                    <div className="countdown-overlay"><span className="countdown-number">{countdown}</span></div>
                   ) : null}
                 </div>
                 <HiddenVideoCapture videoRef={videoRef} stream={stream} />
@@ -1116,17 +996,9 @@ export const PhotoboothSession = ({
             ) : (
               <div className="photobooth-preview">
                 {status === 'error' ? (
-                  <>
-                    <AlertCircle size={48} strokeWidth={1} />
-                    <span>CAMERA ERROR</span>
-                    <em>{error ? errorMessages[error] : 'Unable to start camera.'}</em>
-                  </>
+                  <><AlertCircle size={48} strokeWidth={1} /><span>CAMERA ERROR</span><em>{error ? errorMessages[error] : 'Unable to start camera.'}</em></>
                 ) : (
-                  <>
-                    <Camera size={64} strokeWidth={1} />
-                    <span>{status === 'connecting' ? 'CONNECTING CAMERA...' : 'CAMERA PREVIEW'}</span>
-                    <em>{status === 'connecting' ? 'Starting camera stream...' : 'Camera not connected.'}</em>
-                  </>
+                  <><Camera size={64} strokeWidth={1} /><span>{status === 'connecting' ? 'CONNECTING CAMERA...' : 'CAMERA PREVIEW'}</span><em>{status === 'connecting' ? 'Starting camera stream...' : 'Camera not connected.'}</em></>
                 )}
               </div>
             )}
@@ -1136,18 +1008,10 @@ export const PhotoboothSession = ({
               <Camera size={32} /> {phase === 'countdown' ? 'CAPTURING...' : 'CAPTURE'}
             </button>
           </div>
-          <div className="photobooth-camera-status">
-            <CameraStatusBadge status={status} error={error} />
-          </div>
-          <div className="photobooth-capture-info">
-            <span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span>
-          </div>
-          {captureError ? (
-            <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div>
-          ) : null}
-          {guestError ? (
-            <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div>
-          ) : null}
+          <div className="photobooth-camera-status"><CameraStatusBadge status={status} error={error} /></div>
+          <div className="photobooth-capture-info"><span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span></div>
+          {captureError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div> : null}
+          {guestError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div> : null}
           <div className="photobooth-slots">
             {uniqueSlotsForPreview.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
             {uniqueSlotsForPreview.map((slot) => {
@@ -1155,11 +1019,7 @@ export const PhotoboothSession = ({
               const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
               return (
                 <div key={slot.id} className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}>
-                  {filled ? (
-                    <img src={captureMap.get(slot.captureId)} alt={slot.captureId} />
-                  ) : (
-                    <span>{slot.captureId}</span>
-                  )}
+                  {filled ? <img src={captureMap.get(slot.captureId)} alt={slot.captureId} /> : <span>{slot.captureId}</span>}
                 </div>
               );
             })}
@@ -1174,66 +1034,17 @@ export const PhotoboothSession = ({
             <p>Tap a photo slot to select it, then choose a filter.</p>
           </div>
           <div ref={previewAreaRef} className="filter-preview-area">
-            <div
-              ref={previewFrameRef}
-              className="filter-preview-frame"
-              style={{
-                position: 'relative',
-                overflow: 'hidden',
-                background: '#2a2522',
-                margin: '0 auto',
-              }}
-            >
-              <canvas
-                ref={previewCanvasRef}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  display: 'block',
-                  zIndex: 1,
-                  pointerEvents: 'none',
-                }}
-              />
-
+            <div ref={previewFrameRef} className="filter-preview-frame" style={{ position: 'relative', overflow: 'hidden', background: '#2a2522', margin: '0 auto' }}>
+              <canvas ref={previewCanvasRef} style={{ position: 'absolute', top: 0, left: 0, display: 'block', zIndex: 1, pointerEvents: 'none' }} />
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
                 if (!cap) return null;
                 const isSelected = selectedCaptureId === slot.captureId;
                 return (
-                  <div
-                    key={slot.id}
-                    onClick={() => setSelectedCaptureId(slot.captureId)}
-                    style={{
-                      position: 'absolute',
-                      left: `${slot.x}%`,
-                      top: `${slot.y}%`,
-                      width: `${slot.w}%`,
-                      height: `${slot.h}%`,
-                      border: isSelected ? '2px solid #ffd94e' : '2px solid transparent',
-                      boxShadow: isSelected ? '0 0 0 2px rgba(255,217,78,.4)' : 'none',
-                      cursor: 'pointer',
-                      zIndex: 10,
-                      boxSizing: 'border-box',
-                    }}
-                  >
+                  <div key={slot.id} onClick={() => setSelectedCaptureId(slot.captureId)}
+                    style={{ position: 'absolute', left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%`, border: isSelected ? '2px solid #ffd94e' : '2px solid transparent', boxShadow: isSelected ? '0 0 0 2px rgba(255,217,78,.4)' : 'none', cursor: 'pointer', zIndex: 10, boxSizing: 'border-box' }}>
                     {isSelected ? (
-                      <div
-                        style={{
-                          position: 'absolute',
-                          bottom: 6,
-                          left: 6,
-                          padding: '3px 10px',
-                          background: '#ffd94e',
-                          color: '#1a1614',
-                          fontSize: 10,
-                          fontWeight: 800,
-                          borderRadius: 4,
-                          letterSpacing: '.08em',
-                        }}
-                      >
-                        SELECTED
-                      </div>
+                      <div style={{ position: 'absolute', bottom: 6, left: 6, padding: '3px 10px', background: '#ffd94e', color: '#1a1614', fontSize: 10, fontWeight: 800, borderRadius: 4, letterSpacing: '.08em' }}>SELECTED</div>
                     ) : null}
                   </div>
                 );
@@ -1245,18 +1056,9 @@ export const PhotoboothSession = ({
               {FILTERS.map((f) => {
                 const currentFilter = captureFilters.get(selectedCaptureId) || 'natural';
                 return (
-                  <button
-                    key={f.id}
-                    className={currentFilter === f.id ? 'is-active' : ''}
-                    onClick={() => {
-                      setCaptureFilters((prev) => {
-                        const next = new Map(prev);
-                        next.set(selectedCaptureId, f.id);
-                        return next;
-                      });
-                    }}
-                    type="button"
-                  >
+                  <button key={f.id} className={currentFilter === f.id ? 'is-active' : ''}
+                    onClick={() => { setCaptureFilters((prev) => { const next = new Map(prev); next.set(selectedCaptureId, f.id); return next; }); }}
+                    type="button">
                     <span className="filter-thumb" style={{ filter: f.css }}><FilterIcon size={18} /></span>
                     {f.name}
                   </button>
@@ -1272,20 +1074,13 @@ export const PhotoboothSession = ({
       ) : null}
 
       {phase === 'compositing' ? (
-        <section className="photobooth-compositing">
-          <div className="compositing-spinner" />
-          <span>COMPOSITING...</span>
-        </section>
+        <section className="photobooth-compositing"><div className="compositing-spinner" /><span>COMPOSITING...</span></section>
       ) : null}
 
       {phase === 'result' && compositeUrl ? (
         <section className="photobooth-result-section">
-          <div className="result-header">
-            <h2>YOUR PHOTO IS READY</h2>
-          </div>
-          <div className="result-preview">
-            <img src={compositeUrl} alt="Final result" />
-          </div>
+          <div className="result-header"><h2>YOUR PHOTO IS READY</h2></div>
+          <div className="result-preview"><img src={compositeUrl} alt="Final result" /></div>
           <div className="result-actions">
             <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} disabled={saving} type="button"><RotateCcw size={18} /> RETAKE</button>
             <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
@@ -1297,40 +1092,23 @@ export const PhotoboothSession = ({
               </button>
             ) : null}
             {allSettings.display.showQrButton ? (
-              <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button">
-                <QrCode size={18} /> QR CODE
-              </button>
+              <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button"><QrCode size={18} /> QR CODE</button>
             ) : null}
             {currentGuest && allSettings.display.showDriveQrButton ? (
-              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button">
-                <QrCode size={18} /> DRIVE QR
-              </button>
+              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button"><QrCode size={18} /> DRIVE QR</button>
             ) : null}
           </div>
-          <button className="result-new-session" onClick={handleBackToFrameSelect} disabled={saving} type="button">
-            <RefreshCw size={18} /> NEW SESSION
-          </button>
+          <button className="result-new-session" onClick={handleBackToFrameSelect} disabled={saving} type="button"><RefreshCw size={18} /> NEW SESSION</button>
         </section>
       ) : null}
 
       {phase === 'qr' ? (
         <section className="photobooth-qr-section">
-          <div className="qr-header">
-            <h2>SCAN TO VIEW</h2>
-            <p>Scan this QR code with your phone to view your photo</p>
-          </div>
+          <div className="qr-header"><h2>SCAN TO VIEW</h2><p>Scan this QR code with your phone to view your photo</p></div>
           <div className="qr-display">
             {qrError ? (
-              <div className="qr-error-state">
-                <AlertCircle size={48} strokeWidth={1} />
-                <span>QR GENERATION FAILED</span>
-                <button type="button" onClick={handleShowQr} className="qr-retry">RETRY</button>
-              </div>
-            ) : qrDataUrl ? (
-              <img src={qrDataUrl} alt="QR Code" />
-            ) : (
-              <div className="qr-loading"><div className="compositing-spinner" /></div>
-            )}
+              <div className="qr-error-state"><AlertCircle size={48} strokeWidth={1} /><span>QR GENERATION FAILED</span><button type="button" onClick={handleShowQr} className="qr-retry">RETRY</button></div>
+            ) : qrDataUrl ? <img src={qrDataUrl} alt="QR Code" /> : <div className="qr-loading"><div className="compositing-spinner" /></div>}
           </div>
           <div className="qr-actions">
             <button className="qr-back-result" onClick={() => setPhase('result')} type="button"><ChevronLeft size={18} /> BACK</button>
@@ -1341,22 +1119,11 @@ export const PhotoboothSession = ({
 
       {phase === 'drive-qr' ? (
         <section className="photobooth-qr-section">
-          <div className="qr-header">
-            <h2>SCAN TO GET YOUR PHOTOS</h2>
-            <p>Scan untuk mengambil foto</p>
-          </div>
+          <div className="qr-header"><h2>SCAN TO GET YOUR PHOTOS</h2><p>Scan untuk mengambil foto</p></div>
           <div className="qr-display">
             {driveQrError ? (
-              <div className="qr-error-state">
-                <AlertCircle size={48} strokeWidth={1} />
-                <span>QR GENERATION FAILED</span>
-                <button type="button" onClick={handleShowDriveQr} className="qr-retry">RETRY</button>
-              </div>
-            ) : driveQrDataUrl ? (
-              <img src={driveQrDataUrl} alt="Google Drive QR Code" />
-            ) : (
-              <div className="qr-loading"><div className="compositing-spinner" /></div>
-            )}
+              <div className="qr-error-state"><AlertCircle size={48} strokeWidth={1} /><span>QR GENERATION FAILED</span><button type="button" onClick={handleShowDriveQr} className="qr-retry">RETRY</button></div>
+            ) : driveQrDataUrl ? <img src={driveQrDataUrl} alt="Google Drive QR Code" /> : <div className="qr-loading"><div className="compositing-spinner" /></div>}
           </div>
           <div className="qr-actions">
             <button className="qr-back-result" onClick={() => setPhase('result')} type="button"><ChevronLeft size={18} /> BACK</button>

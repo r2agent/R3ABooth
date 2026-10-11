@@ -28,13 +28,12 @@ export type TabletStatus = {
   sessionActive: boolean;
   photoCount: number;
   totalCaptures: number;
-  eventOpenedAt: number;        // ← waktu buka event (bukan START SESSION)
+  eventOpenedAt: number;
   lastActivity: number;
   online: boolean;
   driveConnected: boolean;
   driveAccount: string;
   driveTokenExpiresAt: number;
-  /* Drive quota (bukan browser storage) */
   driveUsage: number;
   driveLimit: number;
   uploadedCount: number;
@@ -53,7 +52,8 @@ export type CommandType =
   | 'clear-stats'
   | 'download-logs'
   | 'reconnect-drive'
-  | 'force-fullscreen';
+  | 'force-fullscreen'
+  | 'refresh-token';
 
 export type DeviceCommand = {
   type: CommandType;
@@ -262,7 +262,7 @@ export async function getDeviceStatus(deviceId: string): Promise<TabletStatus | 
   }
 }
 
-/* ---------- DRIVE QUOTA (dari Google Drive API) ---------- */
+/* ---------- DRIVE QUOTA ---------- */
 export async function getDriveQuota(): Promise<{ usage: number; limit: number }> {
   try {
     const token = await getValidTokenCached();
@@ -285,7 +285,7 @@ export async function getDriveQuota(): Promise<{ usage: number; limit: number }>
   }
 }
 
-/* Helper — ambil token dari gdriveService (lazy import biar tidak circular) */
+/* Helper — ambil token dari gdriveService */
 async function getValidTokenCached(): Promise<string | null> {
   try {
     const { getValidToken } = await import('./gdriveService');

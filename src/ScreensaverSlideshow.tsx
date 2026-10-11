@@ -6,7 +6,6 @@ type Props = {
 };
 
 // Auto-import semua foto dari src/assets/screensaver/
-// Vite akan scan folder saat build time.
 const modules = import.meta.glob('./assets/screensaver/*.{jpg,jpeg,png,JPG,JPEG,PNG}', {
   eager: true,
   as: 'url',
@@ -15,13 +14,12 @@ const modules = import.meta.glob('./assets/screensaver/*.{jpg,jpeg,png,JPG,JPEG,
 export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => {
   const photos = useMemo(() => {
     return Object.entries(modules)
-      .sort(([a], [b]) => a.localeCompare(b))  // urut sesuai nama file
+      .sort(([a], [b]) => a.localeCompare(b))
       .map(([, url]) => url);
   }, []);
 
   const [index, setIndex] = useState(0);
 
-  // Ganti foto tiap slideDurationSec
   useEffect(() => {
     if (photos.length <= 1) return;
     const interval = Math.max(1, slideDurationSec) * 1000;
@@ -31,13 +29,12 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
     return () => clearInterval(id);
   }, [photos.length, slideDurationSec]);
 
-  // Dismiss saat klik / tap di mana saja
   const handleDismiss = () => onDismiss();
 
-  // Kalau tidak ada foto → fallback layar hitam
   if (photos.length === 0) {
     return (
       <div
+        className="screensaver-overlay"
         onClick={handleDismiss}
         onTouchStart={handleDismiss}
         style={{
@@ -53,6 +50,7 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
 
   return (
     <div
+      className="screensaver-overlay"
       onClick={handleDismiss}
       onTouchStart={handleDismiss}
       style={{
@@ -64,7 +62,6 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
         overflow: 'hidden',
       }}
     >
-      {/* Foto slideshow — fit to screen */}
       {photos.map((url, i) => (
         <img
           key={url}
@@ -76,7 +73,7 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
             inset: 0,
             width: '100%',
             height: '100%',
-            objectFit: 'contain',        // fit to screen (tidak crop)
+            objectFit: 'contain',
             opacity: i === index ? 1 : 0,
             transition: 'opacity 0.8s ease-in-out',
             userSelect: 'none',
@@ -85,7 +82,6 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
         />
       ))}
 
-      {/* Tulisan TAP ANYWHERE mengambang */}
       <div
         style={{
           position: 'absolute',
@@ -110,7 +106,6 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
         TAP ANYWHERE
       </div>
 
-      {/* Keyframes untuk animasi mengambang */}
       <style>{`
         @keyframes r3a-float {
           0%, 100% { transform: translateX(-50%) translateY(0); opacity: 0.9; }
