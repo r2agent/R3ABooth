@@ -23,7 +23,6 @@ import {
   runDiagnostics,
 } from './gdriveService';
 
-// === Client ID dari env Vercel ===
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
@@ -46,7 +45,6 @@ function parseFolderId(input: string): string {
   return '';
 }
 
-// === Wrapper popup + screensaver untuk semua screen ===
 const WithReminder = ({
   visible,
   minutes,
@@ -847,6 +845,11 @@ function App() {
     typeof window !== 'undefined' ? window.location.hash : ''
   );
 
+  // Ref untuk screen & phase (dibaca dari setInterval)
+  const screenRef = useRef<Screen>(screen);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  const photoboothPhaseRef = useRef<string>('frame-select');
+
   // === Reminder state ===
   const [reminderVisible, setReminderVisible] = useState(false);
   const [reminderMinutes, setReminderMinutes] = useState(0);
@@ -936,6 +939,15 @@ function App() {
       const now = Date.now();
       if (now - lastActivityRef.current < timeoutMs) return;
       if (typeof window !== 'undefined' && window.location.hash === '#operator') return;
+
+      // Screensaver muncul di:
+      // - Semua screen menu (home, project-list, event-file, settings)
+      // - Photobooth HANYA saat phase = frame-select
+      // TIDAK muncul saat photobooth di phase selain frame-select (ready/live/filter/result/qr)
+      if (screenRef.current === 'photobooth-session') {
+        if (photoboothPhaseRef.current !== 'frame-select') return;
+      }
+
       setScreensaverVisible(true);
     }, 5 * 1000);
 
@@ -1025,7 +1037,13 @@ function App() {
   if (screen === 'photobooth-session' && activeEvent) {
     return (
       <WithReminder {...reminderProps}>
-        <PhotoboothSession event={activeEvent} cameraSettings={settings.camera} allSettings={settings} onExit={() => setScreen('project-list')} />
+        <PhotoboothSession
+          event={activeEvent}
+          cameraSettings={settings.camera}
+          allSettings={settings}
+          onExit={() => setScreen('project-list')}
+          onPhaseChange={(phase) => { photoboothPhaseRef.current = phase; }}
+        />
       </WithReminder>
     );
   }

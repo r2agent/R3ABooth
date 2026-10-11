@@ -257,7 +257,19 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }: { event: R3aEvent; cameraSettings: CameraSettings; allSettings: AllSettings; onExit: () => void }) => {
+export const PhotoboothSession = ({
+  event,
+  cameraSettings,
+  allSettings,
+  onExit,
+  onPhaseChange,
+}: {
+  event: R3aEvent;
+  cameraSettings: CameraSettings;
+  allSettings: AllSettings;
+  onExit: () => void;
+  onPhaseChange?: (phase: string) => void;
+}) => {
   const { stream, status, error } = useCamera(cameraSettings, true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
@@ -282,6 +294,13 @@ export const PhotoboothSession = ({ event, cameraSettings, allSettings, onExit }
   const [guestAssigning, setGuestAssigning] = useState(false);
   const logoClickCount = useRef(0);
   const logoClickTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Lapor phase ke parent (untuk screensaver)
+  useEffect(() => {
+    if (onPhaseChange) {
+      onPhaseChange(phase);
+    }
+  }, [phase, onPhaseChange]);
 
   const handleLogoClick = useCallback(() => {
     logoClickCount.current += 1;
