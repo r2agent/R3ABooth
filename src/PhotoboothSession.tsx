@@ -10,6 +10,7 @@ import { printResult } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
 import { buildDriveFolderUrl } from './gdriveService';
+import { recordSession } from './sessionStats';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
@@ -277,6 +278,8 @@ export const PhotoboothSession = ({
   const previewFrameRef = useRef<HTMLDivElement>(null);
   /* Cache gambar — supaya tidak load ulang setiap render */
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  /* Track waktu mulai sesi untuk statistik */
+  const sessionStartedAtRef = useRef<number | null>(null);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState(0);
   const [phase, setPhase] = useState<SessionPhase>('frame-select');
   const [countdown, setCountdown] = useState(0);
@@ -388,6 +391,9 @@ export const PhotoboothSession = ({
     setQrError(false);
     setDriveQrDataUrl(null);
     setDriveQrError(false);
+    sessionStartedAtRef.current = null;
+    /* Clear image cache untuk bebaskan memory */
+    imageCacheRef.current.clear();
   }, []);
 
   const handleSelectFrame = useCallback((index: number) => {
@@ -399,6 +405,8 @@ export const PhotoboothSession = ({
   const handleStartCapture = useCallback(async () => {
     resetSession();
     setGuestError(null);
+    /* Tandai waktu mulai sesi */
+    sessionStartedAtRef.current = Date.now();
 
     const gd = allSettings.googleDrive;
     if (gd.connected && VITE_CLIENT_ID && gd.mainFolderId) {
@@ -566,6 +574,9 @@ export const PhotoboothSession = ({
       }
 
       const gd = allSettings.googleDrive;
+      let uploadSuccessCount = 0;
+      let uploadFailCount = 0;
+
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
@@ -578,6 +589,26 @@ export const PhotoboothSession = ({
             : []),
         ];
         void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
+        // Asumsi sukses kalau upload tidak throw
+        uploadSuccessCount = uploadFiles.length;
+      }
+
+      /* ============================================================
+         RECORD SESSION — untuk statistik Operator Dashboard
+         ============================================================ */
+      try {
+        const startedAt = sessionStartedAtRef.current ?? (Date.now() - 60000);
+        recordSession({
+          id: id,
+          eventId: event.id,
+          startedAt,
+          finishedAt: Date.now(),
+          photoCount: slotPhotos.length,
+          uploadSuccess: uploadSuccessCount,
+          uploadFail: uploadFailCount,
+        });
+      } catch {
+        /* ignore stats error */
       }
 
       setSaved(true);
