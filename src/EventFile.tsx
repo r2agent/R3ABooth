@@ -7,7 +7,10 @@ import { publishEventToCloud, buildEventUrl, generateSlug } from './cloudEventSy
 type EventFileTab = 'event' | 'frame' | 'status';
 
 export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved: (event: R3aEvent) => void; onHome: () => void }) => {
-  const [activeTab, setActiveTab] = useState<EventFileTab>('event');
+  // ✅ SMART DEFAULT TAB — event baru buka tab 'event', event lama buka tab 'status'
+  const [activeTab, setActiveTab] = useState<EventFileTab>(
+    event.eventName ? 'status' : 'event'
+  );
   const [draft, setDraft] = useState<R3aEvent>(event);
   const [activeFrameIndex, setActiveFrameIndex] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -26,6 +29,8 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     setPublishedSlug(event.slug || null);
     setPublishMessage(null);
     setPublishError(null);
+    // Update default tab saat event berubah
+    setActiveTab(event.eventName ? 'status' : 'event');
   }, [event]);
 
   const tabs: { id: EventFileTab; label: string }[] = [
