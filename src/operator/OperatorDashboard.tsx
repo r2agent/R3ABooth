@@ -54,7 +54,12 @@ import {
   type TodayStats,
 } from '../sessionStats';
 import type { AllSettings } from '../settingsStore';
-import { subscribeAllTablets, type TabletStatus } from '../statusSync';
+import {
+  subscribeAllTablets,
+  sendCommand,
+  type TabletStatus,
+  type CommandType,
+} from '../statusSync';
 import { formatDeviceType } from '../deviceInfo';
 
 const REFRESH_INTERVAL_MS = 3000;
@@ -121,37 +126,8 @@ export const OperatorDashboard = ({
   onClose: () => void;
   onBackToPhotobooth?: () => void;
 }) => {
-  const [stats, setStats] = useState({ uploaded: 0, pending: 0, failed: 0 });
-  const [pending, setPending] = useState<PendingUpload[]>([]);
-  const [token, setToken] = useState<TokenStatus>({
-    hasToken: false,
-    expiresAt: null,
-    expiresInMs: null,
-    account: null,
-  });
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const [retrying, setRetrying] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-
-  const [devices, setDevices] = useState<DeviceCheck[]>([
-    { id: 'camera', label: 'Camera', status: 'unknown', detail: 'Belum dicek' },
-    { id: 'internet', label: 'Internet', status: 'unknown', detail: 'Belum dicek' },
-    { id: 'storage', label: 'Storage', status: 'unknown', detail: 'Belum dicek' },
-    { id: 'printer', label: 'Printer', status: 'unknown', detail: 'Belum dicek' },
-    { id: 'memory', label: 'Memory', status: 'unknown', detail: 'Belum dicek' },
-  ]);
-  const [diagnosing, setDiagnosing] = useState(false);
-
-  const [todayStats, setTodayStats] = useState<TodayStats>({
-    sessionCount: 0,
-    photoCount: 0,
-    uploadSuccess: 0,
-    uploadFail: 0,
-    avgDurationMs: 0,
-  });
-  const [uptimeMs, setUptimeMs] = useState(0);
-  const [logs, setLogs] = useState(getLogs());
 
   /* ============================================================
      LIVE DEVICES
@@ -162,6 +138,7 @@ export const OperatorDashboard = ({
   useEffect(() => {
     const unsubscribe = subscribeAllTablets((newTablets) => {
       setTablets(newTablets);
+      setLastUpdate(new Date());
     });
     return unsubscribe;
   }, []);
@@ -171,6 +148,27 @@ export const OperatorDashboard = ({
     : tablets;
 
   const selectedDevice = filteredTablets.find((t) => t.deviceId === selectedDeviceId) ?? null;
+
+  /* ============================================================
+     AGREGAT STATISTIK — sum semua device
+     ============================================================ */
+  const aggregatedStats = (() => {
+    let totalSessions = 0;
+    let totalPhotos = 0;
+    let totalUploaded = 0;
+    let totalPending = 0;
+    let totalFailed = 0;
+
+    for (const t of filteredTablets) {
+      totalSessions += t.todaySessionCount ?? 0;
+      totalPhotos += t.todayPhotoCount ?? 0;
+      totalUploaded += t.uploadedCount ?? 0;
+      totalPending += t.pendingCount ?? 0;
+      totalFailed += t.failedCount ?? 0;
+    }
+
+    return { totalSessions, totalPhotos, totalUploaded, totalPending, totalFailed };
+  })();
 
   /* Override body min-width saat operator open */
   useEffect(() => {
@@ -184,27 +182,10 @@ export const OperatorDashboard = ({
     };
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const [s, p] = await Promise.all([
-        getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 })),
-        getAllPendingUploads().catch(() => []),
-      ]);
-      setStats(s);
-      setPending(p);
-      setToken(getTokenStatus());
-      setTodayStats(getTodayStats());
-      setUptimeMs(getAppUptimeMs());
-      setLogs(getLogs());
-      setLastUpdate(new Date());
-    } catch { /* ignore */ }
-  }, []);
-
   useEffect(() => {
-    void refresh();
-    const id = setInterval(refresh, REFRESH_INTERVAL_MS);
+    const id = setInterval(() => setLastUpdate(new Date()), REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
     if (!actionMessage) return;
@@ -212,135 +193,21 @@ export const OperatorDashboard = ({
     return () => clearTimeout(t);
   }, [actionMessage]);
 
-  /* ---------- ACTIONS ---------- */
-  const handleRetryAll = useCallback(async () => {
-    const clientId = allSettings.googleDrive.clientId;
-    if (!clientId) { setActionMessage('No Client ID configured.'); return; }
-    if (pending.length === 0) { setActionMessage('No pending uploads.'); return; }
-    setRetrying(true);
-    try {
-      const succeeded = await retryAllPending(clientId);
-      await refresh();
-      setActionMessage(`Retried: ${succeeded} file(s) uploaded successfully.`);
-      pushLog('info', `Retry all: ${succeeded} files uploaded`);
-    } catch {
-      setActionMessage('Retry failed. Check connection.');
-      pushLog('error', 'Retry all failed');
-    } finally { setRetrying(false); }
-  }, [allSettings.googleDrive.clientId, pending.length, refresh]);
-
-  const handleReconnect = useCallback(async () => {
-    const clientId = allSettings.googleDrive.clientId;
-    if (!clientId) { setActionMessage('No Client ID configured.'); return; }
-    setReconnecting(true);
-    try {
-      const result = await connectGoogleDrive(clientId);
-      await refresh();
-      if (result.success) {
-        setActionMessage(`Reconnected as ${result.account || 'unknown account'}.`);
-        pushLog('info', `Drive reconnected: ${result.account}`);
-      } else {
-        setActionMessage(`Reconnect failed: ${result.error || 'unknown error'}`);
-        pushLog('error', `Drive reconnect failed: ${result.error}`);
-      }
-    } catch {
-      setActionMessage('Reconnect failed.');
-      pushLog('error', 'Drive reconnect exception');
-    } finally { setReconnecting(false); }
-  }, [allSettings.googleDrive.clientId, refresh]);
-
-  const handleDiagnostic = useCallback(async () => {
-    setDiagnosing(true);
-    pushLog('info', 'Running full diagnostic...');
-    try {
-      setDevices((prev) => prev.map((d) => ({ ...d, status: 'checking', detail: 'Checking...' })));
-      const results = await runFullDiagnostic();
-      setDevices(results);
-      pushLog('info', `Diagnostic complete: ${results.filter((r) => r.status === 'ok').length}/${results.length} OK`);
-      setActionMessage('Diagnostic selesai.');
-    } catch {
-      pushLog('error', 'Diagnostic failed');
-      setActionMessage('Diagnostic gagal.');
-    } finally { setDiagnosing(false); }
-  }, []);
-
-  const handleQuickCheckCamera = useCallback(async () => {
-    const result = await checkCamera();
-    setDevices((prev) => prev.map((d) => (d.id === 'camera' ? result : d)));
-    pushLog('info', `Camera check: ${result.detail}`);
-  }, []);
-
-  const handleQuickCheckInternet = useCallback(async () => {
-    const result = await checkInternet();
-    setDevices((prev) => prev.map((d) => (d.id === 'internet' ? result : d)));
-    pushLog('info', `Internet check: ${result.detail}`);
-  }, []);
-
-  const handleQuickCheckStorage = useCallback(async () => {
-    const result = await checkStorage();
-    setDevices((prev) => prev.map((d) => (d.id === 'storage' ? result : d)));
-    pushLog('info', `Storage check: ${result.detail}`);
-  }, []);
-
-  const handleQuickCheckPrinter = useCallback(() => {
-    const result = checkPrinter();
-    setDevices((prev) => prev.map((d) => (d.id === 'printer' ? result : d)));
-    pushLog('info', `Printer check: ${result.detail}`);
-  }, []);
-
-  const handleQuickCheckMemory = useCallback(() => {
-    const result = checkMemory();
-    setDevices((prev) => prev.map((d) => (d.id === 'memory' ? result : d)));
-    pushLog('info', `Memory check: ${result.detail}`);
-  }, []);
-
-  const handleClearCache = useCallback(() => {
-    try {
-      sessionStorage.clear();
-      pushLog('info', 'Session storage cleared');
-      setActionMessage('Cache dibersihkan.');
-    } catch { setActionMessage('Gagal clear cache.'); }
-  }, []);
-
-  const handleResetUptime = useCallback(() => {
-    resetAppUptime();
-    setUptimeMs(0);
-    pushLog('info', 'Uptime counter di-reset');
-    setActionMessage('Uptime di-reset.');
-  }, []);
-
-  const handleClearStats = useCallback(() => {
-    if (!confirm('Hapus semua statistik sesi?')) return;
-    clearAllStats();
-    setTodayStats(getTodayStats());
-    pushLog('info', 'All stats cleared');
-    setActionMessage('Statistik dihapus.');
-  }, []);
-
-  const handleDownloadLogs = useCallback(() => {
-    downloadLogs();
-    pushLog('info', 'Logs downloaded');
-    setActionMessage('Log di-download.');
-  }, []);
-
-  const handleClearLogs = useCallback(() => {
-    clearLogs();
-    setLogs(getLogs());
-    setActionMessage('Log dibersihkan.');
-  }, []);
-
-  const handleReloadApp = useCallback(() => {
-    if (!confirm('Reload aplikasi sekarang?')) return;
-    pushLog('info', 'App reloading...');
-    window.location.reload();
-  }, []);
-
-  const tokenExpiresIn = token.expiresInMs
-    ? Math.max(0, Math.floor(token.expiresInMs / 60000))
-    : 0;
-
-  const systemInfo = getSystemInfo();
-  const lastSession = getLastSession();
+  /* ============================================================
+     QUICK ACTIONS — kirim command ke device yang di-select
+     ============================================================ */
+  const handleCommand = useCallback(async (type: CommandType, label: string) => {
+    if (!selectedDevice) {
+      setActionMessage('Pilih device dulu.');
+      return;
+    }
+    const ok = await sendCommand(selectedDevice.deviceId, type);
+    if (ok) {
+      setActionMessage(`✅ Perintah "${label}" dikirim ke ${selectedDevice.deviceName}.`);
+    } else {
+      setActionMessage(`❌ Gagal kirim perintah ke ${selectedDevice.deviceName}.`);
+    }
+  }, [selectedDevice]);
 
   return (
     <>
@@ -399,7 +266,7 @@ export const OperatorDashboard = ({
         </div>
 
         <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 12, margin: '0 0 16px' }}>
-          Last update: {lastUpdate.toLocaleTimeString()} • Uptime: {formatDuration(uptimeMs)}
+          Last update: {lastUpdate.toLocaleTimeString()}
         </p>
 
         {actionMessage ? (
@@ -480,11 +347,11 @@ export const OperatorDashboard = ({
 
                     {isSelected ? (
                       <div style={{ marginTop: 6, fontSize: 10, color: '#ffd94e', textAlign: 'right' }}>
-                        ▼ DETAIL DI BAWAH
+                        ▼ TERPILIH
                       </div>
                     ) : (
                       <div style={{ marginTop: 6, fontSize: 10, color: 'rgba(255,255,255,.3)', textAlign: 'right' }}>
-                        Klik untuk lihat detail
+                        Klik untuk pilih
                       </div>
                     )}
                   </div>
@@ -494,13 +361,13 @@ export const OperatorDashboard = ({
           )}
         </section>
 
-        {/* ============ DEVICE DETAIL (kalau ada yang di-select) ============ */}
+        {/* ============ DEVICE DETAIL ============ */}
         {selectedDevice ? (
           <section style={{ marginBottom: 16, border: '2px solid rgba(255,217,78,.4)', padding: 16, background: 'rgba(255,217,78,.03)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.1em', marginBottom: 4 }}>
-                  DEVICE DETAIL
+                  DEVICE DETAIL — TERPILIH
                 </div>
                 <h3 style={{ margin: 0, fontSize: 18, color: '#fff' }}>
                   {selectedDevice.deviceName}
@@ -522,7 +389,7 @@ export const OperatorDashboard = ({
                   gap: 6,
                 }}
               >
-                <X size={14} /> TUTUP DETAIL
+                <X size={14} /> BATAL PILIH
               </button>
             </div>
 
@@ -566,191 +433,122 @@ export const OperatorDashboard = ({
               </div>
             </div>
 
-            {/* Drive & Upload Status */}
-            <div className="op-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr' }}>
-              <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-                <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
-                  DRIVE STATUS (DEVICE INI)
-                </h4>
-                <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {selectedDevice.driveConnected ? (
-                    <><CheckCircle2 size={14} color="#4ade80" /> Connected</>
-                  ) : (
-                    <><AlertCircle size={14} color="#ef4444" /> Not connected</>
-                  )}
-                </p>
-                <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)', wordBreak: 'break-word' }}>
-                  Account: {selectedDevice.driveAccount || '—'}
-                </p>
-              </div>
+            {/* Storage & Drive Device */}
+            <div style={{ marginBottom: 16 }}>
+              <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
+                STORAGE & DRIVE (DEVICE INI)
+              </h4>
+              <div className="op-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr' }}>
+                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+                  <h5 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
+                    DRIVE STATUS
+                  </h5>
+                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {selectedDevice.driveConnected ? (
+                      <><CheckCircle2 size={14} color="#4ade80" /> Connected</>
+                    ) : (
+                      <><AlertCircle size={14} color="#ef4444" /> Not connected</>
+                    )}
+                  </p>
+                  <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)', wordBreak: 'break-word' }}>
+                    Account: {selectedDevice.driveAccount || '—'}
+                  </p>
+                </div>
 
-              <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-                <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
-                  UPLOAD STATUS (DEVICE INI)
-                </h4>
-                <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <CheckCircle2 size={14} color="#4ade80" /> Uploaded: {selectedDevice.uploadedCount ?? 0}
-                </p>
-                <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Clock size={14} color="#facc15" /> Pending: {selectedDevice.pendingCount ?? 0}
-                </p>
-                <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <AlertCircle size={14} color="#ef4444" /> Failed: {selectedDevice.failedCount ?? 0}
-                </p>
+                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
+                  <h5 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>
+                    UPLOAD STATUS
+                  </h5>
+                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <CheckCircle2 size={14} color="#4ade80" /> Uploaded: {selectedDevice.uploadedCount ?? 0}
+                  </p>
+                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Clock size={14} color="#facc15" /> Pending: {selectedDevice.pendingCount ?? 0}
+                  </p>
+                  <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <AlertCircle size={14} color="#ef4444" /> Failed: {selectedDevice.failedCount ?? 0}
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* Session info */}
-            <div style={{ marginTop: 16, padding: 12, background: 'rgba(0,0,0,.2)', border: '1px solid rgba(255,255,255,.1)' }}>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
-                <strong style={{ color: 'rgba(255,255,255,.7)' }}>Session:</strong> {selectedDevice.currentEventName || 'Tidak ada'} •
-                <strong style={{ color: 'rgba(255,255,255,.7)', marginLeft: 6 }}>Phase:</strong> {selectedDevice.currentPhase.toUpperCase()} •
-                <strong style={{ color: 'rgba(255,255,255,.7)', marginLeft: 6 }}>Foto:</strong> {selectedDevice.photoCount} / {selectedDevice.totalCaptures} •
-                <strong style={{ color: 'rgba(255,255,255,.7)', marginLeft: 6 }}>Status:</strong> {selectedDevice.online ? 'Online' : 'Offline'}
+            {/* Quick Actions (untuk device terpilih) */}
+            <div style={{ marginTop: 20 }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: '#ffd94e' }}>
+                ⚡ QUICK ACTIONS → {selectedDevice.deviceName.toUpperCase()}
+              </h4>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <ActionButton
+                  icon={<RefreshCw size={16} />}
+                  label="RETRY UPLOAD"
+                  onClick={() => handleCommand('retry-all', 'Retry Upload')}
+                  color="#ef3f25"
+                />
+                <ActionButton
+                  icon={<Trash2 size={16} />}
+                  label="CLEAR CACHE"
+                  onClick={() => handleCommand('clear-cache', 'Clear Cache')}
+                  color="#6b7280"
+                />
+                <ActionButton
+                  icon={<RotateCcw size={16} />}
+                  label="RESET UPTIME"
+                  onClick={() => handleCommand('reset-uptime', 'Reset Uptime')}
+                  color="#6b7280"
+                />
+                <ActionButton
+                  icon={<Trash2 size={16} />}
+                  label="CLEAR STATS"
+                  onClick={() => handleCommand('clear-stats', 'Clear Stats')}
+                  color="#6b7280"
+                />
+                <ActionButton
+                  icon={<Download size={16} />}
+                  label="DOWNLOAD LOGS"
+                  onClick={() => handleCommand('download-logs', 'Download Logs')}
+                  color="#6b7280"
+                />
+                <ActionButton
+                  icon={<Play size={16} />}
+                  label="RELOAD APP"
+                  onClick={() => handleCommand('reload-app', 'Reload App')}
+                  color="#dc2626"
+                />
               </div>
-            </div>
-          </section>
-        ) : null}
-
-        {/* ============ LOCAL DEVICE DIAGNOSTIC (device operator ini) ============ */}
-        <section style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 14, letterSpacing: '.1em' }}>
-              DEVICE STATUS (DEVICE INI)
-            </h3>
-            <button
-              onClick={handleDiagnostic}
-              disabled={diagnosing}
-              type="button"
-              className="op-action-btn"
-              style={{
-                padding: '8px 16px',
-                background: '#2563eb',
-                color: '#fff',
-                border: 'none',
-                fontWeight: 600,
-                fontSize: 12,
-                cursor: diagnosing ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <Activity size={14} /> {diagnosing ? 'CHECKING...' : 'RUN FULL DIAGNOSTIC'}
-            </button>
-          </div>
-          <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-            {devices.map((d) => (
-              <div key={d.id} style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'rgba(255,255,255,.6)' }}>{deviceIcon(d.id)}</span>
-                  <span style={{ fontSize: 12, letterSpacing: '.08em', color: 'rgba(255,255,255,.6)' }}>{d.label.toUpperCase()}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: statusColor(d.status), fontSize: 14, fontWeight: 600 }}>
-                  {statusIcon(d.status)}
-                  {d.status === 'ok' ? 'OK' : d.status === 'warning' ? 'WARN' : d.status === 'error' ? 'ERROR' : '—'}
-                </div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,.5)', wordBreak: 'break-word' }}>{d.detail}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ============ TODAY STATS ============ */}
-        <section style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>STATISTIK HARI INI</h3>
-          <div className="op-grid-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
-            <StatCard label="Sesi" value={String(todayStats.sessionCount)} color="#60a5fa" />
-            <StatCard label="Foto" value={String(todayStats.photoCount)} color="#a78bfa" />
-            <StatCard label="Uploaded" value={String(todayStats.uploadSuccess)} color="#4ade80" />
-            <StatCard label="Upload Fail" value={String(todayStats.uploadFail)} color="#ef4444" />
-            <StatCard label="Avg Durasi" value={todayStats.avgDurationMs > 0 ? formatDuration(todayStats.avgDurationMs) : '—'} color="#facc15" />
-          </div>
-          {lastSession ? (
-            <p style={{ margin: '8px 0 0', fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
-              Sesi terakhir: {new Date(lastSession.finishedAt).toLocaleTimeString()} • {lastSession.photoCount} foto • {formatDuration(lastSession.finishedAt - lastSession.startedAt)}
-            </p>
-          ) : null}
-        </section>
-
-        {/* ============ LOCAL DRIVE + UPLOAD (jika tidak ada device yang di-select) ============ */}
-        {!selectedDevice ? (
-          <section className="op-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr', marginBottom: 16 }}>
-            <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>DRIVE STATUS (DEVICE INI)</h3>
-              <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                {token.hasToken ? (<><CheckCircle2 size={14} color="#4ade80" /> Connected</>) : (<><AlertCircle size={14} color="#ef4444" /> Not connected</>)}
+              <p style={{ margin: '12px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
+                ⚠️ Perintah dikirim ke device terpilih. Device akan eksekusi dalam ~1 detik.
               </p>
-              <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)', wordBreak: 'break-word' }}>Account: {token.account || '—'}</p>
-              <p style={{ margin: 4, fontSize: 13, color: 'rgba(255,255,255,.6)' }}>Token expires in: {token.hasToken ? `${tokenExpiresIn} min` : '—'}</p>
-            </div>
-            <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-              <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>UPLOAD STATUS (DEVICE INI)</h3>
-              <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><CheckCircle2 size={14} color="#4ade80" /> Uploaded: {stats.uploaded}</p>
-              <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><Clock size={14} color="#facc15" /> Pending: {stats.pending}</p>
-              <p style={{ margin: 4, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}><AlertCircle size={14} color="#ef4444" /> Failed: {stats.failed}</p>
             </div>
           </section>
         ) : null}
 
-        {/* ============ PENDING LIST ============ */}
-        <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>PENDING LIST ({pending.length})</h3>
-          {pending.length === 0 ? (
-            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>No pending uploads. All good.</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 240, overflow: 'auto' }}>
-              {pending.slice(0, 50).map((p) => (
-                <li key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,.05)', fontSize: 13, gap: 10 }}>
-                  <span style={{ wordBreak: 'break-all' }}>{p.fileName}</span>
-                  <span style={{ color: 'rgba(255,255,255,.5)', flexShrink: 0 }}>{new Date(p.createdAt).toLocaleTimeString()}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* ============ QUICK ACTIONS ============ */}
+        {/* ============ STATISTIK KESELURUHAN ============ */}
         <section style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>QUICK ACTIONS</h3>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <ActionButton icon={<RefreshCw size={16} />} label={retrying ? 'RETRYING...' : 'RETRY ALL'} onClick={handleRetryAll} disabled={retrying || pending.length === 0} color="#ef3f25" />
-            <ActionButton icon={<Plug size={16} />} label={reconnecting ? 'CONNECTING...' : 'RECONNECT DRIVE'} onClick={handleReconnect} disabled={reconnecting} color="#2563eb" />
-            <ActionButton icon={<Camera size={16} />} label="CHECK CAMERA" onClick={handleQuickCheckCamera} color="#0ea5e9" />
-            <ActionButton icon={<Wifi size={16} />} label="CHECK INTERNET" onClick={handleQuickCheckInternet} color="#0ea5e9" />
-            <ActionButton icon={<HardDrive size={16} />} label="CHECK STORAGE" onClick={handleQuickCheckStorage} color="#0ea5e9" />
-            <ActionButton icon={<Printer size={16} />} label="CHECK PRINTER" onClick={handleQuickCheckPrinter} color="#0ea5e9" />
-            <ActionButton icon={<Cpu size={16} />} label="CHECK MEMORY" onClick={handleQuickCheckMemory} color="#0ea5e9" />
-            <ActionButton icon={<Trash2 size={16} />} label="CLEAR CACHE" onClick={handleClearCache} color="#6b7280" />
-            <ActionButton icon={<RotateCcw size={16} />} label="RESET UPTIME" onClick={handleResetUptime} color="#6b7280" />
-            <ActionButton icon={<Trash2 size={16} />} label="CLEAR STATS" onClick={handleClearStats} color="#6b7280" />
-            <ActionButton icon={<Download size={16} />} label="DOWNLOAD LOGS" onClick={handleDownloadLogs} color="#6b7280" />
-            <ActionButton icon={<FileText size={16} />} label="CLEAR LOGS" onClick={handleClearLogs} color="#6b7280" />
-            <ActionButton icon={<Play size={16} />} label="RELOAD APP" onClick={handleReloadApp} color="#dc2626" />
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            STATISTIK HARI INI (SEMUA BOOTH)
+          </h3>
+          <div className="op-grid-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+            <StatCard label="Total Sesi" value={String(aggregatedStats.totalSessions)} color="#60a5fa" />
+            <StatCard label="Total Foto" value={String(aggregatedStats.totalPhotos)} color="#a78bfa" />
+            <StatCard label="Uploaded" value={String(aggregatedStats.totalUploaded)} color="#4ade80" />
+            <StatCard label="Pending" value={String(aggregatedStats.totalPending)} color="#facc15" />
+            <StatCard label="Failed" value={String(aggregatedStats.totalFailed)} color="#ef4444" />
           </div>
+          <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
+            * Dihitung dari {filteredTablets.length} device aktif
+          </p>
         </section>
 
-        {/* ============ SYSTEM INFO ============ */}
+        {/* ============ LOGS (LOCAL OPERATOR) ============ */}
         <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>SYSTEM INFO (DEVICE INI)</h3>
-          <div className="op-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
-            {systemInfo.map((info) => (
-              <div key={info.label} style={{ fontSize: 12, display: 'flex', gap: 8 }}>
-                <span style={{ color: 'rgba(255,255,255,.5)', minWidth: 80, flexShrink: 0 }}>{info.label}:</span>
-                <span style={{ color: 'rgba(255,255,255,.8)', wordBreak: 'break-word', overflow: 'hidden' }}>{info.value}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ============ LOGS ============ */}
-        <section style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>RECENT LOGS ({logs.length})</h3>
-          {logs.length === 0 ? (
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
+            LOGS (DEVICE OPERATOR)
+          </h3>
+          {getLogs().length === 0 ? (
             <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>Belum ada log.</p>
           ) : (
             <ul className="op-log-list" style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 240, overflow: 'auto', fontFamily: 'monospace', fontSize: 12 }}>
-              {logs.slice(0, 50).map((l, i) => (
+              {getLogs().slice(0, 50).map((l, i) => (
                 <li key={i} style={{ padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,.05)', color: l.level === 'error' ? '#ef4444' : l.level === 'warn' ? '#facc15' : 'rgba(255,255,255,.7)', wordBreak: 'break-word' }}>
                   [{new Date(l.time).toLocaleTimeString()}] [{l.level.toUpperCase()}] {l.message}
                 </li>

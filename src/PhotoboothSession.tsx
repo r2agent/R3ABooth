@@ -8,12 +8,18 @@ import { saveCapture, saveResult, type StoredCapture, type StoredResult } from '
 import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
 import { printResult } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
-import { autoUploadToGuestFolder, retryFailedUploads, type UploadFileEntry } from './uploadService';
-import { buildDriveFolderUrl } from './gdriveService';
-import { recordSession } from './sessionStats';
-import { writeStatus, markOfflineOnDisconnect, clearStatus } from './statusSync';
-import { getTokenStatus } from './gdriveService';
-import { getUploadStats } from './uploadService';
+import { autoUploadToGuestFolder, retryFailedUploads, getUploadStats, type UploadFileEntry } from './uploadService';
+import { buildDriveFolderUrl, getTokenStatus } from './gdriveService';
+import { recordSession, getTodayStats, resetAppUptime, clearAllStats } from './sessionStats';
+import { downloadLogs } from './deviceDiagnostic';
+import {
+  writeStatus,
+  markOfflineOnDisconnect,
+  clearStatus,
+  getDeviceId,
+  subscribeCommands,
+  clearCommand,
+} from './statusSync';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
@@ -335,39 +341,41 @@ export const PhotoboothSession = ({
 
   /* ============================================================
      STATUS SYNC — tulis status ke Firebase setiap phase berubah
-     (DIPINDAH KE SINI, setelah totalCapturesNeeded)
      ============================================================ */
-useEffect(() => {
-  let cancelled = false;
+  useEffect(() => {
+    let cancelled = false;
 
-  const push = async () => {
-    const token = getTokenStatus();
-    const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
-    if (cancelled) return;
+    const push = async () => {
+      const token = getTokenStatus();
+      const stats = await getUploadStats().catch(() => ({ uploaded: 0, pending: 0, failed: 0 }));
+      const todayStats = getTodayStats();
+      if (cancelled) return;
 
-    void writeStatus({
-      currentEventSlug: event?.slug || '',
-      currentEventName: event?.eventName || 'Untitled',
-      currentPhase: phase,
-      sessionActive: phase !== 'frame-select',
-      photoCount: captures.length,
-      totalCaptures: totalCapturesNeeded,
-      driveConnected: token.hasToken,
-      driveAccount: token.account || '',
-      uploadedCount: stats.uploaded,
-      pendingCount: stats.pending,
-      failedCount: stats.failed,
-    });
-  };
+      void writeStatus({
+        currentEventSlug: event?.slug || '',
+        currentEventName: event?.eventName || 'Untitled',
+        currentPhase: phase,
+        sessionActive: phase !== 'frame-select',
+        photoCount: captures.length,
+        totalCaptures: totalCapturesNeeded,
+        driveConnected: token.hasToken,
+        driveAccount: token.account || '',
+        uploadedCount: stats.uploaded,
+        pendingCount: stats.pending,
+        failedCount: stats.failed,
+        todaySessionCount: todayStats.sessionCount,
+        todayPhotoCount: todayStats.photoCount,
+      });
+    };
 
-  void push();
-  const id = setInterval(push, 5000);
+    void push();
+    const id = setInterval(push, 5000);
 
-  return () => {
-    cancelled = true;
-    clearInterval(id);
-  };
-}, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName]);
 
   /* Mark offline saat tab ditutup */
   useEffect(() => {
@@ -375,6 +383,44 @@ useEffect(() => {
     return () => {
       void clearStatus();
     };
+  }, []);
+
+  /* ============================================================
+     COMMAND LISTENER — terima perintah dari operator dashboard
+     ============================================================ */
+  useEffect(() => {
+    const deviceId = getDeviceId();
+    const unsubscribe = subscribeCommands(deviceId, (cmd) => {
+      if (!cmd) return;
+
+      try {
+        switch (cmd.type) {
+          case 'reload-app':
+            window.location.reload();
+            break;
+          case 'clear-cache':
+            sessionStorage.clear();
+            break;
+          case 'retry-all':
+            if (VITE_CLIENT_ID) void retryFailedUploads(VITE_CLIENT_ID);
+            break;
+          case 'reset-uptime':
+            resetAppUptime();
+            break;
+          case 'clear-stats':
+            clearAllStats();
+            break;
+          case 'download-logs':
+            downloadLogs();
+            break;
+        }
+      } catch {
+        /* ignore */
+      }
+
+      void clearCommand(deviceId);
+    });
+    return unsubscribe;
   }, []);
 
   const handleLogoClick = useCallback(() => {
