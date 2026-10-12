@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
-import { Copy, Plus, Trash2, Upload } from 'lucide-react';
+import { Copy, Plus, Trash2, Upload, X } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
 import type { Frame, Slot } from './eventStore';
 
@@ -107,18 +107,9 @@ export const FrameEditor = ({
           <input type="file" accept="image/png,image/jpeg" onChange={handleFileUpload} hidden />
         </label>
         <label className="frame-upload-label" style={{ borderColor: '#ffd94e', color: '#ffd94e' }}>
-          <Upload size={16} /> UPLOAD SLOT FRAME
+          <Upload size={16} /> UPLOAD WATERMARK
           <input type="file" accept="image/png,image/jpeg" onChange={handleSlotFrameUpload} hidden />
         </label>
-        {frame.slotFrameImage ? (
-          <button
-            type="button"
-            onClick={() => onSlotFrameChange('')}
-            style={{ borderColor: '#ef3f25', color: '#ef3f25' }}
-          >
-            ✕ HAPUS SLOT FRAME
-          </button>
-        ) : null}
       </div>
       <div className="frame-editor-body">
         <div className="frame-editor-scroll">
@@ -136,31 +127,6 @@ export const FrameEditor = ({
           ) : (
             <div className="frame-editor-placeholder"><span>No frame image uploaded</span></div>
           )}
-
-          {/* ⚠️ SLOT FRAME PREVIEW — overlay PNG di tiap slot */}
-          {frame.slotFrameImage ? (
-            <>
-              {frame.slots.map((slot) => (
-                <img
-                  key={`slotframe-${slot.id}`}
-                  src={frame.slotFrameImage}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    position: 'absolute',
-                    left: `${slot.x}%`,
-                    top: `${slot.y}%`,
-                    width: `${slot.w}%`,
-                    height: `${slot.h}%`,
-                    objectFit: 'fill',
-                    pointerEvents: 'none',
-                    zIndex: 5,
-                  }}
-                />
-              ))}
-            </>
-          ) : null}
-
           {frame.slots.map((slot) => (
             <div
               key={slot.id}
@@ -175,27 +141,78 @@ export const FrameEditor = ({
           ))}
         </div>
         </div>
-        {selectedSlot ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'start' }}>
+          {selectedSlot ? (
+            <div className="frame-slot-inspector">
+              <div className="inspector-header">SLOT INSPECTOR</div>
+              <div className="inspector-row"><span>CAPTURE ID</span><strong>{selectedSlot.captureId}</strong></div>
+              <div className="inspector-row"><span>X</span><strong>{Math.round(selectedSlot.x)}%</strong></div>
+              <div className="inspector-row"><span>Y</span><strong>{Math.round(selectedSlot.y)}%</strong></div>
+              <div className="inspector-row"><span>W</span><strong>{Math.round(selectedSlot.w)}%</strong></div>
+              <div className="inspector-row"><span>H</span><strong>{Math.round(selectedSlot.h)}%</strong></div>
+            </div>
+          ) : (
+            <div className="frame-slot-inspector frame-slot-inspector-empty">
+              <div className="inspector-header">SLOT INSPECTOR</div>
+              <p>Select a slot to view its position and size values.</p>
+            </div>
+          )}
+
+          {/* ⚠️ WATERMARK PANEL — preview PNG slot frame */}
           <div className="frame-slot-inspector">
-            <div className="inspector-header">SLOT INSPECTOR</div>
-            <div className="inspector-row"><span>CAPTURE ID</span><strong>{selectedSlot.captureId}</strong></div>
-            <div className="inspector-row"><span>X</span><strong>{Math.round(selectedSlot.x)}%</strong></div>
-            <div className="inspector-row"><span>Y</span><strong>{Math.round(selectedSlot.y)}%</strong></div>
-            <div className="inspector-row"><span>W</span><strong>{Math.round(selectedSlot.w)}%</strong></div>
-            <div className="inspector-row"><span>H</span><strong>{Math.round(selectedSlot.h)}%</strong></div>
+            <div className="inspector-header">WATERMARK</div>
             {frame.slotFrameImage ? (
-              <div className="inspector-row" style={{ marginTop: 8 }}>
-                <span>SLOT FRAME</span>
-                <strong style={{ color: '#4ade80' }}>✓ AKTIF</strong>
-              </div>
-            ) : null}
+              <>
+                <div
+                  style={{
+                    width: '100%',
+                    aspectRatio: '16 / 9',
+                    background: 'repeating-conic-gradient(#2a2522 0% 25%, #1a1614 0% 50%) 50% / 16px 16px',
+                    border: '1px solid rgba(255,255,255,.15)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <img
+                    src={frame.slotFrameImage}
+                    alt="Watermark preview"
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                  />
+                </div>
+                <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(255,255,255,.5)', lineHeight: 1.4 }}>
+                  Watermark ini diaplikasikan ke <strong style={{ color: '#ffd94e' }}>semua foto slot</strong> saat composite.
+                  Tidak muncul di <code style={{ color: '#4ade80' }}>final.jpg</code>.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onSlotFrameChange('')}
+                  style={{
+                    marginTop: 10,
+                    padding: '8px 12px',
+                    background: 'transparent',
+                    border: '1px solid rgba(239,63,37,.5)',
+                    color: '#ef3f25',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: '.06em',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <X size={12} /> HAPUS WATERMARK
+                </button>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,.4)', lineHeight: 1.5 }}>
+                Belum ada watermark. Klik <strong style={{ color: '#ffd94e' }}>UPLOAD WATERMARK</strong> di toolbar untuk menambahkan PNG.
+              </p>
+            )}
           </div>
-        ) : (
-          <div className="frame-slot-inspector frame-slot-inspector-empty">
-            <div className="inspector-header">SLOT INSPECTOR</div>
-            <p>Select a slot to view its position and size values.</p>
-          </div>
-        )}
+        </div>
       </div>
       {frame.slots.length === 0 ? <p className="frame-editor-empty">No slots yet. Add a slot to define where captured photos appear on the frame.</p> : null}
     </div>
