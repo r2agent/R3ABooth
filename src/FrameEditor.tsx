@@ -269,53 +269,7 @@ export const FrameEditor = ({
             </div>
           )}
 
-          {/* 2. WATERMARK */}
-          <div className="frame-slot-inspector">
-            <div className="inspector-header">WATERMARK</div>
-            {frame.slotFrameImage ? (
-              <>
-                <div
-                  style={{
-                    width: '100%',
-                    background: 'repeating-conic-gradient(#2a2522 0% 25%, #1a1614 0% 50%) 50% / 16px 16px',
-                    border: '1px solid rgba(255,255,255,.15)',
-                    display: 'grid',
-                    placeItems: 'center',
-                    overflow: 'hidden',
-                    lineHeight: 0,
-                  }}
-                >
-                  <img
-                    src={frame.slotFrameImage}
-                    alt="Watermark preview"
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                  />
-                </div>
-                <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(255,255,255,.5)', lineHeight: 1.4 }}>
-                  Watermark ini diaplikasikan ke <strong style={{ color: '#ffd94e' }}>semua foto slot</strong> saat composite.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => onSlotFrameChange('')}
-                  style={{
-                    marginTop: 10, padding: '8px 12px',
-                    background: 'transparent',
-                    border: '1px solid rgba(239,63,37,.5)',
-                    color: '#ef3f25', fontSize: 11, fontWeight: 700, letterSpacing: '.06em',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  }}
-                >
-                  <X size={12} /> HAPUS WATERMARK
-                </button>
-              </>
-            ) : (
-              <p style={{ margin: 0, fontSize: 12, color: 'rgba(255,255,255,.4)', lineHeight: 1.5 }}>
-                Belum ada watermark. Klik <strong style={{ color: '#ffd94e' }}>UPLOAD WATERMARK</strong> di toolbar.
-              </p>
-            )}
-          </div>
-
-          {/* 3. PHOTO TRANSFORM */}
+          {/* 2. PHOTO TRANSFORM + WATERMARK — PREVIEW GABUNGAN */}
           <div className="frame-slot-inspector">
             <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span>PHOTO TRANSFORM</span>
@@ -336,18 +290,19 @@ export const FrameEditor = ({
               </button>
             </div>
 
-            {/* Preview dummy foto dengan transform */}
+            {/* ⚠️ PREVIEW GABUNGAN — FOTO dummy + WATERMARK di atasnya */}
             <div
               style={{
                 width: '100%',
                 aspectRatio: '16 / 9',
-                background: '#0a0a0a',
+                background: 'repeating-conic-gradient(#2a2522 0% 25%, #1a1614 0% 50%) 50% / 16px 16px',
                 border: '1px solid rgba(255,255,255,.15)',
                 overflow: 'hidden',
                 position: 'relative',
                 marginTop: 4,
               }}
             >
+              {/* Layer 1: FOTO dummy dengan transform */}
               <div
                 style={{
                   position: 'absolute',
@@ -362,13 +317,63 @@ export const FrameEditor = ({
                   fontSize: 11,
                   letterSpacing: '.15em',
                   textShadow: '0 2px 4px rgba(0,0,0,.5)',
+                  zIndex: 1,
                 }}
               >
                 FOTO
               </div>
+
+              {/* Layer 2: Watermark PNG overlay di atasnya */}
+              {frame.slotFrameImage ? (
+                <img
+                  src={frame.slotFrameImage}
+                  alt="Watermark overlay"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'fill',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
+              ) : null}
             </div>
 
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Watermark info & tombol */}
+            <div style={{ marginTop: 8 }}>
+              {frame.slotFrameImage ? (
+                <button
+                  type="button"
+                  onClick={() => onSlotFrameChange('')}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    background: 'transparent',
+                    border: '1px solid rgba(239,63,37,.5)',
+                    color: '#ef3f25',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '.06em',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 5,
+                  }}
+                >
+                  <X size={11} /> HAPUS WATERMARK
+                </button>
+              ) : (
+                <p style={{ margin: 0, fontSize: 10, color: 'rgba(255,255,255,.4)', lineHeight: 1.4, textAlign: 'center' }}>
+                  Belum ada watermark. Klik <strong style={{ color: '#ffd94e' }}>UPLOAD WATERMARK</strong> di toolbar.
+                </p>
+              )}
+            </div>
+
+            {/* Slider transform */}
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>
                   <span>OFFSET X</span><strong style={{ color: '#ffd94e' }}>{photoOffsetX.toFixed(0)}%</strong>
@@ -419,7 +424,7 @@ export const FrameEditor = ({
             </div>
 
             <p style={{ margin: '8px 0 0', fontSize: 10, color: 'rgba(255,255,255,.4)', lineHeight: 1.4 }}>
-              Transform berlaku ke <strong style={{ color: '#ffd94e' }}>semua slot</strong> di frame ini.
+              Transform foto berlaku ke <strong style={{ color: '#ffd94e' }}>semua slot</strong> di frame ini. Watermark tetap di posisi aslinya.
             </p>
           </div>
         </div>
