@@ -67,10 +67,13 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
           ? f
           : {
               ...f,
+              // ⚠️ Copy transform
               photoOffsetX: src.photoOffsetX ?? 0,
               photoOffsetY: src.photoOffsetY ?? 0,
               photoScale: src.photoScale ?? 1,
               photoRotation: src.photoRotation ?? 0,
+              // ⚠️ Copy watermark juga
+              slotFrameImage: src.slotFrameImage ?? '',
             },
       ),
     });
