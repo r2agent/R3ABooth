@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
-import { Copy, Plus, Trash2, Upload, X, Lock } from 'lucide-react';
+import { Copy, Plus, Trash2, Upload, X, Lock, Unlock } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
 import { loadCameraSettings, getAspectRatioValue } from './cameraStore';
 import type { Frame, Slot } from './eventStore';
@@ -39,6 +39,7 @@ export const FrameEditor = ({
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [frameAspect, setFrameAspect] = useState(3 / 2);
   const [cameraAspect, setCameraAspect] = useState(16 / 9);
+  const [ratioLocked, setRatioLocked] = useState(true);
 
   useEffect(() => {
     if (!frame.image) { setFrameAspect(3 / 2); return; }
@@ -89,39 +90,54 @@ export const FrameEditor = ({
         };
       }
 
-      // ⚠️ RESIZE — rasio terkunci
-      const slotAspect = drag.origW / drag.origH; // %-ratio, dijaga konstan
+      // ⚠️ RESIZE
+      const slotAspect = drag.origW / drag.origH;
       const canvasAspect = frameAspect || 1;
-
-      // Dominan delta mana yang dipakai?
-      const useWidth = Math.abs(dxPct) >= Math.abs(dyPct);
 
       let proposedW: number;
       let proposedH: number;
 
-      if (useWidth) {
-        proposedW = drag.origW + dxPct;
-        proposedH = proposedW / slotAspect;
+      if (ratioLocked) {
+        // LOCKED — rasio terjaga
+        const useWidth = Math.abs(dxPct) >= Math.abs(dyPct);
+        if (useWidth) {
+          proposedW = drag.origW + dxPct;
+          proposedH = proposedW / slotAspect;
+        } else {
+          proposedH = drag.origH + dyPct;
+          proposedW = proposedH * slotAspect;
+        }
+
+        // Clamp min 5%
+        if (proposedW < 5) { proposedW = 5; proposedH = proposedW / slotAspect; }
+        if (proposedH < 5) { proposedH = 5; proposedW = proposedH * slotAspect; }
+
+        // Clamp max ke canvas bounds
+        const maxW = 100 - s.x;
+        const maxH = 100 - s.y;
+        if (proposedW > maxW) { proposedW = maxW; proposedH = proposedW / slotAspect; }
+        if (proposedH > maxH) { proposedH = maxH; proposedW = proposedH * slotAspect; }
       } else {
+        // UNLOCKED — bebas resize (bisa gepeng)
+        proposedW = drag.origW + dxPct;
         proposedH = drag.origH + dyPct;
-        proposedW = proposedH * slotAspect;
+
+        // Clamp min 5%
+        proposedW = Math.max(5, proposedW);
+        proposedH = Math.max(5, proposedH);
+
+        // Clamp max ke canvas bounds
+        const maxW = 100 - s.x;
+        const maxH = 100 - s.y;
+        proposedW = Math.min(maxW, proposedW);
+        proposedH = Math.min(maxH, proposedH);
       }
-
-      // Clamp min 5%
-      if (proposedW < 5) { proposedW = 5; proposedH = proposedW / slotAspect; }
-      if (proposedH < 5) { proposedH = 5; proposedW = proposedH * slotAspect; }
-
-      // Clamp max ke canvas bounds
-      const maxW = 100 - s.x;
-      const maxH = 100 - s.y;
-      if (proposedW > maxW) { proposedW = maxW; proposedH = proposedW / slotAspect; }
-      if (proposedH > maxH) { proposedH = maxH; proposedW = proposedH * slotAspect; }
 
       void canvasAspect;
 
       return { ...s, w: proposedW, h: proposedH };
     }));
-  }, [drag, frame.slots, frameAspect, getRectPct, onSlotsChange]);
+  }, [drag, frame.slots, frameAspect, ratioLocked, getRectPct, onSlotsChange]);
 
   const handleMouseUp = useCallback(() => setDrag(null), []);
 
@@ -141,27 +157,20 @@ export const FrameEditor = ({
     e.target.value = '';
   };
 
-  /* ⚠️ Slot baru: hitung w/h supaya pixel-aspect = camera aspect
-     slot.w / slot.h = cameraAspect / canvasAspect
-     (karena slot.w pakai % dari canvasWidth, slot.h pakai % dari canvasHeight) */
+  /* ⚠️ Slot baru: hitung w/h supaya pixel-aspect = camera aspect */
   const handleAddSlot = () => {
     const captureId = `cap-${frame.slots.length + 1}`;
     const canvasAspect = frameAspect || 1;
     const slotAspectPct = cameraAspect / canvasAspect;
 
-    // Default lebar 40%
     let w = 40;
     let h = w / slotAspectPct;
 
-    // Clamp tinggi maksimal 60%
     if (h > 60) { h = 60; w = h * slotAspectPct; }
-    // Clamp lebar maksimal 80%
     if (w > 80) { w = 80; h = w / slotAspectPct; }
 
     onAddSlot(captureId, w, h);
   };
-
-  const isRatioLocked = true; // resize selalu terkunci
 
   return (
     <div className="frame-editor">
@@ -211,13 +220,30 @@ export const FrameEditor = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'start' }}>
           {selectedSlot ? (
             <div className="frame-slot-inspector">
-              <div className="inspector-header">
-                SLOT INSPECTOR
-                {isRatioLocked ? (
-                  <span style={{ float: 'right', fontSize: 10, color: '#ffd94e', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <Lock size={10} /> RATIO
-                  </span>
-                ) : null}
+              <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <span>SLOT INSPECTOR</span>
+                <button
+                  type="button"
+                  onClick={() => setRatioLocked((v) => !v)}
+                  title={ratioLocked ? 'Klik untuk unlock ratio' : 'Klik untuk lock ratio'}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '3px 8px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '.06em',
+                    background: ratioLocked ? 'rgba(255,217,78,.15)' : 'rgba(255,255,255,.08)',
+                    border: ratioLocked ? '1px solid rgba(255,217,78,.5)' : '1px solid rgba(255,255,255,.2)',
+                    color: ratioLocked ? '#ffd94e' : 'rgba(255,255,255,.6)',
+                    cursor: 'pointer',
+                    transition: '.18s',
+                  }}
+                >
+                  {ratioLocked ? <Lock size={10} /> : <Unlock size={10} />}
+                  {ratioLocked ? 'LOCKED' : 'UNLOCKED'}
+                </button>
               </div>
               <div className="inspector-row"><span>CAPTURE ID</span><strong>{selectedSlot.captureId}</strong></div>
               <div className="inspector-row"><span>X</span><strong>{Math.round(selectedSlot.x)}%</strong></div>
@@ -225,7 +251,9 @@ export const FrameEditor = ({
               <div className="inspector-row"><span>W</span><strong>{Math.round(selectedSlot.w)}%</strong></div>
               <div className="inspector-row"><span>H</span><strong>{Math.round(selectedSlot.h)}%</strong></div>
               <p style={{ margin: '8px 0 0', fontSize: 10, color: 'rgba(255,255,255,.4)', lineHeight: 1.4 }}>
-                Rasio terkunci saat resize — tetap proporsional seperti kamera.
+                {ratioLocked
+                  ? 'Rasio terkunci — resize tetap proporsional seperti kamera.'
+                  : 'Rasio bebas — resize bisa gepeng.'}
               </p>
             </div>
           ) : (

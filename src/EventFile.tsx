@@ -60,8 +60,8 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
   const updateFrameSlots = (index: number, slots: Slot[]) => updateFrame(index, { slots });
 
   const addSlotToFrame = (frameIndex: number, captureId: string, w: number, h: number) => {
-   const slot = createSlot(captureId, w, h);
-   updateFrame(frameIndex, { slots: [...draft.frames[frameIndex].slots, slot] });
+    const slot = createSlot(captureId, w, h);
+    updateFrame(frameIndex, { slots: [...draft.frames[frameIndex].slots, slot] });
   };
 
   const duplicateSlotInFrame = (frameIndex: number, slot: Slot) => {
