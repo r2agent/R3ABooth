@@ -212,7 +212,6 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
 }
 
 async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
-  void frame;
   void slot;
   const TARGET_ASPECT = 16 / 9;
 
@@ -247,6 +246,14 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
     applyGlowToCanvas(ctx, photo, 0, 0, canvas.width, canvas.height);
   }
   ctx.restore();
+
+  // ⚠️ NEW: Overlay slot frame PNG — fit-to-fit di atas foto
+  if (frame.slotFrameImage) {
+    try {
+      const overlay = await loadImage(frame.slotFrameImage);
+      ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+    } catch { /* skip */ }
+  }
 
   return canvas.toDataURL('image/jpeg', 0.95);
 }

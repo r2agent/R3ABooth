@@ -8,7 +8,6 @@ import { publishEventToCloud, buildEventUrl, generateSlug } from './cloudEventSy
 type EventFileTab = 'event' | 'frame' | 'status';
 
 export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved: (event: R3aEvent) => void; onHome: () => void }) => {
-  // ✅ SMART DEFAULT TAB — event baru buka tab 'event', event lama buka tab 'status'
   const [activeTab, setActiveTab] = useState<EventFileTab>(
     event.eventName ? 'status' : 'event'
   );
@@ -17,7 +16,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Publish state
   const [publishing, setPublishing] = useState(false);
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
@@ -30,7 +28,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     setPublishedSlug(event.slug || null);
     setPublishMessage(null);
     setPublishError(null);
-    // Update default tab saat event berubah
     setActiveTab(event.eventName ? 'status' : 'event');
   }, [event]);
 
@@ -82,6 +79,12 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     reader.readAsDataURL(file);
   };
 
+  const uploadSlotFrameImage = (frameIndex: number, file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => updateFrame(frameIndex, { slotFrameImage: reader.result as string });
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
@@ -100,16 +103,12 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     }
   };
 
-  /* ============================================================
-     PUBLISH TO CLOUD — simpan event ke Firebase
-     ============================================================ */
   const handlePublish = async () => {
     setPublishing(true);
     setPublishError(null);
     setPublishMessage(null);
 
     try {
-      // Pastikan event punya slug
       const slug = draft.slug || generateSlug(draft.eventName || 'untitled');
       if (!slug) {
         setPublishError('Nama event tidak valid. Isi nama event dulu.');
@@ -117,12 +116,10 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
         return;
       }
 
-      // Simpan event dulu ke lokal (biar slug tersimpan)
       const toSave: R3aEvent = { ...draft, slug, updatedAt: Date.now() };
       await saveEvent(toSave);
       setDraft(toSave);
 
-      // Publish ke Firebase
       const result = await publishEventToCloud(toSave);
 
       if (result.success && result.slug) {
@@ -147,7 +144,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback untuk browser yang tidak support clipboard
       const input = document.createElement('input');
       input.value = url;
       document.body.appendChild(input);
@@ -221,6 +217,8 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                     onDuplicateSlot={(slot) => duplicateSlotInFrame(activeFrameIndex, slot)}
                     onDeleteSlot={(slotId) => deleteSlotFromFrame(activeFrameIndex, slotId)}
                     onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}
+                    onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
+                    onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
                   />
                 ) : (
                   <div className="frame-editor-empty-state">
@@ -250,7 +248,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
               <button className="status-action muted" type="button" onClick={() => setDraft({ ...draft, eventStatus: 'Ended' })}>END EVENT <ChevronRight size={20} /></button>
             </div>
 
-            {/* ============ PUBLISH TO CLOUD SECTION ============ */}
             <div
               style={{
                 marginTop: 32,
@@ -271,7 +268,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                 Guest bisa scan QR atau buka link di HP mereka.
               </p>
 
-              {/* Slug preview */}
               <div style={{ marginBottom: 16 }}>
                 <span style={{ color: 'rgba(255,244,220,.75)', fontSize: 11, fontWeight: 700, letterSpacing: '.18em' }}>
                   EVENT SLUG
@@ -292,7 +288,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                 </div>
               </div>
 
-              {/* URL preview */}
               {slugPreview ? (
                 <div style={{ marginBottom: 16 }}>
                   <span style={{ color: 'rgba(255,244,220,.75)', fontSize: 11, fontWeight: 700, letterSpacing: '.18em' }}>
@@ -315,7 +310,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                 </div>
               ) : null}
 
-              {/* Publish message */}
               {publishMessage ? (
                 <div
                   style={{
@@ -334,7 +328,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                 </div>
               ) : null}
 
-              {/* Publish error */}
               {publishError ? (
                 <div
                   style={{
@@ -353,7 +346,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                 </div>
               ) : null}
 
-              {/* Action buttons */}
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <button
                   onClick={handlePublish}

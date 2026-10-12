@@ -38,7 +38,7 @@ function eventPath(slug: string): string {
 
 /* ============================================================
    SAVE EVENT TO CLOUD
-   ⚠️ Frame image TIDAK dikirim ke Firebase (cuma slot + metadata)
+   ⚠️ Frame image & slotFrameImage TIDAK dikirim ke Firebase
    ============================================================ */
 export async function saveEventToCloud(
   event: R3aEvent,
@@ -60,15 +60,12 @@ export async function saveEventToCloud(
       ? (existing.val() as CloudEvent).publishedAt
       : now;
 
-    /* ============================================================
-       ⚠️ PENTING: Buang frame image dari payload
-       Firebase cuma simpan: id, name, slots (tanpa image base64)
-       ============================================================ */
     const framesWithoutImage = event.frames.map((frame) => ({
       id: frame.id,
       name: frame.name,
-      image: '',              // ← KOSONGKAN image (jangan kirim base64)
-      slots: frame.slots,     // ← Slot tetap dikirim
+      image: '',
+      slotFrameImage: '',
+      slots: frame.slots,
     }));
 
     const payload: CloudEvent = {
@@ -240,13 +237,12 @@ export async function syncCloudToLocal(
           await saveLocalFn(eventToSave);
           result.added++;
         } else if ((eventToSave.updatedAt || 0) > (existing.updatedAt || 0)) {
-          // Preserve frame image lokal (kalau ada) — cloud tidak punya frame image
           const mergedFrames = eventToSave.frames.map((cloudFrame) => {
             const localFrame = existing.frames.find((f) => f.id === cloudFrame.id);
             return {
               ...cloudFrame,
-              // Kalau cloud frame image kosong, pakai lokal (kalau ada)
               image: cloudFrame.image || localFrame?.image || '',
+              slotFrameImage: cloudFrame.slotFrameImage || localFrame?.slotFrameImage || '',
             };
           });
           await saveLocalFn({ ...eventToSave, frames: mergedFrames });

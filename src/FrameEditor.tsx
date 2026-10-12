@@ -14,13 +14,24 @@ type DragState = {
   origH: number;
 };
 
-export const FrameEditor = ({ frame, onSlotsChange, onAddSlot, onDuplicateSlot, onDeleteSlot, onUploadImage }: {
+export const FrameEditor = ({
+  frame,
+  onSlotsChange,
+  onAddSlot,
+  onDuplicateSlot,
+  onDeleteSlot,
+  onUploadImage,
+  onUploadSlotFrame,
+  onSlotFrameChange,
+}: {
   frame: Frame;
   onSlotsChange: (slots: Slot[]) => void;
   onAddSlot: (captureId: string) => void;
   onDuplicateSlot: (slot: Slot) => void;
   onDeleteSlot: (slotId: string) => void;
   onUploadImage: (file: File) => void;
+  onUploadSlotFrame: (file: File) => void;
+  onSlotFrameChange: (dataUrl: string) => void;
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -77,6 +88,14 @@ export const FrameEditor = ({ frame, onSlotsChange, onAddSlot, onDuplicateSlot, 
     e.target.value = '';
   };
 
+  const handleSlotFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.match(/^image\/(png|jpeg)$/)) return;
+    onUploadSlotFrame(file);
+    e.target.value = '';
+  };
+
   return (
     <div className="frame-editor">
       <div className="frame-editor-toolbar">
@@ -87,6 +106,19 @@ export const FrameEditor = ({ frame, onSlotsChange, onAddSlot, onDuplicateSlot, 
           <Upload size={16} /> UPLOAD FRAME IMAGE
           <input type="file" accept="image/png,image/jpeg" onChange={handleFileUpload} hidden />
         </label>
+        <label className="frame-upload-label" style={{ borderColor: '#ffd94e', color: '#ffd94e' }}>
+          <Upload size={16} /> UPLOAD SLOT FRAME
+          <input type="file" accept="image/png,image/jpeg" onChange={handleSlotFrameUpload} hidden />
+        </label>
+        {frame.slotFrameImage ? (
+          <button
+            type="button"
+            onClick={() => onSlotFrameChange('')}
+            style={{ borderColor: '#ef3f25', color: '#ef3f25' }}
+          >
+            ✕ HAPUS SLOT FRAME
+          </button>
+        ) : null}
       </div>
       <div className="frame-editor-body">
         <div className="frame-editor-scroll">
@@ -104,6 +136,31 @@ export const FrameEditor = ({ frame, onSlotsChange, onAddSlot, onDuplicateSlot, 
           ) : (
             <div className="frame-editor-placeholder"><span>No frame image uploaded</span></div>
           )}
+
+          {/* ⚠️ SLOT FRAME PREVIEW — overlay PNG di tiap slot */}
+          {frame.slotFrameImage ? (
+            <>
+              {frame.slots.map((slot) => (
+                <img
+                  key={`slotframe-${slot.id}`}
+                  src={frame.slotFrameImage}
+                  alt=""
+                  draggable={false}
+                  style={{
+                    position: 'absolute',
+                    left: `${slot.x}%`,
+                    top: `${slot.y}%`,
+                    width: `${slot.w}%`,
+                    height: `${slot.h}%`,
+                    objectFit: 'fill',
+                    pointerEvents: 'none',
+                    zIndex: 5,
+                  }}
+                />
+              ))}
+            </>
+          ) : null}
+
           {frame.slots.map((slot) => (
             <div
               key={slot.id}
@@ -126,6 +183,12 @@ export const FrameEditor = ({ frame, onSlotsChange, onAddSlot, onDuplicateSlot, 
             <div className="inspector-row"><span>Y</span><strong>{Math.round(selectedSlot.y)}%</strong></div>
             <div className="inspector-row"><span>W</span><strong>{Math.round(selectedSlot.w)}%</strong></div>
             <div className="inspector-row"><span>H</span><strong>{Math.round(selectedSlot.h)}%</strong></div>
+            {frame.slotFrameImage ? (
+              <div className="inspector-row" style={{ marginTop: 8 }}>
+                <span>SLOT FRAME</span>
+                <strong style={{ color: '#4ade80' }}>✓ AKTIF</strong>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="frame-slot-inspector frame-slot-inspector-empty">
