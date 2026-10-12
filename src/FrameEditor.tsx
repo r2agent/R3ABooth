@@ -178,7 +178,7 @@ export const FrameEditor = ({
 
   return (
     <div className="frame-editor">
-      <div className="frame-editor-toolbar">
+      <div className="frame-editor-toolbar" style={{ flexWrap: 'wrap' }}>
         <button type="button" onClick={handleAddSlot}><Plus size={16} /> ADD SLOT</button>
         {selectedSlotId ? <button type="button" onClick={() => { const s = frame.slots.find((sl) => sl.id === selectedSlotId); if (s) onDuplicateSlot(s); }}><Copy size={16} /> DUPLICATE</button> : null}
         {selectedSlotId ? <button type="button" onClick={() => { onDeleteSlot(selectedSlotId); setSelectedSlotId(null); }}><Trash2 size={16} /> DELETE</button> : null}
@@ -190,7 +190,26 @@ export const FrameEditor = ({
           <Upload size={16} /> UPLOAD WATERMARK
           <input type="file" accept="image/png,image/jpeg" onChange={handleSlotFrameUpload} hidden />
         </label>
+
+        {/* ⚠️ Tombol transform — selalu kelihatan di toolbar */}
+        <button
+          type="button"
+          onClick={resetPhotoTransform}
+          title="Reset transform foto"
+          style={{ borderColor: 'rgba(255,255,255,.3)', color: 'rgba(255,255,255,.8)' }}
+        >
+          <RotateCcw size={16} /> RESET
+        </button>
+        <button
+          type="button"
+          onClick={onApplyTransformToAll}
+          title="Apply transform ke semua frame"
+          style={{ borderColor: 'rgba(74,222,128,.6)', color: '#4ade80' }}
+        >
+          <Check size={16} /> APPLY ALL
+        </button>
       </div>
+
       <div className="frame-editor-body">
         <div className="frame-editor-scroll">
           <div
@@ -227,7 +246,7 @@ export const FrameEditor = ({
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
+            gap: 8,
             alignSelf: 'stretch',
             height: '100%',
             minHeight: 0,
@@ -237,79 +256,43 @@ export const FrameEditor = ({
             scrollbarWidth: 'thin',
           }}
         >
-          {/* 1. SLOT INSPECTOR */}
+          {/* SLOT INSPECTOR */}
           {selectedSlot ? (
-            <div className="frame-slot-inspector">
-              <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <div className="frame-slot-inspector" style={{ padding: 10 }}>
+              <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingBottom: 6 }}>
                 <span>SLOT INSPECTOR</span>
                 <button
                   type="button"
                   onClick={() => setRatioLocked((v) => !v)}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    padding: '2px 6px', fontSize: 9, fontWeight: 700, letterSpacing: '.06em',
                     background: ratioLocked ? 'rgba(255,217,78,.15)' : 'rgba(255,255,255,.08)',
                     border: ratioLocked ? '1px solid rgba(255,217,78,.5)' : '1px solid rgba(255,255,255,.2)',
                     color: ratioLocked ? '#ffd94e' : 'rgba(255,255,255,.6)',
-                    cursor: 'pointer', transition: '.18s',
+                    cursor: 'pointer',
                   }}
                 >
-                  {ratioLocked ? <Lock size={10} /> : <Unlock size={10} />}
+                  {ratioLocked ? <Lock size={9} /> : <Unlock size={9} />}
                   {ratioLocked ? 'LOCKED' : 'UNLOCKED'}
                 </button>
               </div>
-              <div className="inspector-row"><span>CAPTURE ID</span><strong>{selectedSlot.captureId}</strong></div>
-              <div className="inspector-row"><span>X</span><strong>{Math.round(selectedSlot.x)}%</strong></div>
-              <div className="inspector-row"><span>Y</span><strong>{Math.round(selectedSlot.y)}%</strong></div>
-              <div className="inspector-row"><span>W</span><strong>{Math.round(selectedSlot.w)}%</strong></div>
-              <div className="inspector-row"><span>H</span><strong>{Math.round(selectedSlot.h)}%</strong></div>
+              <div className="inspector-row" style={{ fontSize: 11 }}><span>CAPTURE ID</span><strong>{selectedSlot.captureId}</strong></div>
+              <div className="inspector-row" style={{ fontSize: 11 }}><span>X / Y</span><strong>{Math.round(selectedSlot.x)}% / {Math.round(selectedSlot.y)}%</strong></div>
+              <div className="inspector-row" style={{ fontSize: 11 }}><span>W / H</span><strong>{Math.round(selectedSlot.w)}% / {Math.round(selectedSlot.h)}%</strong></div>
             </div>
           ) : (
-            <div className="frame-slot-inspector frame-slot-inspector-empty">
-              <div className="inspector-header">SLOT INSPECTOR</div>
-              <p>Select a slot to view its position and size values.</p>
+            <div className="frame-slot-inspector frame-slot-inspector-empty" style={{ padding: 10 }}>
+              <div className="inspector-header" style={{ paddingBottom: 6 }}>SLOT INSPECTOR</div>
+              <p style={{ margin: 0, fontSize: 11 }}>Select a slot to view its position and size.</p>
             </div>
           )}
 
-          {/* 2. PHOTO TRANSFORM + WATERMARK PREVIEW GABUNGAN */}
-          <div className="frame-slot-inspector">
-            <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-              <span>PHOTO TRANSFORM</span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={resetPhotoTransform}
-                  title="Reset transform"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
-                    background: 'rgba(255,255,255,.08)',
-                    border: '1px solid rgba(255,255,255,.2)',
-                    color: 'rgba(255,255,255,.7)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <RotateCcw size={10} /> RESET
-                </button>
-                <button
-                  type="button"
-                  onClick={onApplyTransformToAll}
-                  title="Apply transform ke semua frame"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
-                    background: 'rgba(74,222,128,.15)',
-                    border: '1px solid rgba(74,222,128,.5)',
-                    color: '#4ade80',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Check size={10} /> APPLY ALL
-                </button>
-              </div>
-            </div>
+          {/* PHOTO TRANSFORM + PREVIEW */}
+          <div className="frame-slot-inspector" style={{ padding: 10 }}>
+            <div className="inspector-header" style={{ paddingBottom: 6 }}>PHOTO TRANSFORM</div>
 
-            {/* PREVIEW GABUNGAN: FOTO dummy + WATERMARK overlay */}
+            {/* PREVIEW GABUNGAN */}
             <div
               style={{
                 width: '100%',
@@ -321,7 +304,6 @@ export const FrameEditor = ({
                 marginTop: 4,
               }}
             >
-              {/* Layer 1: FOTO dummy dengan transform */}
               <div
                 style={{
                   position: 'absolute',
@@ -341,17 +323,13 @@ export const FrameEditor = ({
               >
                 FOTO
               </div>
-
-              {/* Layer 2: Watermark PNG overlay di atas */}
               {frame.slotFrameImage ? (
                 <img
                   src={frame.slotFrameImage}
                   alt="Watermark overlay"
                   style={{
-                    position: 'absolute',
-                    inset: 0,
-                    width: '100%',
-                    height: '100%',
+                    position: 'absolute', inset: 0,
+                    width: '100%', height: '100%',
                     objectFit: 'fill',
                     pointerEvents: 'none',
                     zIndex: 2,
@@ -361,90 +339,61 @@ export const FrameEditor = ({
             </div>
 
             {/* Hapus watermark */}
-            <div style={{ marginTop: 8 }}>
-              {frame.slotFrameImage ? (
-                <button
-                  type="button"
-                  onClick={() => onSlotFrameChange('')}
-                  style={{
-                    width: '100%',
-                    padding: '6px 10px',
-                    background: 'transparent',
-                    border: '1px solid rgba(239,63,37,.5)',
-                    color: '#ef3f25',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '.06em',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 5,
-                  }}
-                >
-                  <X size={11} /> HAPUS WATERMARK
-                </button>
-              ) : (
-                <p style={{ margin: 0, fontSize: 10, color: 'rgba(255,255,255,.4)', lineHeight: 1.4, textAlign: 'center' }}>
-                  Belum ada watermark. Klik <strong style={{ color: '#ffd94e' }}>UPLOAD WATERMARK</strong> di toolbar.
-                </p>
-              )}
-            </div>
+            {frame.slotFrameImage ? (
+              <button
+                type="button"
+                onClick={() => onSlotFrameChange('')}
+                style={{
+                  marginTop: 6, width: '100%', padding: '5px 8px',
+                  background: 'transparent',
+                  border: '1px solid rgba(239,63,37,.5)',
+                  color: '#ef3f25', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                }}
+              >
+                <X size={11} /> HAPUS WATERMARK
+              </button>
+            ) : null}
 
-            {/* Slider transform */}
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Slider */}
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 2 }}>
                   <span>OFFSET X</span><strong style={{ color: '#ffd94e' }}>{photoOffsetX.toFixed(0)}%</strong>
                 </div>
-                <input
-                  type="range" min={-50} max={50} step={1}
-                  value={photoOffsetX}
+                <input type="range" min={-50} max={50} step={1} value={photoOffsetX}
                   onChange={(e) => setPhotoTransform({ photoOffsetX: parseInt(e.target.value, 10) })}
-                  style={sliderStyle}
-                />
+                  style={sliderStyle} />
               </div>
 
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 2 }}>
                   <span>OFFSET Y</span><strong style={{ color: '#ffd94e' }}>{photoOffsetY.toFixed(0)}%</strong>
                 </div>
-                <input
-                  type="range" min={-50} max={50} step={1}
-                  value={photoOffsetY}
+                <input type="range" min={-50} max={50} step={1} value={photoOffsetY}
                   onChange={(e) => setPhotoTransform({ photoOffsetY: parseInt(e.target.value, 10) })}
-                  style={sliderStyle}
-                />
+                  style={sliderStyle} />
               </div>
 
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>
-                  <span>SCALE (ZOOM)</span><strong style={{ color: '#ffd94e' }}>{photoScale.toFixed(2)}x</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 2 }}>
+                  <span>SCALE</span><strong style={{ color: '#ffd94e' }}>{photoScale.toFixed(2)}x</strong>
                 </div>
-                <input
-                  type="range" min={0.5} max={2} step={0.05}
-                  value={photoScale}
+                <input type="range" min={0.5} max={2} step={0.05} value={photoScale}
                   onChange={(e) => setPhotoTransform({ photoScale: parseFloat(e.target.value) })}
-                  style={sliderStyle}
-                />
+                  style={sliderStyle} />
               </div>
 
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 2 }}>
                   <span>ROTATION</span><strong style={{ color: '#ffd94e' }}>{photoRotation.toFixed(0)}°</strong>
                 </div>
-                <input
-                  type="range" min={-180} max={180} step={1}
-                  value={photoRotation}
+                <input type="range" min={-180} max={180} step={1} value={photoRotation}
                   onChange={(e) => setPhotoTransform({ photoRotation: parseInt(e.target.value, 10) })}
-                  style={sliderStyle}
-                />
+                  style={sliderStyle} />
               </div>
             </div>
-
-            <p style={{ margin: '8px 0 0', fontSize: 10, color: 'rgba(255,255,255,.4)', lineHeight: 1.4 }}>
-              Transform foto berlaku ke <strong style={{ color: '#ffd94e' }}>semua slot</strong> di frame ini. Watermark tetap di posisi aslinya.
-            </p>
           </div>
         </div>
       </div>
