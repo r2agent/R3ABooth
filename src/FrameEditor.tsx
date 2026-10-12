@@ -1,6 +1,5 @@
-import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check } from 'lucide-react';
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
-import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw } from 'lucide-react';
+import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
 import { loadCameraSettings, getAspectRatioValue } from './cameraStore';
 import type { Frame, Slot } from './eventStore';
@@ -194,36 +193,36 @@ export const FrameEditor = ({
       </div>
       <div className="frame-editor-body">
         <div className="frame-editor-scroll">
-        <div
-          ref={editorRef}
-          className="frame-editor-canvas"
-          style={{ aspectRatio: frameAspect }}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onClick={() => setSelectedSlotId(null)}
-        >
-          {frame.image ? (
-            <img src={frame.image} alt={frame.name} className="frame-editor-bg" draggable={false} />
-          ) : (
-            <div className="frame-editor-placeholder"><span>No frame image uploaded</span></div>
-          )}
-          {frame.slots.map((slot) => (
-            <div
-              key={slot.id}
-              className={`frame-slot ${selectedSlotId === slot.id ? 'is-selected' : ''}`}
-              style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` } as CSSProperties}
-              onMouseDown={(e) => handleMouseDown(e, slot, 'move')}
-              onClick={(e) => { e.stopPropagation(); setSelectedSlotId(slot.id); }}
-            >
-              <span className="frame-slot-label">{slot.captureId}</span>
-              <div className="frame-slot-resize" onMouseDown={(e) => handleMouseDown(e, slot, 'resize')} />
-            </div>
-          ))}
-        </div>
+          <div
+            ref={editorRef}
+            className="frame-editor-canvas"
+            style={{ aspectRatio: frameAspect }}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onClick={() => setSelectedSlotId(null)}
+          >
+            {frame.image ? (
+              <img src={frame.image} alt={frame.name} className="frame-editor-bg" draggable={false} />
+            ) : (
+              <div className="frame-editor-placeholder"><span>No frame image uploaded</span></div>
+            )}
+            {frame.slots.map((slot) => (
+              <div
+                key={slot.id}
+                className={`frame-slot ${selectedSlotId === slot.id ? 'is-selected' : ''}`}
+                style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` } as CSSProperties}
+                onMouseDown={(e) => handleMouseDown(e, slot, 'move')}
+                onClick={(e) => { e.stopPropagation(); setSelectedSlotId(slot.id); }}
+              >
+                <span className="frame-slot-label">{slot.captureId}</span>
+                <div className="frame-slot-resize" onMouseDown={(e) => handleMouseDown(e, slot, 'resize')} />
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* ⚠️ SIDEBAR SCROLLABLE */}
+        {/* SIDEBAR SCROLLABLE */}
         <div
           style={{
             display: 'flex',
@@ -272,42 +271,45 @@ export const FrameEditor = ({
             </div>
           )}
 
-          {/* 2. PHOTO TRANSFORM + WATERMARK — PREVIEW GABUNGAN */}
+          {/* 2. PHOTO TRANSFORM + WATERMARK PREVIEW GABUNGAN */}
           <div className="frame-slot-inspector">
             <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <span>PHOTO TRANSFORM</span>
-              <button
-                type="button"
-                onClick={resetPhotoTransform}
-                title="Reset transform"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
-                  background: 'rgba(255,255,255,.08)',
-                  border: '1px solid rgba(255,255,255,.2)',
-                  color: 'rgba(255,255,255,.7)',
-                  cursor: 'pointer',
-                }}
-              >
-                <RotateCcw size={10} /> RESET
-              </button>
-              <button
-                type="button"
-                onClick={onApplyTransFormToAll}
-                title="Apply transform ke semua frame"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
-                  background: 'rgba(74,222,128,.15)',
-                  border: '1px solid rgba(74,222,128,.5)',
-                  color: '#4ade80',
-                  cursor: 'pointer',
-                }}
-              >
-                <Check size={10} /> APPLY ALL
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={resetPhotoTransform}
+                  title="Reset transform"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    background: 'rgba(255,255,255,.08)',
+                    border: '1px solid rgba(255,255,255,.2)',
+                    color: 'rgba(255,255,255,.7)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <RotateCcw size={10} /> RESET
+                </button>
+                <button
+                  type="button"
+                  onClick={onApplyTransformToAll}
+                  title="Apply transform ke semua frame"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    background: 'rgba(74,222,128,.15)',
+                    border: '1px solid rgba(74,222,128,.5)',
+                    color: '#4ade80',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Check size={10} /> APPLY ALL
+                </button>
+              </div>
             </div>
 
-            {/* ⚠️ PREVIEW GABUNGAN — FOTO dummy + WATERMARK di atasnya */}
+            {/* PREVIEW GABUNGAN: FOTO dummy + WATERMARK overlay */}
             <div
               style={{
                 width: '100%',
@@ -340,7 +342,7 @@ export const FrameEditor = ({
                 FOTO
               </div>
 
-              {/* Layer 2: Watermark PNG overlay di atasnya */}
+              {/* Layer 2: Watermark PNG overlay di atas */}
               {frame.slotFrameImage ? (
                 <img
                   src={frame.slotFrameImage}
@@ -358,7 +360,7 @@ export const FrameEditor = ({
               ) : null}
             </div>
 
-            {/* Watermark info & tombol */}
+            {/* Hapus watermark */}
             <div style={{ marginTop: 8 }}>
               {frame.slotFrameImage ? (
                 <button
