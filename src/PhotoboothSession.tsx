@@ -311,7 +311,6 @@ export const PhotoboothSession = ({
   const [screensaverActive, setScreensaverActive] = useState(false);
   const [pendingFullscreen, setPendingFullscreen] = useState(false);
   const [pendingRefreshToken, setPendingRefreshToken] = useState(false);
-  /* ⚠️ NEW: preview fullscreen 2s setelah flash */
   const [capturePreviewUrl, setCapturePreviewUrl] = useState<string | null>(null);
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
@@ -683,9 +682,7 @@ export const PhotoboothSession = ({
     setCountdown(5);
   }, [phase, isVideoReady]);
 
-  /* ============================================================
-     COUNTDOWN → CAPTURE + set PREVIEW (bukan langsung ke filter)
-     ============================================================ */
+  /* COUNTDOWN → CAPTURE + set PREVIEW */
   useEffect(() => {
     if (phase !== 'countdown' || countdown === 0) return;
     let preFlashTimer: ReturnType<typeof setTimeout> | null = null;
@@ -700,7 +697,6 @@ export const PhotoboothSession = ({
           const capId = uniqueCaptureIds[currentCaptureIndex];
           const newCapture: CaptureData = { captureId: capId, dataUrl };
           setCaptures((prev) => [...prev, newCapture]);
-          // ⚠️ Set preview — muncul 2s
           setCapturePreviewUrl(dataUrl);
           void saveCapture({
             id: `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -714,11 +710,9 @@ export const PhotoboothSession = ({
           setCaptureError({ message: 'Camera not ready at capture time. Please retry.' });
           setTimeout(() => setCaptureError(null), 3000);
         }
-        // ⚠️ Increment index kalau masih ada slot lagi
         if (currentCaptureIndex + 1 < totalCapturesNeeded) {
           setCurrentCaptureIndex((i) => i + 1);
         }
-        // Set countdown 0 (transisi ke preview), JANGAN pindah phase
         setCountdown(0);
       } else {
         setCountdown((c) => c - 1);
@@ -727,34 +721,26 @@ export const PhotoboothSession = ({
     return () => { clearTimeout(timer); if (preFlashTimer) clearTimeout(preFlashTimer); };
   }, [phase, countdown, currentCaptureIndex, totalCapturesNeeded, uniqueCaptureIds, cameraSettings.mirror, event.id, isVideoReady]);
 
-  /* ============================================================
-     AUTO-CLEAR PREVIEW setelah 2 detik
-     ============================================================ */
+  /* AUTO-CLEAR PREVIEW setelah 2 detik */
   useEffect(() => {
     if (!capturePreviewUrl) return;
     const t = setTimeout(() => setCapturePreviewUrl(null), 2000);
     return () => clearTimeout(t);
   }, [capturePreviewUrl]);
 
-  /* ============================================================
-     AUTO-CHAIN — setelah preview selesai:
-     - kalau semua slot terisi → ke filter
-     - kalau masih ada → countdown berikutnya
-     ============================================================ */
+  /* AUTO-CHAIN */
   useEffect(() => {
     if (phase !== 'countdown') return;
     if (countdown !== 0) return;
-    if (capturePreviewUrl) return; // tunggu preview selesai
-    if (captures.length === 0) return; // belum ada capture sama sekali
+    if (capturePreviewUrl) return;
+    if (captures.length === 0) return;
 
     if (captures.length >= totalCapturesNeeded) {
-      // Semua slot sudah terisi → lanjut ke filter
       setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
       setPhase('filter');
       return;
     }
 
-    // Masih ada slot → jeda 400ms lalu countdown berikutnya
     const t = setTimeout(() => setCountdown(5), 400);
     return () => clearTimeout(t);
   }, [phase, countdown, capturePreviewUrl, captures.length, totalCapturesNeeded, uniqueCaptureIds]);
@@ -841,9 +827,9 @@ export const PhotoboothSession = ({
       const uploadFailCount = 0;
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
+        // ⚠️ Slot photos TIDAK di-upload ke Drive — cuma final + video
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
-          ...slotPhotos.map((sp) => ({ fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`, dataUrl: sp.dataUrl })),
           ...(slideshowVideo ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }] : []),
         ];
         void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
@@ -1127,8 +1113,6 @@ export const PhotoboothSession = ({
       {LoadingOverlay}
       {flash ? <div className="capture-flash" /> : null}
 
-      {/* ⚠️ CAPTURE PREVIEW OVERLAY — z-index di bawah flash (150 < 200)
-          biar flash keluar dulu, baru preview muncul jelas */}
       {capturePreviewUrl ? (
         <div
           style={{
@@ -1196,7 +1180,6 @@ export const PhotoboothSession = ({
               <>
                 <div className="photobooth-video-wrap">
                   <CameraPreview stream={stream} mirror={cameraSettings.mirror} aspectRatio={cameraSettings.aspectRatio} className="photobooth-video" />
-                  {/* ⚠️ Countdown overlay hanya tampil kalau countdown > 0 (bukan saat 0 / preview) */}
                   {phase === 'countdown' && countdown > 0 ? (
                     <div className="countdown-overlay"><span className="countdown-number">{countdown}</span></div>
                   ) : null}
