@@ -28,7 +28,6 @@ import type { AllSettings } from './settingsStore';
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
-/* Event name untuk trigger restart kamera dari mana saja */
 const RESTART_CAMERA_EVENT = 'r3a:restart-camera';
 
 type SessionPhase = 'frame-select' | 'ready' | 'live' | 'countdown' | 'filter' | 'compositing' | 'result' | 'qr' | 'drive-qr';
@@ -312,6 +311,8 @@ export const PhotoboothSession = ({
   const [screensaverActive, setScreensaverActive] = useState(false);
   const [pendingFullscreen, setPendingFullscreen] = useState(false);
   const [pendingRefreshToken, setPendingRefreshToken] = useState(false);
+  /* ⚠️ NEW: preview fullscreen 2s setelah flash */
+  const [capturePreviewUrl, setCapturePreviewUrl] = useState<string | null>(null);
   const [currentGuest, setCurrentGuest] = useState<GuestRecord | null>(null);
   const [guestError, setGuestError] = useState<string | null>(null);
   const [guestAssigning, setGuestAssigning] = useState(false);
@@ -327,8 +328,6 @@ export const PhotoboothSession = ({
 
   /* ============================================================
      ⚠️ AUTO-RESTART KAMERA
-     1. Saat masuk phase `ready` (prepare) — pastikan kamera jalan
-     2. Saat event `r3a:restart-camera` di-dispatch (mis. setelah OAuth)
      ============================================================ */
   useEffect(() => {
     if (phase !== 'ready') return;
@@ -339,7 +338,6 @@ export const PhotoboothSession = ({
 
   useEffect(() => {
     const handler = () => {
-      // Delay 800ms: biar browser release camera handle dari OAuth popup dulu
       setTimeout(() => { void forceRestart(); }, 800);
     };
     window.addEventListener(RESTART_CAMERA_EVENT, handler);
@@ -347,7 +345,7 @@ export const PhotoboothSession = ({
   }, [forceRestart]);
 
   /* ============================================================
-     ⚠️ REMOTE COMMAND OVERLAYS — pure DOM (tanpa React)
+     ⚠️ REMOTE COMMAND OVERLAYS — pure DOM
      ============================================================ */
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -433,11 +431,9 @@ export const PhotoboothSession = ({
       } catch { /* ignore */ }
       setPendingRefreshToken(false);
       if (success) {
-        // Trigger auto-restart kamera (browser lepas handle saat OAuth popup)
         setTimeout(() => {
           window.dispatchEvent(new Event(RESTART_CAMERA_EVENT));
         }, 300);
-        // Setelah OAuth popup, browser biasanya keluar dari fullscreen
         setTimeout(() => setPendingFullscreen(true), 800);
       }
     };
@@ -639,6 +635,7 @@ export const PhotoboothSession = ({
     setQrError(false);
     setDriveQrDataUrl(null);
     setDriveQrError(false);
+    setCapturePreviewUrl(null);
     sessionStartedAtRef.current = null;
     imageCacheRef.current.clear();
   }, []);
@@ -686,6 +683,9 @@ export const PhotoboothSession = ({
     setCountdown(5);
   }, [phase, isVideoReady]);
 
+  /* ============================================================
+     COUNTDOWN → CAPTURE + set PREVIEW (bukan langsung ke filter)
+     ============================================================ */
   useEffect(() => {
     if (phase !== 'countdown' || countdown === 0) return;
     let preFlashTimer: ReturnType<typeof setTimeout> | null = null;
@@ -700,6 +700,8 @@ export const PhotoboothSession = ({
           const capId = uniqueCaptureIds[currentCaptureIndex];
           const newCapture: CaptureData = { captureId: capId, dataUrl };
           setCaptures((prev) => [...prev, newCapture]);
+          // ⚠️ Set preview — muncul 2s
+          setCapturePreviewUrl(dataUrl);
           void saveCapture({
             id: `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             eventId: event.id,
@@ -712,13 +714,11 @@ export const PhotoboothSession = ({
           setCaptureError({ message: 'Camera not ready at capture time. Please retry.' });
           setTimeout(() => setCaptureError(null), 3000);
         }
-        if (currentCaptureIndex + 1 >= totalCapturesNeeded) {
-          setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
-          setPhase('filter');
-        } else {
+        // ⚠️ Increment index kalau masih ada slot lagi
+        if (currentCaptureIndex + 1 < totalCapturesNeeded) {
           setCurrentCaptureIndex((i) => i + 1);
-          setPhase('live');
         }
+        // Set countdown 0 (transisi ke preview), JANGAN pindah phase
         setCountdown(0);
       } else {
         setCountdown((c) => c - 1);
@@ -726,6 +726,38 @@ export const PhotoboothSession = ({
     }, 1000);
     return () => { clearTimeout(timer); if (preFlashTimer) clearTimeout(preFlashTimer); };
   }, [phase, countdown, currentCaptureIndex, totalCapturesNeeded, uniqueCaptureIds, cameraSettings.mirror, event.id, isVideoReady]);
+
+  /* ============================================================
+     AUTO-CLEAR PREVIEW setelah 2 detik
+     ============================================================ */
+  useEffect(() => {
+    if (!capturePreviewUrl) return;
+    const t = setTimeout(() => setCapturePreviewUrl(null), 2000);
+    return () => clearTimeout(t);
+  }, [capturePreviewUrl]);
+
+  /* ============================================================
+     AUTO-CHAIN — setelah preview selesai:
+     - kalau semua slot terisi → ke filter
+     - kalau masih ada → countdown berikutnya
+     ============================================================ */
+  useEffect(() => {
+    if (phase !== 'countdown') return;
+    if (countdown !== 0) return;
+    if (capturePreviewUrl) return; // tunggu preview selesai
+    if (captures.length === 0) return; // belum ada capture sama sekali
+
+    if (captures.length >= totalCapturesNeeded) {
+      // Semua slot sudah terisi → lanjut ke filter
+      setSelectedCaptureId(uniqueCaptureIds[0] ?? null);
+      setPhase('filter');
+      return;
+    }
+
+    // Masih ada slot → jeda 400ms lalu countdown berikutnya
+    const t = setTimeout(() => setCountdown(5), 400);
+    return () => clearTimeout(t);
+  }, [phase, countdown, capturePreviewUrl, captures.length, totalCapturesNeeded, uniqueCaptureIds]);
 
   useEffect(() => {
     if (!flash) return;
@@ -1095,6 +1127,63 @@ export const PhotoboothSession = ({
       {LoadingOverlay}
       {flash ? <div className="capture-flash" /> : null}
 
+      {/* ⚠️ CAPTURE PREVIEW OVERLAY — z-index di bawah flash (150 < 200)
+          biar flash keluar dulu, baru preview muncul jelas */}
+      {capturePreviewUrl ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 150,
+            background: 'rgba(0,0,0,.92)',
+            display: 'grid',
+            placeItems: 'center',
+            pointerEvents: 'none',
+            animation: 'r3a-preview-fade .25s ease-out',
+          }}
+        >
+          <img
+            src={capturePreviewUrl}
+            alt="Capture preview"
+            style={{
+              maxWidth: '92vw',
+              maxHeight: '90vh',
+              objectFit: 'contain',
+              boxShadow: '0 20px 60px rgba(0,0,0,.6)',
+              animation: 'r3a-preview-zoom .35s ease-out',
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 40,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              padding: '10px 26px',
+              background: 'rgba(239,63,37,.92)',
+              color: '#fff',
+              fontWeight: 700,
+              letterSpacing: '.18em',
+              fontSize: 14,
+              borderRadius: 50,
+              fontFamily: "'Space Grotesk', sans-serif",
+            }}
+          >
+            FOTO {Math.min(captures.length, totalCapturesNeeded)} / {totalCapturesNeeded}
+          </div>
+          <style>{`
+            @keyframes r3a-preview-fade {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes r3a-preview-zoom {
+              from { transform: scale(.88); }
+              to { transform: scale(1); }
+            }
+          `}</style>
+        </div>
+      ) : null}
+
       {phase === 'live' || phase === 'countdown' ? (
         <>
           <div className="photobooth-header photobooth-guest-header">
@@ -1107,7 +1196,8 @@ export const PhotoboothSession = ({
               <>
                 <div className="photobooth-video-wrap">
                   <CameraPreview stream={stream} mirror={cameraSettings.mirror} aspectRatio={cameraSettings.aspectRatio} className="photobooth-video" />
-                  {phase === 'countdown' ? (
+                  {/* ⚠️ Countdown overlay hanya tampil kalau countdown > 0 (bukan saat 0 / preview) */}
+                  {phase === 'countdown' && countdown > 0 ? (
                     <div className="countdown-overlay"><span className="countdown-number">{countdown}</span></div>
                   ) : null}
                 </div>
@@ -1125,11 +1215,11 @@ export const PhotoboothSession = ({
           </section>
           <div className="photobooth-controls">
             <button className="photobooth-capture" type="button" disabled={!stream || phase === 'countdown' || totalCapturesNeeded === 0} onClick={handleCapture}>
-              <Camera size={32} /> {phase === 'countdown' ? 'CAPTURING...' : 'CAPTURE'}
+              <Camera size={32} /> {phase === 'countdown' ? `AUTO ${currentCaptureIndex + 1}/${totalCapturesNeeded}` : `CAPTURE ALL (${totalCapturesNeeded})`}
             </button>
           </div>
           <div className="photobooth-camera-status"><CameraStatusBadge status={status} error={error} /></div>
-          <div className="photobooth-capture-info"><span>PHOTO {currentCaptureIndex + 1} / {totalCapturesNeeded}</span></div>
+          <div className="photobooth-capture-info"><span>PHOTO {Math.min(currentCaptureIndex + 1, totalCapturesNeeded)} / {totalCapturesNeeded}</span></div>
           {captureError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div> : null}
           {guestError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div> : null}
           <div className="photobooth-slots">
