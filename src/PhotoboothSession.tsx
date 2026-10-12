@@ -247,7 +247,6 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   }
   ctx.restore();
 
-  // ⚠️ Overlay slot frame PNG — fit-to-fit di atas foto
   if (frame.slotFrameImage) {
     try {
       const overlay = await loadImage(frame.slotFrameImage);
@@ -440,18 +439,6 @@ export const PhotoboothSession = ({
   const allSlots = activeFrame?.slots ?? [];
   const uniqueCaptureIds = useMemo(() => getUniqueCaptureIds(allSlots), [allSlots]);
   const totalCapturesNeeded = uniqueCaptureIds.length;
-
-  const uniqueSlotsForPreview = useMemo(() => {
-    const seen = new Set<string>();
-    const result: Slot[] = [];
-    for (const s of allSlots) {
-      if (!seen.has(s.captureId)) {
-        seen.add(s.captureId);
-        result.push(s);
-      }
-    }
-    return result;
-  }, [allSlots]);
 
   useEffect(() => {
     eventOpenedAtRef.current = Date.now();
@@ -767,7 +754,6 @@ export const PhotoboothSession = ({
       const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
       const slotPhotos: { index: number; dataUrl: string }[] = [];
 
-      // ⚠️ Generate slot photos — HANYA NON-COPY
       const seenCaptureIds = new Set<string>();
       let photoIndex = 1;
       for (const slot of allSlots) {
@@ -1180,46 +1166,59 @@ export const PhotoboothSession = ({
           <div className="photobooth-capture-info"><span>PHOTO {Math.min(currentCaptureIndex + 1, totalCapturesNeeded)} / {totalCapturesNeeded}</span></div>
           {captureError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div> : null}
           {guestError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div> : null}
+
+          {/* ⚠️ FRAME PREVIEW — 1 full frame dengan foto di posisi slot */}
           <div className="photobooth-slots">
-            {uniqueSlotsForPreview.length === 0 ? <p className="photobooth-no-slots">No slots configured for this frame.</p> : null}
-            {uniqueSlotsForPreview.map((slot) => {
-              const filled = captureMap.has(slot.captureId);
-              const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
-              const captureUrl = captureMap.get(slot.captureId);
-              const frameSliceStyle = activeFrame?.image ? {
-                backgroundImage: `url(${activeFrame.image})`,
-                backgroundSize: `${(100 / slot.w) * 100}% ${(100 / slot.h) * 100}%`,
-                backgroundPosition: `-${(slot.x / slot.w) * 100}% -${(slot.y / slot.h) * 100}%`,
-                backgroundRepeat: 'no-repeat',
-              } : undefined;
-              return (
-                <div
-                  key={slot.id}
-                  className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}
-                  style={{ position: 'relative' }}
-                >
-                  {filled && captureUrl ? (
-                    <>
-                      <img
-                        src={captureUrl}
-                        alt={slot.captureId}
-                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                      {frameSliceStyle ? (
-                        <div style={{ position: 'absolute', inset: 0, ...frameSliceStyle }} />
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      {frameSliceStyle ? (
-                        <div style={{ position: 'absolute', inset: 0, ...frameSliceStyle }} />
-                      ) : null}
-                      <span style={{ position: 'relative', zIndex: 1 }}>{slot.captureId}</span>
-                    </>
-                  )}
-                </div>
-              );
-            })}
+            <div
+              className="photobooth-frame-preview"
+              style={{
+                position: 'relative',
+                width: '100%',
+                aspectRatio: String(frameAspect),
+                background: '#2a2522',
+                overflow: 'hidden',
+                borderRadius: 8,
+              }}
+            >
+              {allSlots.map((slot) => {
+                const cap = captureMap.get(slot.captureId);
+                if (!cap) return null;
+                const isNext = uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
+                return (
+                  <img
+                    key={slot.id}
+                    src={cap}
+                    alt={slot.captureId}
+                    style={{
+                      position: 'absolute',
+                      left: `${slot.x}%`,
+                      top: `${slot.y}%`,
+                      width: `${slot.w}%`,
+                      height: `${slot.h}%`,
+                      objectFit: 'cover',
+                      zIndex: 1,
+                      outline: isNext ? '2px solid #ef3f25' : 'none',
+                      outlineOffset: -2,
+                    }}
+                  />
+                );
+              })}
+              {activeFrame?.image ? (
+                <img
+                  src={activeFrame.image}
+                  alt=""
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'fill',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
+              ) : null}
+            </div>
           </div>
         </>
       ) : null}
