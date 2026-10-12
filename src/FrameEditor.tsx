@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
-import { Copy, Plus, Trash2, Upload, X } from 'lucide-react';
+import { Copy, Plus, Trash2, Upload, X, Lock } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
+import { loadCameraSettings, getAspectRatioValue } from './cameraStore';
 import type { Frame, Slot } from './eventStore';
 
 type DragState = {
@@ -26,7 +27,7 @@ export const FrameEditor = ({
 }: {
   frame: Frame;
   onSlotsChange: (slots: Slot[]) => void;
-  onAddSlot: (captureId: string) => void;
+  onAddSlot: (captureId: string, w: number, h: number) => void;
   onDuplicateSlot: (slot: Slot) => void;
   onDeleteSlot: (slotId: string) => void;
   onUploadImage: (file: File) => void;
@@ -37,6 +38,7 @@ export const FrameEditor = ({
   const [drag, setDrag] = useState<DragState | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [frameAspect, setFrameAspect] = useState(3 / 2);
+  const [cameraAspect, setCameraAspect] = useState(16 / 9);
 
   useEffect(() => {
     if (!frame.image) { setFrameAspect(3 / 2); return; }
@@ -44,6 +46,14 @@ export const FrameEditor = ({
     img.onload = () => setFrameAspect(img.naturalWidth / img.naturalHeight);
     img.src = frame.image;
   }, [frame.image]);
+
+  /* Baca aspect ratio kamera dari localStorage */
+  useEffect(() => {
+    try {
+      const cam = loadCameraSettings();
+      setCameraAspect(getAspectRatioValue(cam.aspectRatio));
+    } catch { /* keep default */ }
+  }, []);
 
   const selectedSlot = frame.slots.find((s) => s.id === selectedSlotId) ?? null;
 
@@ -69,14 +79,49 @@ export const FrameEditor = ({
 
     onSlotsChange(frame.slots.map((s) => {
       if (s.id !== drag.slotId) return s;
+
+      // MOVE — bebas
       if (drag.mode === 'move') {
-        return { ...s, x: Math.max(0, Math.min(100 - s.w, drag.origX + dxPct)), y: Math.max(0, Math.min(100 - s.h, drag.origY + dyPct)) };
+        return {
+          ...s,
+          x: Math.max(0, Math.min(100 - s.w, drag.origX + dxPct)),
+          y: Math.max(0, Math.min(100 - s.h, drag.origY + dyPct)),
+        };
       }
-      const newW = Math.max(5, Math.min(100 - s.x, drag.origW + dxPct));
-      const newH = Math.max(5, Math.min(100 - s.y, drag.origH + dyPct));
-      return { ...s, w: newW, h: newH };
+
+      // ⚠️ RESIZE — rasio terkunci
+      const slotAspect = drag.origW / drag.origH; // %-ratio, dijaga konstan
+      const canvasAspect = frameAspect || 1;
+
+      // Dominan delta mana yang dipakai?
+      const useWidth = Math.abs(dxPct) >= Math.abs(dyPct);
+
+      let proposedW: number;
+      let proposedH: number;
+
+      if (useWidth) {
+        proposedW = drag.origW + dxPct;
+        proposedH = proposedW / slotAspect;
+      } else {
+        proposedH = drag.origH + dyPct;
+        proposedW = proposedH * slotAspect;
+      }
+
+      // Clamp min 5%
+      if (proposedW < 5) { proposedW = 5; proposedH = proposedW / slotAspect; }
+      if (proposedH < 5) { proposedH = 5; proposedW = proposedH * slotAspect; }
+
+      // Clamp max ke canvas bounds
+      const maxW = 100 - s.x;
+      const maxH = 100 - s.y;
+      if (proposedW > maxW) { proposedW = maxW; proposedH = proposedW / slotAspect; }
+      if (proposedH > maxH) { proposedH = maxH; proposedW = proposedH * slotAspect; }
+
+      void canvasAspect;
+
+      return { ...s, w: proposedW, h: proposedH };
     }));
-  }, [drag, frame.slots, getRectPct, onSlotsChange]);
+  }, [drag, frame.slots, frameAspect, getRectPct, onSlotsChange]);
 
   const handleMouseUp = useCallback(() => setDrag(null), []);
 
@@ -96,10 +141,32 @@ export const FrameEditor = ({
     e.target.value = '';
   };
 
+  /* ⚠️ Slot baru: hitung w/h supaya pixel-aspect = camera aspect
+     slot.w / slot.h = cameraAspect / canvasAspect
+     (karena slot.w pakai % dari canvasWidth, slot.h pakai % dari canvasHeight) */
+  const handleAddSlot = () => {
+    const captureId = `cap-${frame.slots.length + 1}`;
+    const canvasAspect = frameAspect || 1;
+    const slotAspectPct = cameraAspect / canvasAspect;
+
+    // Default lebar 40%
+    let w = 40;
+    let h = w / slotAspectPct;
+
+    // Clamp tinggi maksimal 60%
+    if (h > 60) { h = 60; w = h * slotAspectPct; }
+    // Clamp lebar maksimal 80%
+    if (w > 80) { w = 80; h = w / slotAspectPct; }
+
+    onAddSlot(captureId, w, h);
+  };
+
+  const isRatioLocked = true; // resize selalu terkunci
+
   return (
     <div className="frame-editor">
       <div className="frame-editor-toolbar">
-        <button type="button" onClick={() => onAddSlot(`cap-${frame.slots.length + 1}`)}><Plus size={16} /> ADD SLOT</button>
+        <button type="button" onClick={handleAddSlot}><Plus size={16} /> ADD SLOT</button>
         {selectedSlotId ? <button type="button" onClick={() => { const s = frame.slots.find((sl) => sl.id === selectedSlotId); if (s) onDuplicateSlot(s); }}><Copy size={16} /> DUPLICATE</button> : null}
         {selectedSlotId ? <button type="button" onClick={() => { onDeleteSlot(selectedSlotId); setSelectedSlotId(null); }}><Trash2 size={16} /> DELETE</button> : null}
         <label className="frame-upload-label">
@@ -144,12 +211,22 @@ export const FrameEditor = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'start' }}>
           {selectedSlot ? (
             <div className="frame-slot-inspector">
-              <div className="inspector-header">SLOT INSPECTOR</div>
+              <div className="inspector-header">
+                SLOT INSPECTOR
+                {isRatioLocked ? (
+                  <span style={{ float: 'right', fontSize: 10, color: '#ffd94e', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Lock size={10} /> RATIO
+                  </span>
+                ) : null}
+              </div>
               <div className="inspector-row"><span>CAPTURE ID</span><strong>{selectedSlot.captureId}</strong></div>
               <div className="inspector-row"><span>X</span><strong>{Math.round(selectedSlot.x)}%</strong></div>
               <div className="inspector-row"><span>Y</span><strong>{Math.round(selectedSlot.y)}%</strong></div>
               <div className="inspector-row"><span>W</span><strong>{Math.round(selectedSlot.w)}%</strong></div>
               <div className="inspector-row"><span>H</span><strong>{Math.round(selectedSlot.h)}%</strong></div>
+              <p style={{ margin: '8px 0 0', fontSize: 10, color: 'rgba(255,255,255,.4)', lineHeight: 1.4 }}>
+                Rasio terkunci saat resize — tetap proporsional seperti kamera.
+              </p>
             </div>
           ) : (
             <div className="frame-slot-inspector frame-slot-inspector-empty">
@@ -158,7 +235,6 @@ export const FrameEditor = ({
             </div>
           )}
 
-          {/* ⚠️ WATERMARK PANEL — preview PNG slot frame */}
           <div className="frame-slot-inspector">
             <div className="inspector-header">WATERMARK</div>
             {frame.slotFrameImage ? (

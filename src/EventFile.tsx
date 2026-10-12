@@ -59,9 +59,9 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
 
   const updateFrameSlots = (index: number, slots: Slot[]) => updateFrame(index, { slots });
 
-  const addSlotToFrame = (frameIndex: number, captureId: string) => {
-    const slot = createSlot(captureId);
-    updateFrame(frameIndex, { slots: [...draft.frames[frameIndex].slots, slot] });
+  const addSlotToFrame = (frameIndex: number, captureId: string, w: number, h: number) => {
+   const slot = createSlot(captureId, w, h);
+   updateFrame(frameIndex, { slots: [...draft.frames[frameIndex].slots, slot] });
   };
 
   const duplicateSlotInFrame = (frameIndex: number, slot: Slot) => {
@@ -213,7 +213,7 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                   <FrameEditor
                     frame={activeFrame}
                     onSlotsChange={(slots) => updateFrameSlots(activeFrameIndex, slots)}
-                    onAddSlot={(captureId) => addSlotToFrame(activeFrameIndex, captureId)}
+                    onAddSlot={(captureId, w, h) => addSlotToFrame(activeFrameIndex, captureId, w, h)}
                     onDuplicateSlot={(slot) => duplicateSlotInFrame(activeFrameIndex, slot)}
                     onDeleteSlot={(slotId) => deleteSlotFromFrame(activeFrameIndex, slotId)}
                     onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}

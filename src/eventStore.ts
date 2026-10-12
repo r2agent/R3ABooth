@@ -221,14 +221,14 @@ export function createFrame(name: string, image: string): Frame {
   };
 }
 
-export function createSlot(captureId: string): Slot {
+export function createSlot(captureId: string, w = 30, h = 20): Slot {
   return {
     id: `slt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     captureId,
     x: 10,
     y: 10,
-    w: 30,
-    h: 30,
+    w,
+    h,
   };
 }
 
