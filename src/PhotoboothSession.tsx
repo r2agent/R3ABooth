@@ -247,7 +247,7 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   }
   ctx.restore();
 
-  // ⚠️ NEW: Overlay slot frame PNG — fit-to-fit di atas foto
+  // ⚠️ Overlay slot frame PNG — fit-to-fit di atas foto
   if (frame.slotFrameImage) {
     try {
       const overlay = await loadImage(frame.slotFrameImage);
@@ -767,35 +767,21 @@ export const PhotoboothSession = ({
       const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
       const slotPhotos: { index: number; dataUrl: string }[] = [];
 
-      /* ============================================================
-         ⚠️ Generate slot photos — HANYA SLOT UTAMA (non-copy)
-         - Slot "utama" = slot PERTAMA dengan captureId tertentu
-         - Slot "copy" = slot dengan captureId yang sudah pernah muncul
-         - Nomor file (slot-01, slot-02, ...) dihitung ulang dari 1
-         ============================================================ */
+      // ⚠️ Generate slot photos — HANYA NON-COPY
       const seenCaptureIds = new Set<string>();
       let photoIndex = 1;
       for (const slot of allSlots) {
-        if (seenCaptureIds.has(slot.captureId)) {
-          // Slot copy — skip
-          continue;
-        }
+        if (seenCaptureIds.has(slot.captureId)) continue;
         seenCaptureIds.add(slot.captureId);
 
         const cap = captureMap.get(slot.captureId);
-        if (!cap) {
-          console.warn('[SlotPhoto] captureId tidak ada di captures:', slot.captureId);
-          continue;
-        }
+        if (!cap) continue;
         try {
           const slotDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
           slotPhotos.push({ index: photoIndex, dataUrl: slotDataUrl });
           photoIndex++;
-        } catch (err) {
-          console.warn('[SlotPhoto] Gagal generate slot', slot.captureId, err);
-        }
+        } catch { /* skip */ }
       }
-      console.log('[SlotPhoto] Generated:', slotPhotos.length, 'dari total', allSlots.length, 'slot');
 
       let slideshowVideo: string | null = null;
       if (allSettings.storage.saveVideos) {
@@ -832,17 +818,13 @@ export const PhotoboothSession = ({
       const uploadFailCount = 0;
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
-        // ⚠️ Upload: final + slot UTAMA (non-copy) + video
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
           ...slotPhotos.map((sp) => ({ fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`, dataUrl: sp.dataUrl })),
           ...(slideshowVideo ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }] : []),
         ];
-        console.log('[Upload] Files yang akan di-upload:', uploadFiles.map((f) => f.fileName));
-        // ⚠️ Await biar bisa log hasil + tidak silent fail
-        const uploadResult = await autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
-        console.log('[Upload] Hasil:', uploadResult);
-        uploadSuccessCount = uploadResult.uploaded;
+        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
+        uploadSuccessCount = uploadFiles.length;
       }
 
       try {
@@ -851,9 +833,7 @@ export const PhotoboothSession = ({
       } catch { /* ignore */ }
 
       setSaved(true);
-    } catch (err) {
-      console.error('[Save] Error:', err);
-    } finally {
+    } catch { /* ignore */ } finally {
       setSaving(false);
     }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
@@ -1205,9 +1185,42 @@ export const PhotoboothSession = ({
             {uniqueSlotsForPreview.map((slot) => {
               const filled = captureMap.has(slot.captureId);
               const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
+              const bgStyle = activeFrame?.image ? {
+                backgroundImage: `url(${activeFrame.image})`,
+                backgroundSize: `${(100 / slot.w) * 100}% ${(100 / slot.h) * 100}%`,
+                backgroundPosition: `-${(slot.x / slot.w) * 100}% -${(slot.y / slot.h) * 100}%`,
+                backgroundRepeat: 'no-repeat',
+              } : undefined;
               return (
-                <div key={slot.id} className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}>
-                  {filled ? <img src={captureMap.get(slot.captureId)} alt={slot.captureId} /> : <span>{slot.captureId}</span>}
+                <div
+                  key={slot.id}
+                  className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}
+                  style={{ position: 'relative' }}
+                >
+                  {filled ? (
+                    <img src={captureMap.get(slot.captureId)} alt={slot.captureId} />
+                  ) : (
+                    <>
+                      {bgStyle ? (
+                        <div style={{ position: 'absolute', inset: 0, ...bgStyle }} />
+                      ) : null}
+                      {activeFrame?.slotFrameImage ? (
+                        <img
+                          src={activeFrame.slotFrameImage}
+                          alt=""
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'fill',
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      ) : null}
+                      <span style={{ position: 'relative', zIndex: 1 }}>{slot.captureId}</span>
+                    </>
+                  )}
                 </div>
               );
             })}
