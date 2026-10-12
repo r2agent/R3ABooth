@@ -325,9 +325,7 @@ export const PhotoboothSession = ({
   const [frameAspect, setFrameAspect] = useState(3 / 2);
   const [framesReady, setFramesReady] = useState(false);
 
-  /* ============================================================
-     ⚠️ AUTO-RESTART KAMERA
-     ============================================================ */
+  /* AUTO-RESTART KAMERA */
   useEffect(() => {
     if (phase !== 'ready') return;
     if (status === 'connected' || status === 'connecting') return;
@@ -343,9 +341,7 @@ export const PhotoboothSession = ({
     return () => window.removeEventListener(RESTART_CAMERA_EVENT, handler);
   }, [forceRestart]);
 
-  /* ============================================================
-     ⚠️ REMOTE COMMAND OVERLAYS — pure DOM
-     ============================================================ */
+  /* REMOTE COMMAND OVERLAYS */
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!pendingFullscreen) return;
@@ -353,18 +349,11 @@ export const PhotoboothSession = ({
     const host = document.createElement('div');
     host.setAttribute('data-r3a-overlay', 'fullscreen');
     host.style.cssText = [
-      'position: fixed',
-      'inset: 0',
-      'z-index: 2147483647',
-      'background: rgba(0,0,0,.85)',
-      'display: flex',
-      'align-items: center',
-      'justify-content: center',
-      'cursor: pointer',
-      'color: #fff',
-      'text-align: center',
-      'padding: 32px',
-      "font-family: 'DM Sans', sans-serif",
+      'position: fixed', 'inset: 0', 'z-index: 2147483647',
+      'background: rgba(0,0,0,.85)', 'display: flex',
+      'align-items: center', 'justify-content: center',
+      'cursor: pointer', 'color: #fff', 'text-align: center',
+      'padding: 32px', "font-family: 'DM Sans', sans-serif",
     ].join(';');
 
     host.innerHTML = `
@@ -400,18 +389,11 @@ export const PhotoboothSession = ({
     const host = document.createElement('div');
     host.setAttribute('data-r3a-overlay', 'refresh-token');
     host.style.cssText = [
-      'position: fixed',
-      'inset: 0',
-      'z-index: 2147483647',
-      'background: rgba(0,0,0,.85)',
-      'display: flex',
-      'align-items: center',
-      'justify-content: center',
-      'cursor: pointer',
-      'color: #fff',
-      'text-align: center',
-      'padding: 32px',
-      "font-family: 'DM Sans', sans-serif",
+      'position: fixed', 'inset: 0', 'z-index: 2147483647',
+      'background: rgba(0,0,0,.85)', 'display: flex',
+      'align-items: center', 'justify-content: center',
+      'cursor: pointer', 'color: #fff', 'text-align: center',
+      'padding: 32px', "font-family: 'DM Sans', sans-serif",
     ].join(';');
 
     host.innerHTML = `
@@ -521,7 +503,6 @@ export const PhotoboothSession = ({
     return () => { void clearStatus(); };
   }, []);
 
-  /* SCREENSAVER DETECTION */
   useEffect(() => {
     const check = () => {
       const isSaver = document.querySelector('.screensaver-overlay') !== null;
@@ -532,7 +513,6 @@ export const PhotoboothSession = ({
     return () => clearInterval(id);
   }, []);
 
-  /* COMMAND LISTENER */
   useEffect(() => {
     const deviceId = getDeviceId();
     const unsubscribe = subscribeCommands(deviceId, (cmd) => {
@@ -682,7 +662,6 @@ export const PhotoboothSession = ({
     setCountdown(5);
   }, [phase, isVideoReady]);
 
-  /* COUNTDOWN → CAPTURE + set PREVIEW */
   useEffect(() => {
     if (phase !== 'countdown' || countdown === 0) return;
     let preFlashTimer: ReturnType<typeof setTimeout> | null = null;
@@ -721,14 +700,12 @@ export const PhotoboothSession = ({
     return () => { clearTimeout(timer); if (preFlashTimer) clearTimeout(preFlashTimer); };
   }, [phase, countdown, currentCaptureIndex, totalCapturesNeeded, uniqueCaptureIds, cameraSettings.mirror, event.id, isVideoReady]);
 
-  /* AUTO-CLEAR PREVIEW setelah 2 detik */
   useEffect(() => {
     if (!capturePreviewUrl) return;
     const t = setTimeout(() => setCapturePreviewUrl(null), 2000);
     return () => clearTimeout(t);
   }, [capturePreviewUrl]);
 
-  /* AUTO-CHAIN */
   useEffect(() => {
     if (phase !== 'countdown') return;
     if (countdown !== 0) return;
@@ -782,15 +759,36 @@ export const PhotoboothSession = ({
 
       const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
       const slotPhotos: { index: number; dataUrl: string }[] = [];
-      for (let i = 0; i < allSlots.length; i++) {
-        const slot = allSlots[i];
+
+      /* ============================================================
+         ⚠️ Generate slot photos — HANYA SLOT UTAMA (non-copy)
+         - Slot "utama" = slot PERTAMA dengan captureId tertentu
+         - Slot "copy" = slot dengan captureId yang sudah pernah muncul
+         - Nomor file (slot-01, slot-02, ...) dihitung ulang dari 1
+         ============================================================ */
+      const seenCaptureIds = new Set<string>();
+      let photoIndex = 1;
+      for (const slot of allSlots) {
+        if (seenCaptureIds.has(slot.captureId)) {
+          // Slot copy — skip
+          continue;
+        }
+        seenCaptureIds.add(slot.captureId);
+
         const cap = captureMap.get(slot.captureId);
-        if (!cap) continue;
+        if (!cap) {
+          console.warn('[SlotPhoto] captureId tidak ada di captures:', slot.captureId);
+          continue;
+        }
         try {
           const slotDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
-          slotPhotos.push({ index: i + 1, dataUrl: slotDataUrl });
-        } catch { /* skip */ }
+          slotPhotos.push({ index: photoIndex, dataUrl: slotDataUrl });
+          photoIndex++;
+        } catch (err) {
+          console.warn('[SlotPhoto] Gagal generate slot', slot.captureId, err);
+        }
       }
+      console.log('[SlotPhoto] Generated:', slotPhotos.length, 'dari total', allSlots.length, 'slot');
 
       let slideshowVideo: string | null = null;
       if (allSettings.storage.saveVideos) {
@@ -827,13 +825,17 @@ export const PhotoboothSession = ({
       const uploadFailCount = 0;
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
-        // ⚠️ Slot photos TIDAK di-upload ke Drive — cuma final + video
+        // ⚠️ Upload: final + slot UTAMA (non-copy) + video
         const uploadFiles: UploadFileEntry[] = [
           { fileName: 'final.jpg', dataUrl: compositeUrl },
+          ...slotPhotos.map((sp) => ({ fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`, dataUrl: sp.dataUrl })),
           ...(slideshowVideo ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }] : []),
         ];
-        void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
-        uploadSuccessCount = uploadFiles.length;
+        console.log('[Upload] Files yang akan di-upload:', uploadFiles.map((f) => f.fileName));
+        // ⚠️ Await biar bisa log hasil + tidak silent fail
+        const uploadResult = await autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
+        console.log('[Upload] Hasil:', uploadResult);
+        uploadSuccessCount = uploadResult.uploaded;
       }
 
       try {
@@ -842,7 +844,9 @@ export const PhotoboothSession = ({
       } catch { /* ignore */ }
 
       setSaved(true);
-    } catch { /* ignore */ } finally {
+    } catch (err) {
+      console.error('[Save] Error:', err);
+    } finally {
       setSaving(false);
     }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
@@ -1116,13 +1120,9 @@ export const PhotoboothSession = ({
       {capturePreviewUrl ? (
         <div
           style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 150,
-            background: 'rgba(0,0,0,.92)',
-            display: 'grid',
-            placeItems: 'center',
-            pointerEvents: 'none',
+            position: 'fixed', inset: 0, zIndex: 150,
+            background: 'rgba(0,0,0,.92)', display: 'grid',
+            placeItems: 'center', pointerEvents: 'none',
             animation: 'r3a-preview-fade .25s ease-out',
           }}
         >
@@ -1130,8 +1130,7 @@ export const PhotoboothSession = ({
             src={capturePreviewUrl}
             alt="Capture preview"
             style={{
-              maxWidth: '92vw',
-              maxHeight: '90vh',
+              maxWidth: '92vw', maxHeight: '90vh',
               objectFit: 'contain',
               boxShadow: '0 20px 60px rgba(0,0,0,.6)',
               animation: 'r3a-preview-zoom .35s ease-out',
@@ -1139,16 +1138,11 @@ export const PhotoboothSession = ({
           />
           <div
             style={{
-              position: 'absolute',
-              bottom: 40,
-              left: '50%',
+              position: 'absolute', bottom: 40, left: '50%',
               transform: 'translateX(-50%)',
               padding: '10px 26px',
-              background: 'rgba(239,63,37,.92)',
-              color: '#fff',
-              fontWeight: 700,
-              letterSpacing: '.18em',
-              fontSize: 14,
+              background: 'rgba(239,63,37,.92)', color: '#fff',
+              fontWeight: 700, letterSpacing: '.18em', fontSize: 14,
               borderRadius: 50,
               fontFamily: "'Space Grotesk', sans-serif",
             }}
@@ -1156,14 +1150,8 @@ export const PhotoboothSession = ({
             FOTO {Math.min(captures.length, totalCapturesNeeded)} / {totalCapturesNeeded}
           </div>
           <style>{`
-            @keyframes r3a-preview-fade {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-            @keyframes r3a-preview-zoom {
-              from { transform: scale(.88); }
-              to { transform: scale(1); }
-            }
+            @keyframes r3a-preview-fade { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes r3a-preview-zoom { from { transform: scale(.88); } to { transform: scale(1); } }
           `}</style>
         </div>
       ) : null}
