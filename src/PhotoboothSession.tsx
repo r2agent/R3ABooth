@@ -1185,7 +1185,8 @@ export const PhotoboothSession = ({
             {uniqueSlotsForPreview.map((slot) => {
               const filled = captureMap.has(slot.captureId);
               const isNext = !filled && uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
-              const bgStyle = activeFrame?.image ? {
+              const captureUrl = captureMap.get(slot.captureId);
+              const frameSliceStyle = activeFrame?.image ? {
                 backgroundImage: `url(${activeFrame.image})`,
                 backgroundSize: `${(100 / slot.w) * 100}% ${(100 / slot.h) * 100}%`,
                 backgroundPosition: `-${(slot.x / slot.w) * 100}% -${(slot.y / slot.h) * 100}%`,
@@ -1197,26 +1198,21 @@ export const PhotoboothSession = ({
                   className={`photobooth-slot ${filled ? 'filled' : ''} ${isNext ? 'active' : ''}`}
                   style={{ position: 'relative' }}
                 >
-                  {filled ? (
-                    <img src={captureMap.get(slot.captureId)} alt={slot.captureId} />
+                  {filled && captureUrl ? (
+                    <>
+                      <img
+                        src={captureUrl}
+                        alt={slot.captureId}
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      {frameSliceStyle ? (
+                        <div style={{ position: 'absolute', inset: 0, ...frameSliceStyle }} />
+                      ) : null}
+                    </>
                   ) : (
                     <>
-                      {bgStyle ? (
-                        <div style={{ position: 'absolute', inset: 0, ...bgStyle }} />
-                      ) : null}
-                      {activeFrame?.slotFrameImage ? (
-                        <img
-                          src={activeFrame.slotFrameImage}
-                          alt=""
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'fill',
-                            pointerEvents: 'none',
-                          }}
-                        />
+                      {frameSliceStyle ? (
+                        <div style={{ position: 'absolute', inset: 0, ...frameSliceStyle }} />
                       ) : null}
                       <span style={{ position: 'relative', zIndex: 1 }}>{slot.captureId}</span>
                     </>
