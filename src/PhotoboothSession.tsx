@@ -1178,6 +1178,7 @@ export const PhotoboothSession = ({
                 background: '#2a2522',
                 overflow: 'hidden',
                 borderRadius: 8,
+                border: '1px solid rgba(255,255,255,.15)',
               }}
             >
               {allSlots.map((slot) => {
