@@ -1347,4 +1347,3 @@ const HiddenVideoCapture = ({ videoRef, stream }: { videoRef: React.RefObject<HT
   }, [stream, videoRef]);
   return <video ref={videoRef as React.RefObject<HTMLVideoElement>} autoPlay playsInline muted style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 1, height: 1 }} />;
 };
-
