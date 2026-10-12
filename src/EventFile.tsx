@@ -57,6 +57,25 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     setDraft({ ...draft, frames: draft.frames.map((f, i) => (i === index ? { ...f, ...updates } : f)) });
   };
 
+  const applyTransformToAllFrames = () => {
+    const src = draft.frames[activeFrameIndex];
+    if (!src) return;
+    setDraft({
+      ...draft,
+      frames: draft.frames.map((f, i) =>
+        i === activeFrameIndex
+          ? f
+          : {
+              ...f,
+              photoOffsetX: src.photoOffsetX ?? 0,
+              photoOffsetY: src.photoOffsetY ?? 0,
+              photoScale: src.photoScale ?? 1,
+              photoRotation: src.photoRotation ?? 0,
+            },
+      ),
+    });
+  };
+
   const updateFrameSlots = (index: number, slots: Slot[]) => updateFrame(index, { slots });
 
   const addSlotToFrame = (frameIndex: number, captureId: string, w: number, h: number) => {
@@ -220,6 +239,7 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                     onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
                     onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
                     onFrameChange={(updates) => updateFrame(activeFrameIndex, updates)}
+                    onApplyTransformToAll={applyTransformToAllFrames}
                   />
                 ) : (
                   <div className="frame-editor-empty-state">

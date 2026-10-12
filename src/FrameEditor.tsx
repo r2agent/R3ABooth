@@ -1,3 +1,4 @@
+import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check } from 'lucide-react';
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
 import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
@@ -25,6 +26,7 @@ export const FrameEditor = ({
   onUploadSlotFrame,
   onSlotFrameChange,
   onFrameChange,
+  onApplyTransformToAll,
 }: {
   frame: Frame;
   onSlotsChange: (slots: Slot[]) => void;
@@ -35,6 +37,7 @@ export const FrameEditor = ({
   onUploadSlotFrame: (file: File) => void;
   onSlotFrameChange: (dataUrl: string) => void;
   onFrameChange: (updates: Partial<Frame>) => void;
+  onApplyTransformToAll: () => void;
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -288,6 +291,20 @@ export const FrameEditor = ({
               >
                 <RotateCcw size={10} /> RESET
               </button>
+              <button
+                type="button"
+                onClick={onApplyTransFormToAll}
+                title="Apply transform ke semua frame"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                  background: 'rgba(74,222,128,.15)',
+                  border: '1px solid rgba(74,222,128,.5)',
+                  color: '#4ade80',
+                  cursor: 'pointer',
+                }}
+              >
+                <Check size={10} /> APPLY ALL
             </div>
 
             {/* ⚠️ PREVIEW GABUNGAN — FOTO dummy + WATERMARK di atasnya */}
