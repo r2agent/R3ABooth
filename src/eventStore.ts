@@ -12,6 +12,11 @@ export type Frame = {
   name: string;
   image: string;
   slotFrameImage?: string;
+  // ⚠️ NEW: transform foto di slot
+  photoOffsetX?: number;   // -50 to 50 (%)
+  photoOffsetY?: number;   // -50 to 50 (%)
+  photoScale?: number;     // 0.5 to 2.0 (default 1)
+  photoRotation?: number;  // -180 to 180 (deg, default 0)
   slots: Slot[];
 };
 
@@ -71,12 +76,21 @@ function normalizeSlot(slot: Partial<Slot> | null | undefined, index: number): S
   };
 }
 
+function normalizeNumber(v: unknown, fallback: number, min: number, max: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  return Math.max(min, Math.min(max, v));
+}
+
 function normalizeFrame(frame: Partial<Frame> | null | undefined, index: number): Frame {
   return {
     id: typeof frame?.id === 'string' && frame.id ? frame.id : `frm-legacy-${index}`,
     name: typeof frame?.name === 'string' && frame.name ? frame.name : `Frame ${index + 1}`,
     image: typeof frame?.image === 'string' ? frame.image : '',
     slotFrameImage: typeof frame?.slotFrameImage === 'string' ? frame.slotFrameImage : '',
+    photoOffsetX: normalizeNumber(frame?.photoOffsetX, 0, -50, 50),
+    photoOffsetY: normalizeNumber(frame?.photoOffsetY, 0, -50, 50),
+    photoScale: normalizeNumber(frame?.photoScale, 1, 0.5, 2),
+    photoRotation: normalizeNumber(frame?.photoRotation, 0, -180, 180),
     slots: Array.isArray(frame?.slots) ? frame.slots.map((slot, slotIndex) => normalizeSlot(slot, slotIndex)) : [],
   };
 }
@@ -217,6 +231,10 @@ export function createFrame(name: string, image: string): Frame {
     name,
     image,
     slotFrameImage: '',
+    photoOffsetX: 0,
+    photoOffsetY: 0,
+    photoScale: 1,
+    photoRotation: 0,
     slots: [],
   };
 }
@@ -243,11 +261,5 @@ export function duplicateSlot(slot: Slot): Slot {
 
 /* ============================================================
    ⚠️ CATATAN PENTING
-   
-   Cloud sync functions (publishEventToCloud, fetchEventFromCloud,
-   dll) SUDAH TIDAK ADA di sini — untuk menghindari circular dependency.
-   
-   Kalau butuh fungsi cloud, import langsung dari './cloudEventSync':
-   
-   import { publishEventToCloud } from './cloudEventSync';
+   Cloud sync functions dipindah ke './cloudEventSync'.
    ============================================================ */

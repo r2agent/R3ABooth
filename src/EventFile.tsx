@@ -219,6 +219,7 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                     onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}
                     onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
                     onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
+                    onFrameChange={(updates) => updateFrame(activeFrameIndex, updates)}
                   />
                 ) : (
                   <div className="frame-editor-empty-state">

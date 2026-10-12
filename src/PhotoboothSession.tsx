@@ -177,6 +177,9 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
   ctx.fillStyle = '#2a2522';
   ctx.fillRect(0, 0, fw, fh);
 
+  const scale = frame.photoScale ?? 1;
+  const rotation = ((frame.photoRotation ?? 0) * Math.PI) / 180;
+
   for (const slot of frame.slots) {
     const cap = captures.get(slot.captureId);
     if (!cap) continue;
@@ -186,20 +189,37 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
       const sy = (slot.y / 100) * fh;
       const sw = (slot.w / 100) * fw;
       const sh = (slot.h / 100) * fh;
+
+      const offsetX = ((frame.photoOffsetX ?? 0) / 100) * sw;
+      const offsetY = ((frame.photoOffsetY ?? 0) / 100) * sh;
+
       const filterId = captureFilters.get(slot.captureId) || 'natural';
       const glow = isGlowFilter(filterId);
       const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+
+      // Cover-style foto ke slot
+      const photoAspect = photo.naturalWidth / photo.naturalHeight;
+      const slotAspect = sw / sh;
+      let drawW: number, drawH: number;
+      if (photoAspect > slotAspect) {
+        drawH = sh;
+        drawW = sh * photoAspect;
+      } else {
+        drawW = sw;
+        drawH = sw / photoAspect;
+      }
 
       ctx.save();
       ctx.beginPath();
       ctx.rect(sx, sy, sw, sh);
       ctx.clip();
+      ctx.translate(sx + sw / 2 + offsetX, sy + sh / 2 + offsetY);
+      ctx.rotate(rotation);
+      ctx.scale(scale, scale);
       ctx.filter = baseCss;
-      drawPhotoCovered(ctx, photo, sx, sy, sw, sh);
+      ctx.drawImage(photo, -drawW / 2, -drawH / 2, drawW, drawH);
       ctx.filter = 'none';
-      if (glow) {
-        applyGlowToCanvas(ctx, photo, sx, sy, sw, sh);
-      }
+      if (glow) applyGlowToCanvas(ctx, photo, -drawW / 2, -drawH / 2, drawW, drawH);
       ctx.restore();
     } catch { /* skip failed slot */ }
   }
@@ -213,44 +233,51 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
 
 async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
   void slot;
-  const TARGET_ASPECT = 16 / 9;
+  const CANVAS_W = 1920;
+  const CANVAS_H = 1080;
 
   const photo = await loadImage(captureDataUrl);
-  const photoAspect = photo.naturalWidth / photo.naturalHeight;
-
-  let cropWidth: number;
-  let cropHeight: number;
-  if (TARGET_ASPECT > photoAspect) {
-    cropWidth = photo.naturalWidth;
-    cropHeight = cropWidth / TARGET_ASPECT;
-  } else {
-    cropHeight = photo.naturalHeight;
-    cropWidth = cropHeight * TARGET_ASPECT;
-  }
-  const cropX = (photo.naturalWidth - cropWidth) / 2;
-  const cropY = (photo.naturalHeight - cropHeight) / 2;
-
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(cropWidth);
-  canvas.height = Math.round(cropHeight);
+  canvas.width = CANVAS_W;
+  canvas.height = CANVAS_H;
   const ctx = canvas.getContext('2d')!;
+
+  // Transform per frame
+  const scale = frame.photoScale ?? 1;
+  const rotation = ((frame.photoRotation ?? 0) * Math.PI) / 180;
+  const offsetX = ((frame.photoOffsetX ?? 0) / 100) * CANVAS_W;
+  const offsetY = ((frame.photoOffsetY ?? 0) / 100) * CANVAS_H;
 
   const glow = isGlowFilter(filterId);
   const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
 
-  ctx.save();
-  ctx.filter = baseCss;
-  ctx.drawImage(photo, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
-  ctx.filter = 'none';
-  if (glow) {
-    applyGlowToCanvas(ctx, photo, 0, 0, canvas.width, canvas.height);
+  // Cover-style foto ke canvas
+  const photoAspect = photo.naturalWidth / photo.naturalHeight;
+  const canvasAspect = CANVAS_W / CANVAS_H;
+  let drawW: number, drawH: number;
+  if (photoAspect > canvasAspect) {
+    drawH = CANVAS_H;
+    drawW = CANVAS_H * photoAspect;
+  } else {
+    drawW = CANVAS_W;
+    drawH = CANVAS_W / photoAspect;
   }
+
+  ctx.save();
+  ctx.translate(CANVAS_W / 2 + offsetX, CANVAS_H / 2 + offsetY);
+  ctx.rotate(rotation);
+  ctx.scale(scale, scale);
+  ctx.filter = baseCss;
+  ctx.drawImage(photo, -drawW / 2, -drawH / 2, drawW, drawH);
+  ctx.filter = 'none';
+  if (glow) applyGlowToCanvas(ctx, photo, -drawW / 2, -drawH / 2, drawW, drawH);
   ctx.restore();
 
+  // Overlay watermark PNG
   if (frame.slotFrameImage) {
     try {
       const overlay = await loadImage(frame.slotFrameImage);
-      ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(overlay, 0, 0, CANVAS_W, CANVAS_H);
     } catch { /* skip */ }
   }
 
