@@ -24,9 +24,16 @@ import {
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
+<Accept Current Change | Accept Incoming Change | Accept Both Changes | Compare Changes
+import { IGFollowGate } from './IGFollowGate';
+import { loadAppVersion } from './versionStore';
+=======
 import { IGFollowGate } from './IGFollowGate';
 import { loadAppVersion } from './versionStore';
 import igGateImage from './assets/ig-gate.jpg';
+>>>>>>> 58527b659aad0feee0a85f995d2531c762b510e5
+
+const igGateImage = '/ig-gate.jpg';
 
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
@@ -200,7 +207,6 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
       const glow = isGlowFilter(filterId);
       const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
 
-      // Cover-style foto ke slot
       const photoAspect = photo.naturalWidth / photo.naturalHeight;
       const slotAspect = sw / sh;
       let drawW: number, drawH: number;
@@ -245,7 +251,6 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   canvas.height = CANVAS_H;
   const ctx = canvas.getContext('2d')!;
 
-  // Transform per frame
   const scale = frame.photoScale ?? 1;
   const rotation = ((frame.photoRotation ?? 0) * Math.PI) / 180;
   const offsetX = ((frame.photoOffsetX ?? 0) / 100) * CANVAS_W;
@@ -254,7 +259,6 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   const glow = isGlowFilter(filterId);
   const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
 
-  // Cover-style foto ke canvas
   const photoAspect = photo.naturalWidth / photo.naturalHeight;
   const canvasAspect = CANVAS_W / CANVAS_H;
   let drawW: number, drawH: number;
@@ -276,7 +280,6 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   if (glow) applyGlowToCanvas(ctx, photo, -drawW / 2, -drawH / 2, drawW, drawH);
   ctx.restore();
 
-  // Overlay watermark PNG
   if (frame.slotFrameImage) {
     try {
       const overlay = await loadImage(frame.slotFrameImage);
@@ -646,6 +649,17 @@ export const PhotoboothSession = ({
   }, []);
 
   const handleSelectFrame = useCallback((index: number) => {
+<<<<<<< HEAD
+    const version = loadAppVersion();
+    const gateEnabled = allSettings.system.igGateEnabled !== false;
+
+    if (version === 'v1.0.0' && gateEnabled) {
+      setPendingFrameIndex(index);
+      setShowIGGate(true);
+      return;
+    }
+
+=======
     const version = loadAppVersion();
     const gateEnabled = allSettings.system.igGateEnabled !== false;
 
@@ -656,11 +670,24 @@ export const PhotoboothSession = ({
       return;
     }
 
+>>>>>>> 58527b659aad0feee0a85f995d2531c762b510e5
     setSelectedFrameIndex(index);
     resetSession();
     setPhase('ready');
   }, [resetSession, allSettings.system.igGateEnabled]);
 
+<<<<<<< HEAD
+  const handleIGGateDismiss = useCallback(() => {
+    if (pendingFrameIndex !== null) {
+      setSelectedFrameIndex(pendingFrameIndex);
+      setPendingFrameIndex(null);
+    }
+    resetSession();
+    setShowIGGate(false);
+    setPhase('ready');
+  }, [pendingFrameIndex, resetSession]);
+
+=======
   const handleIGGateDismiss = useCallback(() => {
     if (pendingFrameIndex !== null) {
       setSelectedFrameIndex(pendingFrameIndex);
@@ -672,6 +699,7 @@ export const PhotoboothSession = ({
   }, [pendingFrameIndex, resetSession]);
 
 
+>>>>>>> 58527b659aad0feee0a85f995d2531c762b510e5
   const handleStartCapture = useCallback(async () => {
     resetSession();
     setGuestError(null);
@@ -1223,7 +1251,6 @@ export const PhotoboothSession = ({
           {captureError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> {captureError.message}</div> : null}
           {guestError ? <div className="photobooth-capture-error"><AlertCircle size={20} /> GUEST FOLDER: {guestError}</div> : null}
 
-          {/* ⚠️ FRAME PREVIEW — 1 full frame dengan foto di posisi slot */}
           <div className="photobooth-slots">
             <div
               className="photobooth-frame-preview"
