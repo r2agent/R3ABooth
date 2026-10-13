@@ -1,33 +1,71 @@
 /* ============================================================
    VERSION STORE — manage app version (v1.0.0 / v2.0.0)
    User bisa switch kapan saja, tersimpan di localStorage.
+   Safe: handle semua edge case (SSR, localStorage error, data corrupt).
    ============================================================ */
 
 export type AppVersion = 'v1.0.0' | 'v2.0.0';
 
-export const AVAILABLE_VERSIONS: { id: AppVersion; label: string; description: string }[] = [
+export type VersionInfo = {
+  id: AppVersion;
+  label: string;
+  description: string;
+};
+
+export const AVAILABLE_VERSIONS: VersionInfo[] = [
   { id: 'v1.0.0', label: 'v1.0.0', description: 'Classic — stabil & teruji' },
   { id: 'v2.0.0', label: 'v2.0.0', description: 'Eksperimental — fitur baru' },
 ];
 
 const STORAGE_KEY = 'r3a-app-version';
+const DEFAULT_VERSION: AppVersion = 'v1.0.0';
 
+/* Validasi versi ada di list */
+function isValidVersion(value: unknown): value is AppVersion {
+  if (typeof value !== 'string') return false;
+  return AVAILABLE_VERSIONS.some((v) => v.id === value);
+}
+
+/* Load versi dari localStorage — aman dari semua error */
 export function loadAppVersion(): AppVersion {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === 'v1.0.0' || raw === 'v2.0.0') return raw;
-    return 'v1.0.0';
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return DEFAULT_VERSION;
+    }
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (isValidVersion(raw)) return raw;
+    return DEFAULT_VERSION;
   } catch {
-    return 'v1.0.0';
+    return DEFAULT_VERSION;
   }
 }
 
+/* Save versi ke localStorage — aman dari quota / permission error */
 export function saveAppVersion(version: AppVersion): void {
   try {
-    localStorage.setItem(STORAGE_KEY, version);
-  } catch { /* ignore */ }
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    if (!isValidVersion(version)) return;
+    window.localStorage.setItem(STORAGE_KEY, version);
+  } catch {
+    /* ignore — silent fail */
+  }
 }
 
-export function getVersionInfo(version: AppVersion) {
-  return AVAILABLE_VERSIONS.find((v) => v.id === version) || AVAILABLE_VERSIONS[0];
+/* Ambil info versi (label, description) */
+export function getVersionInfo(version: AppVersion): VersionInfo {
+  return (
+    AVAILABLE_VERSIONS.find((v) => v.id === version) ||
+    AVAILABLE_VERSIONS[0]
+  );
+}
+
+/* Cek apakah versi valid */
+export function isValidAppVersion(value: unknown): value is AppVersion {
+  return isValidVersion(value);
+}
+
+/* Reset ke default */
+export function resetAppVersion(): AppVersion {
+  saveAppVersion(DEFAULT_VERSION);
+  return DEFAULT_VERSION;
 }

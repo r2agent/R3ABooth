@@ -12,6 +12,7 @@ import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsSt
 import { OperatorDashboard } from './operator/OperatorDashboard';
 import { ReminderPopup } from './ReminderPopup';
 import { ScreensaverSlideshow } from './ScreensaverSlideshow';
+import { loadAppVersion, saveAppVersion, AVAILABLE_VERSIONS, type AppVersion } from './versionStore';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
