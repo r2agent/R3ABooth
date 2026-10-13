@@ -24,14 +24,8 @@ import {
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
-<Accept Current Change | Accept Incoming Change | Accept Both Changes | Compare Changes
 import { IGFollowGate } from './IGFollowGate';
 import { loadAppVersion } from './versionStore';
-=======
-import { IGFollowGate } from './IGFollowGate';
-import { loadAppVersion } from './versionStore';
-import igGateImage from './assets/ig-gate.jpg';
->>>>>>> 58527b659aad0feee0a85f995d2531c762b510e5
 
 const igGateImage = '/ig-gate.jpg';
 
@@ -649,7 +643,6 @@ export const PhotoboothSession = ({
   }, []);
 
   const handleSelectFrame = useCallback((index: number) => {
-<<<<<<< HEAD
     const version = loadAppVersion();
     const gateEnabled = allSettings.system.igGateEnabled !== false;
 
@@ -659,24 +652,11 @@ export const PhotoboothSession = ({
       return;
     }
 
-=======
-    const version = loadAppVersion();
-    const gateEnabled = allSettings.system.igGateEnabled !== false;
-
-    // ⚠️ Gate hanya untuk v1.0.0 + toggle ON
-    if (version === 'v1.0.0' && gateEnabled) {
-      setPendingFrameIndex(index);
-      setShowIGGate(true);
-      return;
-    }
-
->>>>>>> 58527b659aad0feee0a85f995d2531c762b510e5
     setSelectedFrameIndex(index);
     resetSession();
     setPhase('ready');
   }, [resetSession, allSettings.system.igGateEnabled]);
 
-<<<<<<< HEAD
   const handleIGGateDismiss = useCallback(() => {
     if (pendingFrameIndex !== null) {
       setSelectedFrameIndex(pendingFrameIndex);
@@ -687,19 +667,6 @@ export const PhotoboothSession = ({
     setPhase('ready');
   }, [pendingFrameIndex, resetSession]);
 
-=======
-  const handleIGGateDismiss = useCallback(() => {
-    if (pendingFrameIndex !== null) {
-      setSelectedFrameIndex(pendingFrameIndex);
-      setPendingFrameIndex(null);
-    }
-    resetSession();
-    setShowIGGate(false);
-    setPhase('ready');
-  }, [pendingFrameIndex, resetSession]);
-
-
->>>>>>> 58527b659aad0feee0a85f995d2531c762b510e5
   const handleStartCapture = useCallback(async () => {
     resetSession();
     setGuestError(null);
