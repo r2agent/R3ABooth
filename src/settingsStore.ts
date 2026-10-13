@@ -142,7 +142,7 @@ const DEFAULT_SETTINGS: AllSettings = {
     accessLevel: 'ADMIN',
   },
   system: {
-    appVersion: '1.0.0',
+    appVersion: '1.0.0', // legacy field, sekarang versi aktif di versionStore
   },
 };
 

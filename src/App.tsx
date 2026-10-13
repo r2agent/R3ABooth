@@ -297,7 +297,15 @@ type SettingsTab = 'camera' | 'storage' | 'application' | 'display' | 'security'
 
 type TestState = { status: 'idle' | 'running' | 'success' | 'error'; message: string };
 
-const Settings = ({ onHome }: { onHome: () => void }) => {
+const Settings = ({
+  onHome,
+  appVersion,
+  onVersionChange,
+}: {
+  onHome: () => void;
+  appVersion: AppVersion;
+  onVersionChange: (v: AppVersion) => void;
+}) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('camera');
   const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
@@ -926,9 +934,41 @@ const Settings = ({ onHome }: { onHome: () => void }) => {
           <div className="settings-simple-panel">
             <div className="simple-panel-heading"><span>SYSTEM & DIAGNOSTICS</span><p>System health and diagnostics</p></div>
             <div className="simple-panel-grid">
-              <div className="setting-control">
+              <div className="setting-control" style={{ alignItems: 'start' }}>
                 <span>APP VERSION</span>
-                <button type="button">{settings.system.appVersion}<b>▼</b></button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 260 }}>
+                    <select
+                      value={appVersion}
+                      onChange={(e) => {
+                        const next = e.target.value as AppVersion;
+                        const info = AVAILABLE_VERSIONS.find((v) => v.id === next);
+                        if (confirm(`Ganti ke ${next}?\n\n${info?.description}\n\nAplikasi akan reload.`)) {
+                        onVersionChange(next);
+                        setTimeout(() => window.location.reload(), 300);
+                      }
+                    }}
+                    style={{
+                      height: 50,
+                      padding: '0 16px',
+                      border: 0,
+                      color: '#342f2d',
+                      background: '#fffdf9',
+                      font: 'inherit',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {AVAILABLE_VERSIONS.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.label} — {v.description}
+                      </option>
+                    ))}
+                  </select>
+                  <em style={{ fontSize: 11, color: 'rgba(255,255,255,.6)', fontStyle: 'normal' }}>
+                    Versi aktif: <strong style={{ color: '#ffd94e' }}>{appVersion}</strong>
+                  </em>
+                </div>
               </div>
               <div className="setting-control">
                 <span>ELECTRON STATUS</span>
@@ -973,6 +1013,7 @@ function App() {
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
   const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
+  const [appVersion, setAppVersion] = useState<AppVersion>(() => loadAppVersion());
   const [hash, setHash] = useState(() =>
     typeof window !== 'undefined' ? window.location.hash : ''
   );
@@ -1341,7 +1382,11 @@ function App() {
   if (screen === 'settings') {
     return (
       <WithReminder {...reminderProps}>
-        <Settings onHome={() => { setSettings(loadAllSettings()); setScreen('home'); }} />
+        <Settings
+          onHome={() => { setSettings(loadAllSettings()); setScreen('home'); }}
+          appVersion={appVersion}
+          onVersionChange={(v) => { saveAppVersion(v); setAppVersion(v); }}
+        />
       </WithReminder>
     );
   }
