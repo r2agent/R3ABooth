@@ -16,7 +16,7 @@ export function loadAppVersion(): AppVersion {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === 'v1.0.0' || raw === 'v2.0.0') return raw;
-    return 'v1.0.0'; // default
+    return 'v1.0.0';
   } catch {
     return 'v1.0.0';
   }
