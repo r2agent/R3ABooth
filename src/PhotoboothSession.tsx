@@ -24,6 +24,9 @@ import {
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
+import { IGFollowGate } from './IGFollowGate';
+import { loadAppVersion } from './versionStore';
+import igGateImage from './assets/ig-gate.jpg';
 
 const VITE_CLIENT_ID =
   (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
@@ -357,6 +360,8 @@ export const PhotoboothSession = ({
   const [driveQrError, setDriveQrError] = useState(false);
   const [frameAspect, setFrameAspect] = useState(3 / 2);
   const [framesReady, setFramesReady] = useState(false);
+  const [showIGGate, setShowIGGate] = useState(false);
+  const [pendingFrameIndex, setPendingFrameIndex] = useState<number | null>(null);
 
   /* AUTO-RESTART KAMERA */
   useEffect(() => {
@@ -641,10 +646,31 @@ export const PhotoboothSession = ({
   }, []);
 
   const handleSelectFrame = useCallback((index: number) => {
+    const version = loadAppVersion();
+    const gateEnabled = allSettings.system.igGateEnabled !== false;
+
+    // ⚠️ Gate hanya untuk v1.0.0 + toggle ON
+    if (version === 'v1.0.0' && gateEnabled) {
+      setPendingFrameIndex(index);
+      setShowIGGate(true);
+      return;
+    }
+
     setSelectedFrameIndex(index);
     resetSession();
     setPhase('ready');
-  }, [resetSession]);
+  }, [resetSession, allSettings.system.igGateEnabled]);
+
+  const handleIGGateDismiss = useCallback(() => {
+    if (pendingFrameIndex !== null) {
+      setSelectedFrameIndex(pendingFrameIndex);
+      setPendingFrameIndex(null);
+    }
+    resetSession();
+    setShowIGGate(false);
+    setPhase('ready');
+  }, [pendingFrameIndex, resetSession]);
+
 
   const handleStartCapture = useCallback(async () => {
     resetSession();
@@ -1047,6 +1073,9 @@ export const PhotoboothSession = ({
     return (
       <main className="photobooth-screen photobooth-kiosk">
         {LoadingOverlay}
+        {showIGGate ? (
+          <IGFollowGate imageSrc={igGateImage} onDismiss={handleIGGateDismiss} />
+        ) : null}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project"><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
           <div className="hidden-exit-trigger" onClick={handleLogoClick} />

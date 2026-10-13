@@ -54,8 +54,8 @@ export type DisplaySettingsShape = {
   showPrintButton: boolean;
   showQrButton: boolean;
   showDriveQrButton: boolean;
-  idleTimeoutMin: number;       // NEW
-  slideDurationSec: number;     // NEW
+  idleTimeoutMin: number;
+  slideDurationSec: number;
 };
 
 export type SecuritySettingsShape = {
@@ -67,6 +67,7 @@ export type SecuritySettingsShape = {
 
 export type SystemSettingsShape = {
   appVersion: string;
+  igGateEnabled: boolean;   // ⚠️ NEW: toggle gate follow IG
 };
 
 export type AllSettings = {
@@ -142,7 +143,8 @@ const DEFAULT_SETTINGS: AllSettings = {
     accessLevel: 'ADMIN',
   },
   system: {
-    appVersion: '1.0.0', // legacy field, sekarang versi aktif di versionStore
+    appVersion: '1.0.0',
+    igGateEnabled: true,
   },
 };
 

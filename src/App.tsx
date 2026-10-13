@@ -972,6 +972,19 @@ const Settings = ({
                 </div>
               </div>
               <div className="setting-control">
+                <span>IG FOLLOW GATE</span>
+                <button
+                  className={`toggle-row ${settings.system.igGateEnabled ? 'is-on' : ''}`}
+                  type="button"
+                  onClick={() => update('system', { igGateEnabled: !settings.system.igGateEnabled })}
+                >
+                  <i />{settings.system.igGateEnabled ? 'ON' : 'OFF'}
+                </button>
+                <em style={{ fontSize: 11, opacity: 0.6 }}>
+                  Popup follow IG saat pilih frame (v1.0.0)
+                </em>
+              </div>
+              <div className="setting-control">
                 <span>ELECTRON STATUS</span>
                 <button type="button">BROWSER MODE<b>▼</b></button>
               </div>
