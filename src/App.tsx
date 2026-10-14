@@ -1027,15 +1027,7 @@ function App() {
     useEffect(() => {
     startAutoRefresh();
     return () => stopAutoRefresh();
-  }, []);cd /workspaces/R3ABooth
-
-# Hapus folder functions & config firebase
-rm -rf functions
-rm -f firebase.json
-rm -f .firebaserc
-
-# Cek
-ls
+  }, []);
   const [events, setEvents] = useState<R3aEvent[]>([]);
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
