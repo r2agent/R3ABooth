@@ -24,6 +24,7 @@ import {
   Globe,
   Key,
   Maximize2,
+  Edit3,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -93,6 +94,9 @@ export const OperatorDashboard = ({
 
   const [tablets, setTablets] = useState<TabletStatus[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState<string>('');
+  const [renaming, setRenaming] = useState(false);
+  const [deviceFilter, setDeviceFilter] = useState<'all' | 'online' | 'offline'>('all');
 
   useEffect(() => {
     const unsubscribe = subscribeAllTablets((newTablets) => {
@@ -106,9 +110,31 @@ export const OperatorDashboard = ({
     return () => clearInterval(id);
   }, []);
 
-  const filteredTablets = eventSlug
+  // Reset rename input saat ganti device
+  useEffect(() => {
+    setRenameInput('');
+    setRenaming(false);
+  }, [selectedDeviceId]);
+
+  const eventFiltered = eventSlug
     ? tablets.filter((t) => t.currentEventSlug === eventSlug)
     : tablets;
+
+  // Hitung online/offline
+  const isDeviceOnline = (t: TabletStatus): boolean => {
+    const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
+    const isStale = lastActivityAgo > 60;
+    return t.online && !isStale;
+  };
+
+  const onlineCount = eventFiltered.filter(isDeviceOnline).length;
+  const offlineCount = eventFiltered.length - onlineCount;
+
+  const filteredTablets = deviceFilter === 'all'
+    ? eventFiltered
+    : deviceFilter === 'online'
+      ? eventFiltered.filter(isDeviceOnline)
+      : eventFiltered.filter((t) => !isDeviceOnline(t));
 
   const selectedDevice = filteredTablets.find((t) => t.deviceId === selectedDeviceId) ?? null;
 
@@ -150,6 +176,37 @@ export const OperatorDashboard = ({
     if (ok) setActionMessage(`✅ Perintah "${label}" dikirim ke ${selectedDevice.browser}.`);
     else setActionMessage(`❌ Gagal kirim perintah.`);
   }, [selectedDevice]);
+
+  const handleRename = useCallback(async () => {
+    if (!selectedDevice) {
+      setActionMessage('Pilih device dulu.');
+      return;
+    }
+    const newName = renameInput.trim();
+    if (!newName) {
+      setActionMessage('❌ Nama tidak boleh kosong.');
+      return;
+    }
+    if (newName === selectedDevice.deviceName) {
+      setActionMessage('⚠️ Nama sama dengan yang sekarang.');
+      return;
+    }
+
+    setRenaming(true);
+    const ok = await sendCommand(selectedDevice.deviceId, 'rename-device', newName);
+    setRenaming(false);
+
+    if (ok) {
+      setActionMessage(`✅ Rename dikirim. Device akan update dalam ~5 detik.`);
+      setRenameInput('');
+      // Optimistic update
+      setTablets((prev) => prev.map((t) =>
+        t.deviceId === selectedDevice.deviceId ? { ...t, deviceName: newName } : t
+      ));
+    } else {
+      setActionMessage('❌ Gagal kirim perintah rename.');
+    }
+  }, [selectedDevice, renameInput]);
 
   return (
     <>
@@ -202,13 +259,80 @@ export const OperatorDashboard = ({
 
         {/* LIVE DEVICES */}
         <section style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>
-            LIVE DEVICES ({filteredTablets.length})
-            {eventSlug ? <span style={{ color: '#ffd94e', marginLeft: 8, fontSize: 12 }}>• Event: {eventSlug}</span> : null}
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 14, letterSpacing: '.1em' }}>
+              LIVE DEVICES ({filteredTablets.length})
+              {eventSlug ? <span style={{ color: '#ffd94e', marginLeft: 8, fontSize: 12 }}>• Event: {eventSlug}</span> : null}
+            </h3>
+          </div>
+
+          {/* FILTER TABS — Online/Offline/All */}
+          <div style={{
+            display: 'flex', gap: 0, marginBottom: 12,
+            border: '1px solid rgba(255,255,255,.15)',
+            borderRadius: 6, overflow: 'hidden',
+            background: 'rgba(0,0,0,.2)',
+          }}>
+            <button
+              type="button"
+              onClick={() => setDeviceFilter('all')}
+              style={{
+                flex: 1, padding: '10px 16px',
+                background: deviceFilter === 'all' ? 'rgba(255,217,78,.15)' : 'transparent',
+                border: 'none',
+                color: deviceFilter === 'all' ? '#ffd94e' : 'rgba(255,255,255,.6)',
+                fontWeight: 700, fontSize: 12, letterSpacing: '.08em',
+                cursor: 'pointer',
+                borderRight: '1px solid rgba(255,255,255,.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              ALL ({eventFiltered.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeviceFilter('online')}
+              style={{
+                flex: 1, padding: '10px 16px',
+                background: deviceFilter === 'online' ? 'rgba(74,222,128,.15)' : 'transparent',
+                border: 'none',
+                color: deviceFilter === 'online' ? '#4ade80' : 'rgba(255,255,255,.6)',
+                fontWeight: 700, fontSize: 12, letterSpacing: '.08em',
+                cursor: 'pointer',
+                borderRight: '1px solid rgba(255,255,255,.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
+              ONLINE ({onlineCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeviceFilter('offline')}
+              style={{
+                flex: 1, padding: '10px 16px',
+                background: deviceFilter === 'offline' ? 'rgba(255,255,255,.08)' : 'transparent',
+                border: 'none',
+                color: deviceFilter === 'offline' ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.6)',
+                fontWeight: 700, fontSize: 12, letterSpacing: '.08em',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6b7280' }} />
+              OFFLINE ({offlineCount})
+            </button>
+          </div>
+
           {filteredTablets.length === 0 ? (
-            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>
-              {eventSlug ? `Tidak ada device online untuk event "${eventSlug}".` : 'Tidak ada device online.'}
+            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0, textAlign: 'center', padding: '24px 0' }}>
+              {deviceFilter === 'online'
+                ? '✅ Tidak ada device online saat ini'
+                : deviceFilter === 'offline'
+                  ? '✅ Semua device online'
+                  : eventSlug
+                    ? `Tidak ada device untuk event "${eventSlug}"`
+                    : 'Tidak ada device terdeteksi'}
             </p>
           ) : (
             <div className="op-grid-tablets" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
@@ -218,6 +342,7 @@ export const OperatorDashboard = ({
                 const isOnline = t.online && !isStale;
                 const isSelected = selectedDeviceId === t.deviceId;
                 const openDuration = t.eventOpenedAt > 0 ? Date.now() - t.eventOpenedAt : 0;
+                const hasCustomName = t.deviceName && t.deviceName.trim();
 
                 return (
                   <div
@@ -236,12 +361,18 @@ export const OperatorDashboard = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#4ade80' : '#6b7280', flexShrink: 0 }} />
                       <strong style={{ fontSize: 13, color: '#fff', wordBreak: 'break-word', flex: 1 }}>
-                        {t.browser || 'Browser'} - {formatDeviceType(t.deviceType || 'unknown')} - {t.os || 'OS'}
+                        {hasCustomName ? t.deviceName : `${t.browser || 'Browser'} - ${formatDeviceType(t.deviceType || 'unknown')} - ${t.os || 'OS'}`}
                       </strong>
                       <span style={{ color: 'rgba(255,255,255,.6)' }}>
                         {deviceTypeIcon(t.deviceType || 'desktop')}
                       </span>
                     </div>
+
+                    {hasCustomName ? (
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
+                        {t.browser || 'Browser'} · {formatDeviceType(t.deviceType || 'unknown')} · {t.os || 'OS'}
+                      </div>
+                    ) : null}
 
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
                       ID: {t.deviceId.slice(-8)}
@@ -297,6 +428,79 @@ export const OperatorDashboard = ({
               <button onClick={() => setSelectedDeviceId(null)} type="button" style={{ padding: '8px 16px', background: 'rgba(255,255,255,.1)', color: '#fff', border: '1px solid rgba(255,255,255,.2)', fontWeight: 600, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <X size={14} /> BATAL
               </button>
+            </div>
+
+            {/* ⚠️ DEVICE MANAGEMENT — Rename */}
+            <div style={{ marginBottom: 16, padding: 16, background: 'rgba(255,217,78,.06)', border: '1px solid rgba(255,217,78,.25)', borderRadius: 6 }}>
+              <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: '#ffd94e', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit3 size={14} /> DEVICE MANAGEMENT
+              </h4>
+
+              {/* Current name */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em', marginBottom: 4 }}>
+                  NAMA SEKARANG
+                </div>
+                <div style={{
+                  padding: '10px 14px',
+                  background: 'rgba(0,0,0,.3)',
+                  border: '1px solid rgba(255,255,255,.1)',
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  fontSize: 14, fontWeight: 700,
+                  color: '#fff',
+                  wordBreak: 'break-all',
+                }}>
+                  {selectedDevice.deviceName || `${selectedDevice.browser} - ${formatDeviceType(selectedDevice.deviceType || 'unknown')} - ${selectedDevice.os}`}
+                </div>
+              </div>
+
+              {/* Rename input */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em', marginBottom: 4 }}>
+                  NAMA BARU
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={renameInput}
+                    onChange={(e) => setRenameInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && renameInput.trim()) {
+                        void handleRename();
+                      }
+                    }}
+                    placeholder="Contoh: Booth Utama, Booth Pintu Masuk, dll"
+                    style={{
+                      flex: 1, minWidth: 200,
+                      padding: '10px 14px',
+                      background: 'rgba(255,255,255,.06)',
+                      border: '1px solid rgba(255,255,255,.15)',
+                      color: '#fff',
+                      fontSize: 13,
+                      outline: 'none',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRename}
+                    disabled={renaming || !renameInput.trim()}
+                    style={{
+                      padding: '10px 20px',
+                      background: renaming || !renameInput.trim() ? '#555' : '#ffd94e',
+                      color: renaming || !renameInput.trim() ? '#aaa' : '#000',
+                      border: 'none',
+                      fontWeight: 700, fontSize: 12, letterSpacing: '.06em',
+                      cursor: renaming || !renameInput.trim() ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {renaming ? 'MENGIRIM...' : 'RENAME'}
+                  </button>
+                </div>
+                <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)', lineHeight: 1.4 }}>
+                  💡 Nama baru akan diterapkan di device dalam ~5 detik setelah device online &amp; menerima perintah.
+                </p>
+              </div>
             </div>
 
             {/* Identitas */}

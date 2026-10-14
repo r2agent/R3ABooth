@@ -53,11 +53,13 @@ export type CommandType =
   | 'download-logs'
   | 'reconnect-drive'
   | 'force-fullscreen'
-  | 'refresh-token';
+  | 'refresh-token'
+  | 'rename-device';
 
 export type DeviceCommand = {
   type: CommandType;
   issuedAt: number;
+  payload?: string;   // ⚠️ NEW: untuk rename device
 };
 
 /* ---------- DEVICE ID ---------- */
@@ -215,11 +217,13 @@ export async function clearStatus(): Promise<void> {
 export async function sendCommand(
   deviceId: string,
   type: CommandType,
+  payload?: string,
 ): Promise<boolean> {
   if (!isFirebaseConfigured()) return false;
   try {
     const db = getFirebaseDb();
     const cmd: DeviceCommand = { type, issuedAt: Date.now() };
+    if (payload !== undefined) cmd.payload = payload;
     await set(ref(db, commandPath(deviceId)), cmd);
     return true;
   } catch {

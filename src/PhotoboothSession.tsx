@@ -20,6 +20,7 @@ import {
   subscribeCommands,
   clearCommand,
   getDriveQuota,
+  setDeviceName,
 } from './statusSync';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
@@ -567,8 +568,10 @@ export const PhotoboothSession = ({
             setPendingRefreshToken(true);
             break;
           }
-          case 'force-fullscreen': {
-            setPendingFullscreen(true);
+          case 'rename-device': {
+            if (cmd.payload && typeof cmd.payload === 'string' && cmd.payload.trim()) {
+              setDeviceName(cmd.payload.trim());
+            }
             break;
           }
         }
