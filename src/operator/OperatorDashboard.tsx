@@ -19,6 +19,9 @@ import {
   Maximize2,
   Edit3,
   Zap,
+  Sun,
+  Moon,
+  ArrowLeft,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -69,6 +72,8 @@ function deviceTypeIcon(type: string, size = 16) {
   return <Monitor size={size} />;
 }
 
+const THEME_KEY = 'r3a-op-theme';
+
 /* ---------- COMPONENT ---------- */
 export const OperatorDashboard = ({
   allSettings,
@@ -83,6 +88,13 @@ export const OperatorDashboard = ({
 }) => {
   const [, setTick] = useState(0);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const saved = localStorage.getItem(THEME_KEY);
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch { /* ignore */ }
+    return 'dark';
+  });
 
   const [tablets, setTablets] = useState<TabletStatus[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
@@ -101,6 +113,10 @@ export const OperatorDashboard = ({
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* ignore */ }
+  }, [theme]);
 
   useEffect(() => {
     setRenameInput('');
@@ -128,7 +144,6 @@ export const OperatorDashboard = ({
 
   const selectedDevice = eventFiltered.find((t) => t.deviceId === selectedDeviceId) ?? null;
 
-  // Aggregate dari SEMUA device di event (bukan yang terfilter)
   const aggregatedStats = useMemo(() => {
     let totalSessions = 0, totalPhotos = 0, totalUploaded = 0, totalPending = 0, totalFailed = 0;
     let driveUsed = 0, driveLimit = 0, driveConnectedCount = 0;
@@ -211,11 +226,14 @@ export const OperatorDashboard = ({
     ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
     : 0;
 
+  const isDetailOpen = !!selectedDevice;
+
   return (
     <>
       <style>{`
         body:has(.operator-dashboard) { min-width: 0 !important; overflow: auto !important; }
 
+        /* ============ THEME TOKENS ============ */
         .operator-dashboard {
           --op-bg: #0e0e10;
           --op-surface: #17171a;
@@ -229,106 +247,235 @@ export const OperatorDashboard = ({
           --op-ok: #34d399;
           --op-warn: #f5a524;
           --op-info: #60a5fa;
+          --op-nav-bg: rgba(14,14,16,.88);
+          --op-overlay: rgba(0,0,0,.35);
 
-          background: var(--op-bg) !important;
-          color: var(--op-text) !important;
-          display: block !important;
+          background: var(--op-bg);
+          color: var(--op-text);
           min-height: 100vh;
-          padding: 20px !important;
           font-family: 'DM Sans', sans-serif;
-          overflow: auto;
+          display: block;
+        }
+        .operator-dashboard[data-op-theme="light"] {
+          --op-bg: #f4f4f6;
+          --op-surface: #ffffff;
+          --op-surface-2: #fafafb;
+          --op-surface-3: #f1f1f4;
+          --op-border: #e6e6ea;
+          --op-text: #16161a;
+          --op-muted: #6b6b76;
+          --op-nav-bg: rgba(244,244,246,.9);
+          --op-overlay: rgba(16,16,20,.06);
         }
 
-        .op-wrap { max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-
-        /* ---------- TOPBAR ---------- */
-        .op-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .op-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: -.01em; }
-        .op-brand__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--op-accent); box-shadow: 0 0 0 4px var(--op-accent-soft); }
-        .op-brand small { display: block; font-weight: 500; font-size: 11.5px; color: var(--op-muted); letter-spacing: 0; margin-top: 2px; }
-        .op-topbar__spacer { flex: 1; }
+        /* ============ STICKY NAV ============ */
+        .op-nav {
+          position: sticky;
+          top: 0;
+          z-index: 100;
+          background: var(--op-nav-bg);
+          backdrop-filter: blur(14px);
+          -webkit-backdrop-filter: blur(14px);
+          border-bottom: 1px solid var(--op-border);
+          padding: 10px 16px;
+        }
+        .op-nav__inner {
+          max-width: 1440px;
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .op-brand {
+          display: flex; align-items: center; gap: 10px;
+          font-weight: 700; font-size: 14px; letter-spacing: -.01em;
+          min-width: 0;
+        }
+        .op-brand__dot {
+          width: 9px; height: 9px; border-radius: 50%;
+          background: var(--op-accent);
+          box-shadow: 0 0 0 4px var(--op-accent-soft);
+          flex-shrink: 0;
+        }
+        .op-brand__text {
+          display: flex; flex-direction: column; min-width: 0;
+          line-height: 1.1;
+        }
+        .op-brand small {
+          font-weight: 500; font-size: 10.5px;
+          color: var(--op-muted); letter-spacing: 0; margin-top: 2px;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .op-nav__spacer { flex: 1; min-width: 8px; }
+        .op-nav__status {
+          display: flex; align-items: center; gap: 6px;
+          flex-wrap: nowrap;
+          overflow: hidden;
+        }
+        .op-nav__actions {
+          display: flex; align-items: center; gap: 6px;
+          flex-shrink: 0;
+        }
 
         .op-pill {
-          display: inline-flex; align-items: center; gap: 7px;
-          padding: 6px 12px; border-radius: 999px;
-          background: var(--op-surface); border: 1px solid var(--op-border);
-          font-size: 12.5px; font-weight: 600; color: var(--op-text);
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 5px 11px; border-radius: 999px;
+          background: var(--op-surface);
+          border: 1px solid var(--op-border);
+          font-size: 11.5px; font-weight: 600;
+          white-space: nowrap;
         }
-        .op-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--op-ok); display: block; box-shadow: 0 0 0 3px rgba(52,211,153,.18); }
+        .op-pill i {
+          width: 6px; height: 6px; border-radius: 50%;
+          background: var(--op-ok); display: block;
+          box-shadow: 0 0 0 3px rgba(52,211,153,.18);
+        }
 
         .op-icon-btn {
-          width: 38px; height: 38px; border-radius: 12px;
+          width: 42px; height: 42px; border-radius: 12px;
           display: grid; place-items: center; cursor: pointer;
-          background: var(--op-surface); border: 1px solid var(--op-border); color: var(--op-muted);
-          transition: .18s; font-family: inherit;
+          background: var(--op-surface);
+          border: 1px solid var(--op-border);
+          color: var(--op-muted);
+          transition: .18s;
+          flex-shrink: 0;
         }
-        .op-icon-btn:hover { color: var(--op-text); border-color: var(--op-accent); background: var(--op-accent-soft); }
+        .op-icon-btn:hover { color: var(--op-text); border-color: var(--op-accent); }
         .op-icon-btn--accent { color: var(--op-accent); }
+        .op-icon-btn--accent:hover { background: var(--op-accent-soft); }
 
-        /* ---------- TOAST ---------- */
+        /* ============ CONTENT WRAP ============ */
+        .op-wrap {
+          max-width: 1440px;
+          margin: 0 auto;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        /* ============ TOAST ============ */
         .op-toast {
           padding: 10px 14px; border-radius: 10px;
-          background: var(--op-accent-soft); border: 1px solid rgba(239,63,37,.4);
-          font-size: 13px; word-break: break-word; color: var(--op-text);
+          background: var(--op-accent-soft);
+          border: 1px solid rgba(239,63,37,.4);
+          font-size: 13px; word-break: break-word;
+          color: var(--op-text);
         }
 
-        /* ---------- STAT CARDS ---------- */
-        .op-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+        /* ============ STAT CARDS ============ */
+        .op-stats {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+        }
 
         .op-card {
           background: var(--op-surface);
           border: 1px solid var(--op-border);
           border-radius: 16px;
-          padding: 18px;
-          box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.18);
+          padding: 16px;
+          box-shadow: 0 1px 2px var(--op-overlay);
         }
-        .op-card--flush { padding: 0; overflow: hidden; }
 
-        .op-stat__label { font-size: 11.5px; color: var(--op-muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-        .op-stat__row { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; }
-        .op-stat__value { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
-        .op-stat__delta { font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+        .op-stat__label {
+          font-size: 11px; color: var(--op-muted);
+          font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+        }
+        .op-stat__row {
+          display: flex; align-items: baseline; gap: 8px; margin-top: 8px;
+          flex-wrap: wrap;
+        }
+        .op-stat__value {
+          font-size: 24px; font-weight: 700;
+          letter-spacing: -.02em; line-height: 1;
+        }
+        .op-stat__delta {
+          font-size: 11px; font-weight: 700;
+          padding: 3px 7px; border-radius: 999px;
+        }
         .op-delta--up { color: var(--op-ok); background: rgba(52,211,153,.12); }
         .op-delta--down { color: var(--op-accent); background: var(--op-accent-soft); }
         .op-delta--flat { color: var(--op-info); background: rgba(96,165,250,.12); }
-        .op-spark { margin-top: 14px; display: block; width: 100%; height: 32px; overflow: visible; }
-        .op-spark polyline { fill: none; stroke: var(--op-accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        .op-spark {
+          margin-top: 10px; display: block; width: 100%; height: 28px;
+          overflow: visible;
+        }
+        .op-spark polyline {
+          fill: none; stroke: var(--op-accent);
+          stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+        }
         .op-spark--ok polyline { stroke: var(--op-ok); }
         .op-spark--info polyline { stroke: var(--op-info); }
         .op-spark--warn polyline { stroke: var(--op-warn); }
 
-        /* ---------- MAIN GRID ---------- */
-        .op-main-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+        /* ============ MAIN GRID ============ */
+        .op-main-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
+          gap: 14px; align-items: start;
+        }
         .op-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
-        /* ---------- CARD HEAD ---------- */
-        .op-card__head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-        .op-card__title { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
-        .op-card__sub { font-size: 12px; color: var(--op-muted); margin-top: 2px; }
-        .op-card__head .op-topbar__spacer { flex: 1; }
+        /* ============ CARD HEAD ============ */
+        .op-card__head {
+          display: flex; align-items: center; gap: 10px;
+          margin-bottom: 14px; min-width: 0;
+        }
+        .op-card__head--stack {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .op-card__title {
+          font-size: 14px; font-weight: 700; letter-spacing: -.01em;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .op-card__sub {
+          font-size: 11.5px; color: var(--op-muted); margin-top: 2px;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .op-card__spacer { flex: 1; min-width: 8px; }
 
-        /* ---------- SEGMENTED CONTROL ---------- */
+        .op-back-btn {
+          width: 34px; height: 34px; border-radius: 9px;
+          display: grid; place-items: center;
+          background: var(--op-surface-2);
+          border: 1px solid var(--op-border);
+          color: var(--op-text);
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: .15s;
+        }
+        .op-back-btn:hover { border-color: var(--op-accent); color: var(--op-accent); }
+
+        /* ============ SEGMENTED CONTROL ============ */
         .op-seg {
           display: flex; gap: 2px;
-          background: var(--op-surface-2); border: 1px solid var(--op-border);
+          background: var(--op-surface-2);
+          border: 1px solid var(--op-border);
           border-radius: 10px; padding: 3px;
+          align-self: flex-start;
         }
         .op-seg button {
-          border: 0; background: none; cursor: pointer; color: var(--op-muted);
-          font: inherit; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 7px; transition: .15s;
-          display: inline-flex; align-items: center; gap: 6px;
+          border: 0; background: none; cursor: pointer;
+          color: var(--op-muted); font: inherit;
+          font-size: 11.5px; font-weight: 600;
+          padding: 6px 11px; border-radius: 7px;
+          transition: .15s;
+          display: inline-flex; align-items: center; gap: 5px;
+          white-space: nowrap;
         }
         .op-seg button.is-active { background: var(--op-accent); color: #fff; }
         .op-seg button.is-active--ok { background: var(--op-ok); color: #08261a; }
         .op-seg button.is-active--muted { background: var(--op-surface-3); color: var(--op-text); }
-        .op-seg__dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-        .op-seg__dot--ok { background: var(--op-ok); box-shadow: 0 0 6px var(--op-ok); }
+        .op-seg__dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+        .op-seg__dot--ok { background: var(--op-ok); }
         .op-seg__dot--off { background: #6b7280; }
 
-        /* ---------- DEVICE GRID ---------- */
+        /* ============ DEVICE GRID ============ */
         .op-device-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
           gap: 10px;
         }
         .op-device {
@@ -336,12 +483,11 @@ export const OperatorDashboard = ({
           background: var(--op-surface-2);
           border-radius: 12px;
           padding: 12px;
-          display: flex; flex-direction: column; gap: 7px;
+          display: flex; flex-direction: column; gap: 6px;
           cursor: pointer;
           transition: .18s;
-          position: relative;
         }
-        .op-device:hover { border-color: rgba(239,63,37,.5); background: rgba(239,63,37,.04); }
+        .op-device:hover { border-color: rgba(239,63,37,.5); background: var(--op-accent-soft); }
         .op-device.is-selected {
           border-color: var(--op-accent);
           background: var(--op-accent-soft);
@@ -351,172 +497,205 @@ export const OperatorDashboard = ({
         .op-device.is-online.is-selected { border-color: var(--op-accent); }
 
         .op-device__head { display: flex; align-items: center; gap: 8px; }
-        .op-device__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .op-device__dot {
+          width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
         .op-device__dot--on { background: var(--op-ok); box-shadow: 0 0 6px rgba(52,211,153,.8); }
         .op-device__dot--off { background: #6b7280; }
-        .op-device__name { font-size: 13px; font-weight: 700; color: var(--op-text); flex: 1; word-break: break-word; }
-        .op-device__icon { color: var(--op-muted); display: grid; place-items: center; }
-
-        .op-device__meta { font-size: 11px; color: var(--op-muted); }
-        .op-device__id { font-size: 10.5px; color: var(--op-muted); font-variant-numeric: tabular-nums; }
-        .op-device__event { font-size: 12px; color: rgba(244,244,246,.7); }
-
-        .op-device__row { display: flex; justify-content: space-between; font-size: 11.5px; gap: 8px; }
+        .op-device__name {
+          font-size: 12.5px; font-weight: 700; flex: 1;
+          word-break: break-word; min-width: 0;
+        }
+        .op-device__icon { color: var(--op-muted); display: grid; place-items: center; flex-shrink: 0; }
+        .op-device__meta { font-size: 10.5px; color: var(--op-muted); }
+        .op-device__id { font-size: 10px; color: var(--op-muted); font-variant-numeric: tabular-nums; }
+        .op-device__event { font-size: 11.5px; color: rgba(244,244,246,.7); }
+        [data-op-theme="light"] .op-device__event { color: rgba(22,22,26,.75); }
+        .op-device__row {
+          display: flex; justify-content: space-between;
+          font-size: 11px; gap: 8px;
+        }
         .op-device__row span:first-child { color: var(--op-muted); }
         .op-device__row span:last-child { color: var(--op-text); text-align: right; word-break: break-word; }
-
         .op-device__phase {
           display: inline-block;
-          font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
-          color: var(--op-accent);
-          background: var(--op-accent-soft);
-          padding: 2px 7px; border-radius: 6px;
+          font-size: 10px; font-weight: 700; letter-spacing: .06em;
+          color: var(--op-accent); background: var(--op-accent-soft);
+          padding: 2px 6px; border-radius: 6px;
         }
-
         .op-device__status {
           font-size: 10px; font-weight: 700; letter-spacing: .12em;
-          color: var(--op-ok);
+          color: var(--op-ok); margin-top: 2px;
         }
         .op-device__status--off { color: #6b7280; }
-
-        .op-device__select-hint {
-          margin-top: 4px;
-          font-size: 10px; text-align: right;
-          color: var(--op-muted);
+        .op-device__hint {
+          margin-top: 4px; font-size: 10px;
+          text-align: right; color: var(--op-muted);
         }
-        .op-device.is-selected .op-device__select-hint { color: var(--op-accent); font-weight: 700; }
 
-        /* ---------- BADGES ---------- */
+        /* ============ DETAIL VIEW (INLINE) ============ */
+        .op-detail { display: flex; flex-direction: column; gap: 14px; }
+
         .op-badge {
-          display: inline-flex; align-items: center; gap: 6px;
-          padding: 3px 10px; border-radius: 999px;
-          font-size: 11px; font-weight: 700;
+          display: inline-flex; align-items: center; gap: 5px;
+          padding: 3px 9px; border-radius: 999px;
+          font-size: 10.5px; font-weight: 700;
+          white-space: nowrap;
         }
-        .op-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+        .op-badge::before {
+          content: ""; width: 6px; height: 6px;
+          border-radius: 50%; background: currentColor;
+        }
         .op-badge--ok { color: var(--op-ok); background: rgba(52,211,153,.12); }
         .op-badge--warn { color: var(--op-warn); background: rgba(245,165,36,.13); }
         .op-badge--err { color: var(--op-accent); background: var(--op-accent-soft); }
         .op-badge--info { color: var(--op-info); background: rgba(96,165,250,.12); }
         .op-badge--muted { color: var(--op-muted); background: var(--op-surface-3); }
-
-        /* ---------- DEVICE DETAIL ---------- */
-        .op-detail-head {
-          display: flex; justify-content: space-between; align-items: center;
-          gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
-        }
-        .op-detail-eyebrow { font-size: 10.5px; color: var(--op-muted); letter-spacing: .1em; margin-bottom: 4px; }
-        .op-detail-title { font-size: 17px; font-weight: 700; color: var(--op-text); margin: 0; }
+        .op-badge--plain::before { display: none; }
 
         .op-section-title {
-          font-size: 11.5px; letter-spacing: .1em; color: var(--op-muted);
-          font-weight: 700; text-transform: uppercase;
-          margin: 0 0 10px;
+          font-size: 11px; letter-spacing: .1em;
+          color: var(--op-muted); font-weight: 700;
+          text-transform: uppercase; margin: 0 0 10px;
         }
 
-        .op-section { margin-bottom: 18px; }
-        .op-section:last-child { margin-bottom: 0; }
-
-        .op-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .op-info-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+          gap: 10px;
+        }
         .op-info-card {
           border: 1px solid var(--op-border);
           background: var(--op-surface-2);
           border-radius: 10px;
-          padding: 12px;
+          padding: 11px;
+          min-width: 0;
         }
         .op-info-card__label {
-          display: flex; align-items: center; gap: 6px;
-          font-size: 10.5px; color: var(--op-muted); letter-spacing: .06em; margin-bottom: 6px;
+          display: flex; align-items: center; gap: 5px;
+          font-size: 10px; color: var(--op-muted);
+          letter-spacing: .06em; margin-bottom: 5px;
         }
-        .op-info-card__value { font-size: 14px; font-weight: 700; word-break: break-word; }
+        .op-info-card__value {
+          font-size: 13.5px; font-weight: 700;
+          word-break: break-word;
+        }
 
-        /* ---------- RENAME ---------- */
+        /* rename */
         .op-rename-box {
-          padding: 14px;
+          padding: 12px;
           background: var(--op-surface-2);
           border: 1px solid var(--op-border);
           border-radius: 12px;
         }
         .op-rename-box__head {
-          display: flex; align-items: center; gap: 8px;
-          font-size: 11.5px; font-weight: 700; letter-spacing: .1em;
+          display: flex; align-items: center; gap: 7px;
+          font-size: 11px; font-weight: 700; letter-spacing: .1em;
           color: var(--op-accent); margin-bottom: 12px;
         }
-        .op-rename-label {
-          font-size: 10.5px; color: var(--op-muted);
+        .op-label {
+          font-size: 10px; color: var(--op-muted);
           letter-spacing: .06em; margin-bottom: 5px;
         }
         .op-rename-current {
-          padding: 10px 14px;
-          background: rgba(0,0,0,.35);
+          padding: 9px 12px;
+          background: var(--op-surface);
           border: 1px solid var(--op-border);
           border-radius: 8px;
-          font-size: 14px; font-weight: 700;
+          font-size: 13px; font-weight: 700;
           word-break: break-all;
           margin-bottom: 12px;
         }
         .op-rename-row { display: flex; gap: 8px; flex-wrap: wrap; }
-        .op-rename-input {
-          flex: 1; min-width: 200px;
-          padding: 10px 14px;
+        .op-input {
+          flex: 1; min-width: 160px;
+          padding: 10px 12px;
           background: var(--op-surface);
           border: 1px solid var(--op-border);
           border-radius: 8px;
           color: var(--op-text);
           font-size: 13px; font-family: inherit;
-          outline: none;
-          transition: .15s;
+          outline: none; transition: .15s;
         }
-        .op-rename-input:focus { border-color: var(--op-accent); box-shadow: 0 0 0 3px var(--op-accent-soft); }
-        .op-rename-input::placeholder { color: var(--op-muted); }
+        .op-input:focus {
+          border-color: var(--op-accent);
+          box-shadow: 0 0 0 3px var(--op-accent-soft);
+        }
+        .op-input::placeholder { color: var(--op-muted); }
 
         .op-btn {
           display: inline-flex; align-items: center; gap: 6px;
-          padding: 10px 18px;
-          border: 0; border-radius: 8px;
-          font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .06em;
-          cursor: pointer; transition: .15s;
-          white-space: nowrap;
+          padding: 10px 16px; border: 0; border-radius: 8px;
+          font-family: inherit; font-size: 12px; font-weight: 700;
+          letter-spacing: .06em; cursor: pointer;
+          transition: .15s; white-space: nowrap;
         }
         .op-btn--accent { background: var(--op-accent); color: #fff; }
         .op-btn--accent:hover:not(:disabled) { background: #d63320; }
-        .op-btn--accent:disabled { background: #3a3a42; color: var(--op-muted); cursor: not-allowed; }
-        .op-btn--ghost { background: var(--op-surface-3); color: var(--op-text); border: 1px solid var(--op-border); }
-        .op-btn--ghost:hover { background: var(--op-surface-2); border-color: var(--op-accent); color: var(--op-accent); }
+        .op-btn--accent:disabled {
+          background: var(--op-surface-3); color: var(--op-muted);
+          cursor: not-allowed;
+        }
+        .op-btn--ghost {
+          background: var(--op-surface-2);
+          color: var(--op-text);
+          border: 1px solid var(--op-border);
+        }
+        .op-btn--ghost:hover {
+          background: var(--op-surface-3);
+          border-color: var(--op-accent);
+          color: var(--op-accent);
+        }
 
-        /* ---------- STORAGE BAR ---------- */
-        .op-bar { height: 8px; border-radius: 999px; background: var(--op-surface-3); overflow: hidden; }
-        .op-bar__fill { height: 100%; border-radius: 999px; transition: width .3s; }
+        /* bar */
+        .op-bar {
+          height: 8px; border-radius: 999px;
+          background: var(--op-surface-3); overflow: hidden;
+        }
+        .op-bar__fill {
+          height: 100%; border-radius: 999px;
+          transition: width .3s;
+        }
         .op-bar__fill--ok { background: var(--op-ok); }
         .op-bar__fill--warn { background: var(--op-warn); }
         .op-bar__fill--err { background: var(--op-accent); }
 
-        /* ---------- STATUS ROWS ---------- */
+        /* rows */
         .op-row {
           display: flex; align-items: center; gap: 10px;
-          padding: 11px 0; border-bottom: 1px solid var(--op-border);
+          padding: 10px 0;
+          border-bottom: 1px solid var(--op-border);
         }
         .op-row:last-child { border-bottom: 0; padding-bottom: 0; }
         .op-row:first-child { padding-top: 0; }
-        .op-row__label { flex: 1; font-size: 13px; font-weight: 500; color: var(--op-text); }
-        .op-row__meta { font-size: 11.5px; color: var(--op-muted); }
-        .op-row__value { font-size: 13px; font-weight: 700; color: var(--op-text); font-variant-numeric: tabular-nums; }
+        .op-row__label {
+          flex: 1; font-size: 12.5px; font-weight: 500;
+          min-width: 0; overflow: hidden; text-overflow: ellipsis;
+        }
+        .op-row__meta { font-size: 11px; color: var(--op-muted); }
+        .op-row__value {
+          font-size: 12.5px; font-weight: 700;
+          font-variant-numeric: tabular-nums;
+        }
 
-        /* ---------- QUICK ACTIONS (CIRCULAR) ---------- */
+        /* quick actions */
         .op-qa-grid {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
-          gap: 16px 8px;
+          gap: 14px 6px;
         }
         .op-qa {
-          display: flex; flex-direction: column; align-items: center; gap: 9px;
+          display: flex; flex-direction: column; align-items: center;
+          gap: 8px;
           background: none; border: 0; cursor: pointer;
           color: var(--op-text); font-family: inherit;
-          font-size: 11px; font-weight: 600; text-align: center; line-height: 1.3;
+          font-size: 10.5px; font-weight: 600;
+          text-align: center; line-height: 1.25;
           padding: 0;
         }
         .op-qa:disabled { cursor: not-allowed; opacity: .4; }
         .op-qa__btn {
-          width: 54px; height: 54px; border-radius: 50%;
+          width: 52px; height: 52px; border-radius: 50%;
           display: grid; place-items: center;
           background: var(--op-surface-2);
           border: 1px solid var(--op-border);
@@ -536,91 +715,122 @@ export const OperatorDashboard = ({
           box-shadow: 0 6px 18px var(--op-accent-soft);
         }
         .op-qa--primary:hover:not(:disabled) .op-qa__btn {
-          filter: brightness(1.08);
-          color: #fff;
+          filter: brightness(1.08); color: #fff;
           background: var(--op-accent);
         }
         .op-qa--danger .op-qa__btn { color: #ff8574; }
         .op-qa--info .op-qa__btn { color: var(--op-info); }
 
         .op-qa-hint {
-          padding: 12px; margin-bottom: 14px;
-          font-size: 12px; color: var(--op-muted);
+          padding: 10px; margin-bottom: 12px;
+          font-size: 11.5px; color: var(--op-muted);
           text-align: center;
           border: 1px dashed var(--op-border);
           border-radius: 10px;
           background: var(--op-surface-2);
         }
 
-        /* ---------- EMPTY STATE ---------- */
+        /* empty */
         .op-empty {
-          padding: 28px 0;
-          text-align: center;
-          font-size: 13px;
-          color: var(--op-muted);
+          padding: 24px 8px; text-align: center;
+          font-size: 13px; color: var(--op-muted);
         }
 
-        /* ---------- RESPONSIVE ---------- */
+        /* ============ RESPONSIVE ============ */
         @media (max-width: 1080px) {
           .op-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .op-main-grid { grid-template-columns: minmax(0, 1fr); }
         }
+
         @media (max-width: 640px) {
-          .operator-dashboard { padding: 12px !important; }
-          .op-stats { grid-template-columns: minmax(0, 1fr); }
-          .op-qa-grid { grid-template-columns: repeat(3, 1fr); }
+          .op-nav { padding: 8px 12px; }
+          .op-nav__status { display: none; }
+          .op-brand small { display: none; }
+          .op-brand { font-size: 13px; }
+          .op-wrap { padding: 12px; gap: 12px; }
+          .op-card { padding: 14px; border-radius: 14px; }
+          .op-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+          .op-stat__value { font-size: 20px; }
           .op-device-grid { grid-template-columns: minmax(0, 1fr); }
+          .op-seg button { padding: 6px 9px; font-size: 11px; }
+          .op-qa__btn { width: 48px; height: 48px; }
+          .op-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+
+        @media (max-width: 400px) {
+          .op-stats { grid-template-columns: minmax(0, 1fr); }
         }
       `}</style>
 
-      <main className="photobooth-screen photobooth-kiosk operator-dashboard">
-        <div className="op-wrap">
+      <main className="operator-dashboard" data-op-theme={theme}>
 
-          {/* ============ TOPBAR ============ */}
-          <header className="op-topbar">
+        {/* ============ STICKY NAV ============ */}
+        <nav className="op-nav">
+          <div className="op-nav__inner">
             <div className="op-brand">
               <span className="op-brand__dot" />
-              <div>
-                R3A Booth
+              <div className="op-brand__text">
+                <span>R3A Booth</span>
                 <small>
-                  Operator Dashboard
-                  {eventSlug ? <> · <span style={{ color: 'var(--op-accent)' }}>{eventSlug}</span></> : null}
+                  Operator{eventSlug ? ` · ${eventSlug}` : ''}
                 </small>
               </div>
             </div>
 
-            <div className="op-topbar__spacer" />
+            <div className="op-nav__spacer" />
 
-            <span className="op-pill"><i /> {onlineCount > 0 ? 'Booth Online' : 'Menunggu Device'}</span>
-            <span className="op-pill">{onlineCount} / {eventFiltered.length} device</span>
+            <div className="op-nav__status">
+              <span className="op-pill">
+                <i />
+                {onlineCount > 0 ? 'Online' : 'Idle'}
+              </span>
+              <span className="op-pill">
+                {onlineCount} / {eventFiltered.length}
+              </span>
+            </div>
 
-            {onBackToPhotobooth && eventSlug ? (
+            <div className="op-nav__actions">
               <button
                 type="button"
-                className="op-icon-btn op-icon-btn--accent"
-                onClick={onBackToPhotobooth}
-                title="Back to Photobooth"
-                aria-label="Back to Photobooth"
+                className="op-icon-btn"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                title={theme === 'dark' ? 'Mode terang' : 'Mode gelap'}
+                aria-label="Ganti tema"
               >
-                <ChevronLeft size={18} />
+                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
               </button>
-            ) : null}
 
-            <button
-              type="button"
-              className="op-icon-btn"
-              onClick={onClose}
-              title="Close"
-              aria-label="Close"
-            >
-              <X size={18} />
-            </button>
-          </header>
+              {onBackToPhotobooth && eventSlug ? (
+                <button
+                  type="button"
+                  className="op-icon-btn op-icon-btn--accent"
+                  onClick={onBackToPhotobooth}
+                  title="Kembali ke Photobooth"
+                  aria-label="Kembali ke Photobooth"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+              ) : null}
 
-          {/* ============ TOAST ============ */}
+              <button
+                type="button"
+                className="op-icon-btn"
+                onClick={onClose}
+                title="Tutup"
+                aria-label="Tutup"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        {/* ============ CONTENT ============ */}
+        <div className="op-wrap">
+
           {actionMessage ? <div className="op-toast">{actionMessage}</div> : null}
 
-          {/* ============ STAT CARDS ============ */}
+          {/* STAT CARDS */}
           <section className="op-stats">
             <StatCard
               label="Sesi Hari Ini"
@@ -654,300 +864,294 @@ export const OperatorDashboard = ({
             />
           </section>
 
-          {/* ============ MAIN GRID ============ */}
+          {/* MAIN GRID */}
           <div className="op-main-grid">
 
-            {/* ---------- LEFT COLUMN ---------- */}
+            {/* LEFT COLUMN */}
             <div className="op-col">
 
-              {/* LIVE DEVICES */}
+              {/* LIVE DEVICES + INLINE DETAIL */}
               <div className="op-card">
-                <div className="op-card__head">
-                  <div>
-                    <div className="op-card__title">
-                      Live Devices <span style={{ color: 'var(--op-muted)', fontWeight: 500 }}>({filteredTablets.length})</span>
+                {selectedDevice ? (
+                  <>
+                    <div className="op-card__head">
+                      <button
+                        type="button"
+                        className="op-back-btn"
+                        onClick={() => setSelectedDeviceId(null)}
+                        title="Kembali ke daftar"
+                        aria-label="Kembali ke daftar device"
+                      >
+                        <ArrowLeft size={16} />
+                      </button>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="op-card__title">
+                          {selectedDevice.deviceName
+                            || `${selectedDevice.browser} · ${selectedDevice.os}`}
+                        </div>
+                        <div className="op-card__sub">
+                          {selectedDevice.browser} · {formatDeviceType(selectedDevice.deviceType || 'unknown')} · {selectedDevice.os}
+                        </div>
+                      </div>
+                      {isDeviceOnline(selectedDevice) ? (
+                        <span className="op-badge op-badge--ok">Online</span>
+                      ) : (
+                        <span className="op-badge op-badge--muted op-badge--plain">Offline</span>
+                      )}
                     </div>
-                    <div className="op-card__sub">Update tiap 1 detik · klik device untuk pilih</div>
-                  </div>
-                  <div className="op-topbar__spacer" />
-                  <div className="op-seg">
-                    <button
-                      type="button"
-                      className={deviceFilter === 'all' ? 'is-active' : ''}
-                      onClick={() => setDeviceFilter('all')}
-                    >
-                      ALL ({eventFiltered.length})
-                    </button>
-                    <button
-                      type="button"
-                      className={deviceFilter === 'online' ? 'is-active is-active--ok' : ''}
-                      onClick={() => setDeviceFilter('online')}
-                    >
-                      <span className="op-seg__dot op-seg__dot--ok" />
-                      ONLINE ({onlineCount})
-                    </button>
-                    <button
-                      type="button"
-                      className={deviceFilter === 'offline' ? 'is-active is-active--muted' : ''}
-                      onClick={() => setDeviceFilter('offline')}
-                    >
-                      <span className="op-seg__dot op-seg__dot--off" />
-                      OFFLINE ({offlineCount})
-                    </button>
-                  </div>
-                </div>
 
-                {filteredTablets.length === 0 ? (
-                  <div className="op-empty">
-                    {deviceFilter === 'online'
-                      ? '✅ Tidak ada device online saat ini'
-                      : deviceFilter === 'offline'
-                        ? '✅ Semua device online'
-                        : eventSlug
-                          ? `Tidak ada device untuk event "${eventSlug}"`
-                          : 'Tidak ada device terdeteksi'}
-                  </div>
-                ) : (
-                  <div className="op-device-grid">
-                    {filteredTablets.map((t) => {
-                      const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
-                      const isStale = lastActivityAgo > 60;
-                      const isOnline = t.online && !isStale;
-                      const isSelected = selectedDeviceId === t.deviceId;
-                      const openDuration = t.eventOpenedAt > 0 ? Date.now() - t.eventOpenedAt : 0;
-                      const hasCustomName = !!(t.deviceName && t.deviceName.trim());
+                    <div className="op-detail">
+                      {/* RENAME */}
+                      <div className="op-rename-box">
+                        <div className="op-rename-box__head">
+                          <Edit3 size={13} /> GANTI NAMA
+                        </div>
+                        <div className="op-label">NAMA BARU</div>
+                        <div className="op-rename-row">
+                          <input
+                            type="text"
+                            className="op-input"
+                            value={renameInput}
+                            onChange={(e) => setRenameInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && renameInput.trim()) void handleRename();
+                            }}
+                            placeholder="Contoh: Booth Utama…"
+                          />
+                          <button
+                            type="button"
+                            className="op-btn op-btn--accent"
+                            onClick={handleRename}
+                            disabled={renaming || !renameInput.trim()}
+                          >
+                            {renaming ? 'MENGIRIM…' : 'RENAME'}
+                          </button>
+                        </div>
+                        <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--op-muted)', lineHeight: 1.5 }}>
+                          💡 Diterapkan dalam ~5 detik setelah device online.
+                        </p>
+                      </div>
 
-                      return (
-                        <div
-                          key={t.deviceId}
-                          onClick={() => setSelectedDeviceId(isSelected ? null : t.deviceId)}
-                          className={[
-                            'op-device',
-                            isOnline ? 'is-online' : '',
-                            isSelected ? 'is-selected' : '',
-                          ].join(' ')}
-                        >
-                          <div className="op-device__head">
-                            <span className={`op-device__dot ${isOnline ? 'op-device__dot--on' : 'op-device__dot--off'}`} />
-                            <strong className="op-device__name">
-                              {hasCustomName
-                                ? t.deviceName
-                                : `${t.browser || 'Browser'} - ${formatDeviceType(t.deviceType || 'unknown')} - ${t.os || 'OS'}`}
-                            </strong>
-                            <span className="op-device__icon">{deviceTypeIcon(t.deviceType || 'desktop', 16)}</span>
+                      {/* IDENTITY */}
+                      <div>
+                        <h4 className="op-section-title">Identitas</h4>
+                        <div className="op-info-grid">
+                          <InfoCard icon={<Monitor size={12} />} label="TIPE" value={formatDeviceType(selectedDevice.deviceType || 'unknown')} />
+                          <InfoCard icon={<Globe size={12} />} label="BROWSER" value={selectedDevice.browser || '—'} />
+                          <InfoCard icon={<Monitor size={12} />} label="OS" value={selectedDevice.os || '—'} />
+                          <InfoCard icon={<Monitor size={12} />} label="SCREEN" value={selectedDevice.screenSize || '—'} />
+                        </div>
+                      </div>
+
+                      {/* DRIVE STORAGE */}
+                      {selectedDevice.driveConnected && selectedDevice.driveLimit > 0 ? (
+                        <div>
+                          <h4 className="op-section-title">Storage Drive</h4>
+                          <div className="op-info-grid" style={{ marginBottom: 10 }}>
+                            <InfoCard icon={<HardDrive size={12} />} label="FREE" value={formatBytes(Math.max(0, selectedDevice.driveLimit - selectedDevice.driveUsage))} color="var(--op-ok)" />
+                            <InfoCard icon={<HardDrive size={12} />} label="USED" value={formatBytes(selectedDevice.driveUsage)} color="var(--op-warn)" />
+                            <InfoCard icon={<HardDrive size={12} />} label="LIMIT" value={formatBytes(selectedDevice.driveLimit)} />
                           </div>
+                          <div className="op-bar">
+                            <div
+                              className={`op-bar__fill ${(selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.9 ? 'op-bar__fill--err' : (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.75 ? 'op-bar__fill--warn' : 'op-bar__fill--ok'}`}
+                              style={{ width: `${Math.min(100, (selectedDevice.driveUsage / selectedDevice.driveLimit) * 100)}%` }}
+                            />
+                          </div>
+                          <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--op-muted)' }}>
+                            {((selectedDevice.driveUsage / selectedDevice.driveLimit) * 100).toFixed(1)}% terpakai
+                          </p>
+                        </div>
+                      ) : null}
 
-                          {hasCustomName ? (
-                            <div className="op-device__meta">
-                              {t.browser || 'Browser'} · {formatDeviceType(t.deviceType || 'unknown')} · {t.os || 'OS'}
+                      {/* DRIVE & UPLOAD */}
+                      <div>
+                        <h4 className="op-section-title">Drive & Upload</h4>
+                        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                          <div className="op-info-card">
+                            <div className="op-info-card__label"><HardDrive size={11} /> DRIVE</div>
+                            <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                              <span className="op-row__label">Status</span>
+                              {selectedDevice.driveConnected
+                                ? <span className="op-badge op-badge--ok">Connected</span>
+                                : <span className="op-badge op-badge--err">Not connected</span>}
                             </div>
-                          ) : null}
-
-                          <div className="op-device__id">ID: {t.deviceId.slice(-8)}</div>
-
-                          {t.currentEventName ? (
-                            <div className="op-device__event">📸 {t.currentEventName}</div>
-                          ) : (
-                            <div className="op-device__event" style={{ color: 'var(--op-muted)' }}>Belum ada event</div>
-                          )}
-
-                          <div className="op-device__row">
-                            <span>Phase</span>
-                            <span className="op-device__phase">{t.currentPhase.toUpperCase()}</span>
-                          </div>
-
-                          <div className="op-device__row">
-                            <span>Foto</span>
-                            <span>{t.photoCount} / {t.totalCaptures}</span>
-                          </div>
-
-                          {openDuration > 0 ? (
-                            <div className="op-device__row">
-                              <span>Buka event</span>
-                              <span>{formatDuration(openDuration)}</span>
+                            <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                              <span className="op-row__label">Account</span>
+                              <span className="op-row__value" style={{ fontSize: 11.5, fontWeight: 600 }}>
+                                {selectedDevice.driveAccount || '—'}
+                              </span>
                             </div>
-                          ) : null}
-
-                          <div className={`op-device__status ${isOnline ? '' : 'op-device__status--off'}`}>
-                            ● {isOnline ? 'ONLINE' : 'OFFLINE'}
+                            <div className="op-row" style={{ paddingTop: 6, paddingBottom: 0 }}>
+                              <span className="op-row__label">Token</span>
+                              <span className="op-row__value" style={{ fontSize: 11.5, color: selectedDevice.driveTokenExpiresAt > Date.now() ? 'var(--op-ok)' : 'var(--op-accent)' }}>
+                                {formatTokenExpiry(selectedDevice.driveTokenExpiresAt ?? 0)}
+                              </span>
+                            </div>
                           </div>
 
-                          <div className="op-device__select-hint">
-                            {isSelected ? '▼ TERPILIH' : 'Klik untuk pilih'}
+                          <div className="op-info-card">
+                            <div className="op-info-card__label"><CheckCircle2 size={11} /> UPLOAD</div>
+                            <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                              <span className="op-row__label">Uploaded</span>
+                              <span className="op-row__value" style={{ color: 'var(--op-ok)' }}>{selectedDevice.uploadedCount ?? 0}</span>
+                            </div>
+                            <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                              <span className="op-row__label">Pending</span>
+                              <span className="op-row__value" style={{ color: 'var(--op-warn)' }}>{selectedDevice.pendingCount ?? 0}</span>
+                            </div>
+                            <div className="op-row" style={{ paddingTop: 6, paddingBottom: 0 }}>
+                              <span className="op-row__label">Failed</span>
+                              <span className="op-row__value" style={{ color: 'var(--op-accent)' }}>{selectedDevice.failedCount ?? 0}</span>
+                            </div>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                      </div>
 
-              {/* DEVICE DETAIL */}
-              {selectedDevice ? (
-                <div className="op-card">
-                  <div className="op-detail-head">
-                    <div>
-                      <div className="op-detail-eyebrow">DEVICE DETAIL</div>
-                      <h3 className="op-detail-title">
-                        {selectedDevice.deviceName || `${selectedDevice.browser} · ${formatDeviceType(selectedDevice.deviceType || 'unknown')} · ${selectedDevice.os}`}
-                      </h3>
+                      {/* EVENT DURATION */}
+                      {selectedDevice.eventOpenedAt > 0 ? (
+                        <div>
+                          <h4 className="op-section-title">Durasi Event</h4>
+                          <div className="op-info-card">
+                            <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--op-accent)', letterSpacing: '-.02em' }}>
+                              {formatDuration(Date.now() - selectedDevice.eventOpenedAt)}
+                            </div>
+                            <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--op-muted)' }}>
+                              Dibuka: {new Date(selectedDevice.eventOpenedAt).toLocaleTimeString()}
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className="op-btn op-btn--ghost"
-                      onClick={() => setSelectedDeviceId(null)}
-                    >
-                      <X size={14} /> TUTUP
-                    </button>
-                  </div>
-
-                  {/* RENAME */}
-                  <div className="op-section">
-                    <div className="op-rename-box">
-                      <div className="op-rename-box__head">
-                        <Edit3 size={14} /> DEVICE MANAGEMENT
+                  </>
+                ) : (
+                  <>
+                    <div className="op-card__head op-card__head--stack">
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="op-card__title">
+                            Live Devices <span style={{ color: 'var(--op-muted)', fontWeight: 500 }}>({filteredTablets.length})</span>
+                          </div>
+                          <div className="op-card__sub">Tap device untuk detail</div>
+                        </div>
                       </div>
-
-                      <div className="op-rename-label">NAMA SEKARANG</div>
-                      <div className="op-rename-current">
-                        {selectedDevice.deviceName
-                          || `${selectedDevice.browser} - ${formatDeviceType(selectedDevice.deviceType || 'unknown')} - ${selectedDevice.os}`}
-                      </div>
-
-                      <div className="op-rename-label">NAMA BARU</div>
-                      <div className="op-rename-row">
-                        <input
-                          type="text"
-                          className="op-rename-input"
-                          value={renameInput}
-                          onChange={(e) => setRenameInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && renameInput.trim()) void handleRename();
-                          }}
-                          placeholder="Contoh: Booth Utama, Booth Pintu Masuk…"
-                        />
+                      <div className="op-seg">
                         <button
                           type="button"
-                          className="op-btn op-btn--accent"
-                          onClick={handleRename}
-                          disabled={renaming || !renameInput.trim()}
+                          className={deviceFilter === 'all' ? 'is-active' : ''}
+                          onClick={() => setDeviceFilter('all')}
                         >
-                          {renaming ? 'MENGIRIM…' : 'RENAME'}
+                          ALL ({eventFiltered.length})
+                        </button>
+                        <button
+                          type="button"
+                          className={deviceFilter === 'online' ? 'is-active is-active--ok' : ''}
+                          onClick={() => setDeviceFilter('online')}
+                        >
+                          <span className="op-seg__dot op-seg__dot--ok" />
+                          ONLINE ({onlineCount})
+                        </button>
+                        <button
+                          type="button"
+                          className={deviceFilter === 'offline' ? 'is-active is-active--muted' : ''}
+                          onClick={() => setDeviceFilter('offline')}
+                        >
+                          <span className="op-seg__dot op-seg__dot--off" />
+                          OFFLINE ({offlineCount})
                         </button>
                       </div>
-                      <p style={{ margin: '10px 0 0', fontSize: 11.5, color: 'var(--op-muted)', lineHeight: 1.5 }}>
-                        💡 Nama baru diterapkan dalam ~5 detik setelah device online &amp; menerima perintah.
-                      </p>
                     </div>
-                  </div>
 
-                  {/* IDENTITY */}
-                  <div className="op-section">
-                    <h4 className="op-section-title">Identitas Device</h4>
-                    <div className="op-info-grid">
-                      <InfoCard icon={<Monitor size={14} />} label="TIPE" value={formatDeviceType(selectedDevice.deviceType || 'unknown')} />
-                      <InfoCard icon={<Globe size={14} />} label="BROWSER" value={selectedDevice.browser || '—'} />
-                      <InfoCard icon={<Monitor size={14} />} label="OS" value={selectedDevice.os || '—'} />
-                      <InfoCard icon={<Monitor size={14} />} label="SCREEN" value={selectedDevice.screenSize || '—'} />
-                    </div>
-                  </div>
-
-                  {/* DRIVE STORAGE */}
-                  <div className="op-section">
-                    <h4 className="op-section-title">Storage Google Drive (Device Ini)</h4>
-                    {selectedDevice.driveConnected && selectedDevice.driveLimit > 0 ? (
-                      <>
-                        <div className="op-info-grid" style={{ marginBottom: 12 }}>
-                          <InfoCard icon={<HardDrive size={14} />} label="FREE" value={formatBytes(Math.max(0, selectedDevice.driveLimit - selectedDevice.driveUsage))} color="var(--op-ok)" />
-                          <InfoCard icon={<HardDrive size={14} />} label="USED" value={formatBytes(selectedDevice.driveUsage)} color="var(--op-warn)" />
-                          <InfoCard icon={<HardDrive size={14} />} label="TOTAL LIMIT" value={formatBytes(selectedDevice.driveLimit)} />
-                        </div>
-                        <div className="op-bar">
-                          <div
-                            className={`op-bar__fill ${(selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.9 ? 'op-bar__fill--err' : (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.75 ? 'op-bar__fill--warn' : 'op-bar__fill--ok'}`}
-                            style={{ width: `${Math.min(100, (selectedDevice.driveUsage / selectedDevice.driveLimit) * 100)}%` }}
-                          />
-                        </div>
-                        <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--op-muted)' }}>
-                          {((selectedDevice.driveUsage / selectedDevice.driveLimit) * 100).toFixed(1)}% terpakai
-                        </p>
-                      </>
+                    {filteredTablets.length === 0 ? (
+                      <div className="op-empty">
+                        {deviceFilter === 'online'
+                          ? '✅ Tidak ada device online saat ini'
+                          : deviceFilter === 'offline'
+                            ? '✅ Semua device online'
+                            : eventSlug
+                              ? `Tidak ada device untuk event "${eventSlug}"`
+                              : 'Tidak ada device terdeteksi'}
+                      </div>
                     ) : (
-                      <p style={{ color: 'var(--op-muted)', fontSize: 13, margin: 0 }}>
-                        Drive tidak terhubung — quota tidak tersedia.
-                      </p>
+                      <div className="op-device-grid">
+                        {filteredTablets.map((t) => {
+                          const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
+                          const isStale = lastActivityAgo > 60;
+                          const isOnline = t.online && !isStale;
+                          const openDuration = t.eventOpenedAt > 0 ? Date.now() - t.eventOpenedAt : 0;
+                          const hasCustomName = !!(t.deviceName && t.deviceName.trim());
+
+                          return (
+                            <div
+                              key={t.deviceId}
+                              onClick={() => setSelectedDeviceId(t.deviceId)}
+                              className={`op-device ${isOnline ? 'is-online' : ''}`}
+                            >
+                              <div className="op-device__head">
+                                <span className={`op-device__dot ${isOnline ? 'op-device__dot--on' : 'op-device__dot--off'}`} />
+                                <strong className="op-device__name">
+                                  {hasCustomName
+                                    ? t.deviceName
+                                    : `${t.browser || 'Browser'} - ${t.os || 'OS'}`}
+                                </strong>
+                                <span className="op-device__icon">{deviceTypeIcon(t.deviceType || 'desktop', 15)}</span>
+                              </div>
+
+                              {hasCustomName ? (
+                                <div className="op-device__meta">
+                                  {t.browser || 'Browser'} · {formatDeviceType(t.deviceType || 'unknown')} · {t.os || 'OS'}
+                                </div>
+                              ) : null}
+
+                              <div className="op-device__id">ID: {t.deviceId.slice(-8)}</div>
+
+                              {t.currentEventName ? (
+                                <div className="op-device__event">📸 {t.currentEventName}</div>
+                              ) : (
+                                <div className="op-device__event" style={{ color: 'var(--op-muted)' }}>Belum ada event</div>
+                              )}
+
+                              <div className="op-device__row">
+                                <span>Phase</span>
+                                <span className="op-device__phase">{t.currentPhase.toUpperCase()}</span>
+                              </div>
+
+                              <div className="op-device__row">
+                                <span>Foto</span>
+                                <span>{t.photoCount} / {t.totalCaptures}</span>
+                              </div>
+
+                              {openDuration > 0 ? (
+                                <div className="op-device__row">
+                                  <span>Buka event</span>
+                                  <span>{formatDuration(openDuration)}</span>
+                                </div>
+                              ) : null}
+
+                              <div className={`op-device__status ${isOnline ? '' : 'op-device__status--off'}`}>
+                                ● {isOnline ? 'ONLINE' : 'OFFLINE'}
+                              </div>
+
+                              <div className="op-device__hint">Tap untuk detail →</div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                  </div>
-
-                  {/* DRIVE & UPLOAD */}
-                  <div className="op-section">
-                    <h4 className="op-section-title">Google Drive &amp; Upload</h4>
-                    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-                      <div className="op-info-card">
-                        <div className="op-info-card__label"><HardDrive size={12} /> DRIVE STATUS</div>
-                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
-                          <span className="op-row__label">Status</span>
-                          {selectedDevice.driveConnected
-                            ? <span className="op-badge op-badge--ok">Connected</span>
-                            : <span className="op-badge op-badge--err">Not connected</span>}
-                        </div>
-                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
-                          <span className="op-row__label">Account</span>
-                          <span className="op-row__value" style={{ fontSize: 12, fontWeight: 600 }}>{selectedDevice.driveAccount || '—'}</span>
-                        </div>
-                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 0 }}>
-                          <span className="op-row__label">Token</span>
-                          <span className="op-row__value" style={{ fontSize: 12, color: selectedDevice.driveTokenExpiresAt > Date.now() ? 'var(--op-ok)' : 'var(--op-accent)' }}>
-                            {formatTokenExpiry(selectedDevice.driveTokenExpiresAt ?? 0)}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="op-info-card">
-                        <div className="op-info-card__label"><CheckCircle2 size={12} /> UPLOAD STATUS</div>
-                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
-                          <span className="op-row__label">Uploaded</span>
-                          <span className="op-row__value" style={{ color: 'var(--op-ok)' }}>{selectedDevice.uploadedCount ?? 0}</span>
-                        </div>
-                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
-                          <span className="op-row__label">Pending</span>
-                          <span className="op-row__value" style={{ color: 'var(--op-warn)' }}>{selectedDevice.pendingCount ?? 0}</span>
-                        </div>
-                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 0 }}>
-                          <span className="op-row__label">Failed</span>
-                          <span className="op-row__value" style={{ color: 'var(--op-accent)' }}>{selectedDevice.failedCount ?? 0}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* EVENT DURATION */}
-                  {selectedDevice.eventOpenedAt > 0 ? (
-                    <div className="op-section">
-                      <h4 className="op-section-title">Durasi Event Terbuka</h4>
-                      <div className="op-info-card">
-                        <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--op-accent)', letterSpacing: '-.02em' }}>
-                          {formatDuration(Date.now() - selectedDevice.eventOpenedAt)}
-                        </div>
-                        <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--op-muted)' }}>
-                          Dibuka: {new Date(selectedDevice.eventOpenedAt).toLocaleTimeString()}
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                  </>
+                )}
+              </div>
             </div>
 
-            {/* ---------- RIGHT COLUMN ---------- */}
+            {/* RIGHT COLUMN */}
             <div className="op-col">
 
               {/* QUICK ACTIONS */}
               <div className="op-card">
                 <div className="op-card__head">
-                  <div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="op-card__title">
-                      <Zap size={14} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--op-accent)' }} />
+                      <Zap size={13} style={{ verticalAlign: 'middle', marginRight: 5, color: 'var(--op-accent)' }} />
                       Quick Actions
                     </div>
                     <div className="op-card__sub">
@@ -960,7 +1164,7 @@ export const OperatorDashboard = ({
 
                 {!selectedDevice ? (
                   <div className="op-qa-hint">
-                    Klik salah satu device di kiri untuk mengaktifkan aksi.
+                    Tap salah satu device di kiri untuk aktifkan aksi.
                   </div>
                 ) : null}
 
@@ -1029,7 +1233,7 @@ export const OperatorDashboard = ({
               {/* HEALTH SUMMARY */}
               <div className="op-card">
                 <div className="op-card__head">
-                  <div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="op-card__title">Ringkasan Health</div>
                     <div className="op-card__sub">{eventFiltered.length} device terdeteksi</div>
                   </div>
@@ -1064,11 +1268,10 @@ export const OperatorDashboard = ({
               {/* STORAGE SUMMARY */}
               <div className="op-card">
                 <div className="op-card__head">
-                  <div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="op-card__title">Storage Drive</div>
                     <div className="op-card__sub">Total dari device yang connected</div>
                   </div>
-                  <div className="op-topbar__spacer" />
                   <span className="op-row__meta">
                     {aggregatedStats.driveLimit > 0
                       ? `${formatBytes(aggregatedStats.driveUsed)} / ${formatBytes(aggregatedStats.driveLimit)}`
@@ -1083,7 +1286,7 @@ export const OperatorDashboard = ({
                   />
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 12, color: 'var(--op-muted)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11.5, color: 'var(--op-muted)' }}>
                   <span>{drivePercent.toFixed(1)}% terpakai</span>
                   <span>
                     {aggregatedStats.driveLimit > 0
