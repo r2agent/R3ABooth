@@ -21,7 +21,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build web (Vite)
         run: npm run build
@@ -32,8 +32,27 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Setup Android SDK (manual)
+        run: |
+          # Ubuntu runner sudah preinstall Android SDK di sini
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+
+          # Cari cmdline-tools
+          CMDLINE_TOOLS=$(find $ANDROID_HOME -name "sdkmanager" -type f 2>/dev/null | head -1)
+          echo "SDK Manager: $CMDLINE_TOOLS"
+          echo "CMDLINE_TOOLS=$CMDLINE_TOOLS" >> $GITHUB_ENV
+
+          # Accept licenses
+          yes | $CMDLINE_TOOLS --licenses > /dev/null 2>&1 || true
+
+          # Install platform & build tools
+          $CMDLINE_TOOLS "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "$(dirname $CMDLINE_TOOLS)" >> $GITHUB_PATH
 
       - name: Capacitor sync
         run: npx cap sync android
