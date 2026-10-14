@@ -125,6 +125,8 @@ export async function pkceLogin(): Promise<{ success: boolean; account?: string;
         account = data.email;
         persist();
 
+        console.log('[PKCE] ✅ Login sukses! Account:', data.email);
+
         resolve({ success: true, account: data.email || undefined });
       } catch (err) {
         resolve({ success: false, error: err instanceof Error ? err.message : 'Unknown' });
@@ -148,15 +150,22 @@ let refreshInProgress: Promise<boolean> | null = null;
 
 export async function ensureFreshToken(): Promise<string | null> {
   if (accessToken && Date.now() < tokenExpiry - 60000) {
+    const minLeft = Math.floor((tokenExpiry - Date.now()) / 60000);
+    console.log(`[PKCE] Token masih valid (${minLeft} menit lagi), skip refresh`);
     return accessToken;
   }
 
-  if (!refreshToken) return null;
+  if (!refreshToken) {
+    console.warn('[PKCE] Tidak ada refresh token');
+    return null;
+  }
 
   if (refreshInProgress) {
     const ok = await refreshInProgress;
     return ok ? accessToken : null;
   }
+
+  console.log('[PKCE] Token expired/hampir expired, refreshing...');
 
   refreshInProgress = (async () => {
     try {
@@ -166,14 +175,19 @@ export async function ensureFreshToken(): Promise<string | null> {
         body: JSON.stringify({ refreshToken }),
       });
 
-      if (!res.ok) return false;
+      if (!res.ok) {
+        console.error('[PKCE] ❌ Refresh gagal:', res.status);
+        return false;
+      }
 
       const data = await res.json();
       accessToken = data.accessToken;
       tokenExpiry = Date.now() + (data.expiresIn * 1000);
       persist();
+      console.log('[PKCE] ✅ Token refreshed! Expiry baru:', new Date(tokenExpiry).toLocaleString());
       return true;
-    } catch {
+    } catch (err) {
+      console.error('[PKCE] ❌ Refresh error:', err);
       return false;
     } finally {
       refreshInProgress = null;
@@ -227,11 +241,31 @@ export function hasRefreshToken(): boolean {
 
 let refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
-export function startAutoRefresh(): void {
-  if (refreshIntervalId) return;
+export function startAutoRefresh(customIntervalMin?: number): void {
+  if (refreshIntervalId) {
+    clearInterval(refreshIntervalId);
+    refreshIntervalId = null;
+  }
+
+  // Ambil interval dari setting, atau pakai default 50 menit
+  let intervalMin = customIntervalMin ?? 50;
+  try {
+    const raw = localStorage.getItem('r3a-booth-settings-v1');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const fromSettings = parsed?.googleDrive?.autoRefreshIntervalMin;
+      if (typeof fromSettings === 'number' && fromSettings >= 1 && fromSettings <= 60) {
+        intervalMin = fromSettings;
+      }
+    }
+  } catch { /* keep default */ }
+
+  const intervalMs = intervalMin * 60 * 1000;
+  console.log(`[PKCE] Auto-refresh interval: ${intervalMin} menit`);
+
   refreshIntervalId = setInterval(() => {
     void ensureFreshToken();
-  }, 50 * 60 * 1000);
+  }, intervalMs);
 }
 
 export function stopAutoRefresh(): void {

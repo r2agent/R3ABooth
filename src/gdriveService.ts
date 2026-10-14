@@ -1,8 +1,6 @@
-// Google Drive integration via Google Identity Services (GIS) implicit flow
-// and Google Picker API for folder selection.
-//
-// Implicit flow: no backend, no refresh token, access token lives ~1 hour.
-// Token kept in memory + sessionStorage (per-tab).
+// Google Drive integration — delegate ke pkceAuth untuk OAuth.
+// Fungsi upload/folder/picker tetap di sini.
+
 import {
   pkceLogin,
   pkceLogout,
@@ -28,95 +26,14 @@ export type DriveFolder = {
   name: string;
 };
 
-// --- Constants ---------------------------------------------------------------
-
-const SCOPES =
-  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
-
-const TOKEN_SS_KEY = 'r3a.gdrive.accessToken';
-const EXPIRY_SS_KEY = 'r3a.gdrive.tokenExpiry';
-const ACCOUNT_SS_KEY = 'r3a.gdrive.account';
-
-// --- Token state -------------------------------------------------------------
-
-let accessToken: string | null = null;
-let tokenExpiry = 0;
-let lastKnownAccount: string | null = null;
-let tokenClient: TokenClient | null = null;
-let currentClientId = '';
-
-type TokenClient = {
-  requestAccessToken: (opts?: { prompt?: '' | 'consent' | 'select_account' }) => void;
-  callback?: (resp: {
-    access_token?: string;
-    expires_in?: number;
-    error?: string;
-    error_description?: string;
-  }) => void;
+export type TokenStatus = {
+  hasToken: boolean;
+  expiresAt: number | null;
+  expiresInMs: number | null;
+  account: string | null;
 };
 
-// --- sessionStorage helpers --------------------------------------------------
-
-function ssGet(key: string): string | null {
-  try {
-    return typeof window !== 'undefined' ? window.sessionStorage.getItem(key) : null;
-  } catch {
-    return null;
-  }
-}
-
-function ssSet(key: string, value: string | null): void {
-  try {
-    if (typeof window === 'undefined') return;
-    if (value === null) window.sessionStorage.removeItem(key);
-    else window.sessionStorage.setItem(key, value);
-  } catch { /* ignore */ }
-}
-
-accessToken = ssGet(TOKEN_SS_KEY);
-tokenExpiry = Number(ssGet(EXPIRY_SS_KEY) || 0) || 0;
-lastKnownAccount = ssGet(ACCOUNT_SS_KEY);
-
-function setAccessToken(token: string | null, expiry: number): void {
-  accessToken = token;
-  tokenExpiry = expiry;
-  ssSet(TOKEN_SS_KEY, token);
-  ssSet(EXPIRY_SS_KEY, expiry ? String(expiry) : null);
-}
-
-function setAccount(account: string | null): void {
-  lastKnownAccount = account;
-  ssSet(ACCOUNT_SS_KEY, account);
-}
-
-// --- GIS loader --------------------------------------------------------------
-
-let gisLoaded = false;
-let gisLoadPromise: Promise<void> | null = null;
-
-function loadGis(): Promise<void> {
-  if (gisLoaded) return Promise.resolve();
-  if (gisLoadPromise) return gisLoadPromise;
-  gisLoadPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[data-gis]') as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener('load', () => { gisLoaded = true; resolve(); });
-      existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity Services')));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.setAttribute('data-gis', 'true');
-    script.onload = () => { gisLoaded = true; resolve(); };
-    script.onerror = () => reject(new Error('Failed to load Google Identity Services'));
-    document.head.appendChild(script);
-  });
-  return gisLoadPromise;
-}
-
-// --- Picker loader -----------------------------------------------------------
+// --- Google Picker loader ----------------------------------------------------
 
 let pickerLoaded = false;
 let pickerLoadPromise: Promise<void> | null = null;
@@ -128,7 +45,7 @@ function loadPicker(): Promise<void> {
     const existing = document.querySelector('script[data-picker]') as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener('load', () => { pickerLoaded = true; resolve(); });
-      existing.addEventListener('error', () => reject(new Error('Failed to load Google Picker')));
+      existing.addEventListener('error', () => reject(new Error('Failed to load Picker')));
       return;
     }
     const script = document.createElement('script');
@@ -139,79 +56,43 @@ function loadPicker(): Promise<void> {
     script.onload = () => {
       gapi.load('picker', { callback: () => { pickerLoaded = true; resolve(); } });
     };
-    script.onerror = () => reject(new Error('Failed to load Google Picker'));
+    script.onerror = () => reject(new Error('Failed to load Picker'));
     document.head.appendChild(script);
   });
   return pickerLoadPromise;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-declare const google: any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const gapi: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const google: any;
 
-// --- Implicit flow -----------------------------------------------------------
-
-function initTokenClient(clientId: string): Promise<void> {
-  return loadGis().then(() => {
-    currentClientId = clientId;
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: SCOPES,
-      callback: () => { /* handled per-request */ },
-    });
-  });
-}
-
-function requestToken(
-  clientId: string,
-  promptMode: '' | 'consent' | 'select_account' = '',
-): Promise<string> {
-  return initTokenClient(clientId).then(
-    () =>
-      new Promise<string>((resolve, reject) => {
-        if (!tokenClient) {
-          reject(new Error('Token client not initialized'));
-          return;
-        }
-        tokenClient.callback = (resp) => {
-          if (resp.error) {
-            reject(new Error(resp.error_description || resp.error));
-            return;
-          }
-          accessToken = resp.access_token || null;
-          tokenExpiry = Date.now() + (resp.expires_in ? resp.expires_in * 1000 : 3600 * 1000);
-          setAccessToken(accessToken, tokenExpiry);
-          resolve(accessToken!);
-        };
-        tokenClient.requestAccessToken({ prompt: promptMode });
-      }),
-  );
-}
-
-export function getValidToken(clientId: string): Promise<string> {
-  return pkceGetValidToken(clientId);
-}
-
-async function fetchUserEmail(token: string): Promise<string> {
-  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error('Failed to fetch user info');
-  const data = await res.json() as { email?: string };
-  return data.email || 'Unknown account';
-}
-
-// --- Public API --------------------------------------------------------------
+// --- Public: Connect (delegate ke PKCE) --------------------------------------
 
 export async function connectGoogleDrive(_clientId: string): Promise<DriveConnectResult> {
   return pkceLogin();
 }
 
+// --- Public: Disconnect ------------------------------------------------------
+
 export async function disconnectGoogleDrive(): Promise<boolean> {
   pkceLogout();
   return true;
 }
+
+// --- Public: Get valid token -------------------------------------------------
+
+export function getValidToken(clientId: string): Promise<string> {
+  return pkceGetValidToken(clientId);
+}
+
+// --- Public: Get token status ------------------------------------------------
+
+export function getTokenStatus(): TokenStatus {
+  return pkceGetTokenStatus();
+}
+
+// --- Public: Test connection -------------------------------------------------
 
 export async function testGoogleDriveConnection(clientId: string): Promise<DriveTestResult> {
   if (!clientId) return { success: false, message: 'No Client ID configured.' };
@@ -237,6 +118,8 @@ export async function testGoogleDriveConnection(clientId: string): Promise<Drive
 export async function testGoogleDriveUpload(_clientId: string): Promise<DriveTestResult> {
   return { success: false, message: 'Upload test is not part of Phase 1.' };
 }
+
+// --- Public: Picker folder ---------------------------------------------------
 
 export async function pickDriveFolder(clientId: string): Promise<DriveFolder | null> {
   if (!clientId) throw new Error('No Client ID configured.');
@@ -267,6 +150,8 @@ export async function pickDriveFolder(clientId: string): Promise<DriveFolder | n
     throw err instanceof Error ? err : new Error('Picker failed');
   });
 }
+
+// --- Public: Share folder ----------------------------------------------------
 
 export async function shareFolderWithAnyone(folderId: string, clientId: string): Promise<boolean> {
   try {
@@ -318,24 +203,12 @@ export async function runDiagnostics(): Promise<{ label: string; status: string;
     results.push({ label: 'NETWORK', status: 'OFFLINE', healthy: false });
   }
 
-  if (accessToken && Date.now() < tokenExpiry) {
+  const tokenStatus = getTokenStatus();
+  if (tokenStatus.hasToken) {
     results.push({ label: 'GOOGLE DRIVE', status: 'CONNECTED', healthy: true });
   } else {
     results.push({ label: 'GOOGLE DRIVE', status: 'NOT CONNECTED', healthy: false });
   }
 
   return results;
-}
-
-// --- Operator dashboard helpers ---------------------------------------------
-
-export type TokenStatus = {
-  hasToken: boolean;
-  expiresAt: number | null;
-  expiresInMs: number | null;
-  account: string | null;
-};
-
-export function getTokenStatus(): TokenStatus {
-  return pkceGetTokenStatus();
 }
