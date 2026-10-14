@@ -5,7 +5,7 @@ import { createFrame, createSlot, duplicateSlot, saveEvent } from './eventStore'
 import type { R3aEvent, Frame, Slot } from './eventStore';
 import { publishEventToCloud, buildEventUrl, generateSlug } from './cloudEventSync';
 
-type EventFileTab = 'event' | 'frame' | 'status';
+type EventFileTab = 'event' | 'frame' | 'printer' | 'status';
 
 export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved: (event: R3aEvent) => void; onHome: () => void }) => {
   const [activeTab, setActiveTab] = useState<EventFileTab>(
@@ -34,6 +34,7 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
   const tabs: { id: EventFileTab; label: string }[] = [
     { id: 'event', label: 'EVENT INFORMATION' },
     { id: 'frame', label: 'FRAME' },
+    { id: 'printer', label: 'PRINTER' },
     { id: 'status', label: 'EVENT STATUS' },
   ];
 
@@ -206,52 +207,127 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
           </div>
         ) : null}
 
-        {activeTab === 'frame' ? (
-          <div className="new-project-panel">
-            <div className="frame-tab-layout">
-              <div className="frame-sidebar">
-                <div className="frame-sidebar-header">
-                  <span>FRAMES</span>
-                  <button onClick={addFrame} type="button" className="frame-add-button"><Plus size={16} /></button>
-                </div>
-                <div className="frame-sidebar-list">
-                  {draft.frames.length === 0 ? <p className="frame-sidebar-empty">No frames yet. Add a frame to get started.</p> : null}
-                  {draft.frames.map((frame, index) => (
-                    <div key={frame.id} className={`frame-sidebar-item ${index === activeFrameIndex ? 'is-active' : ''}`} onClick={() => setActiveFrameIndex(index)}>
-                      <div className="frame-sidebar-thumb" style={{ background: frame.image ? `url(${frame.image}) center/cover` : '#3a3431' }}>
-                        {!frame.image ? <ImageIcon size={20} /> : null}
-                      </div>
-                      <div className="frame-sidebar-info">
-                        <strong>{frame.name}</strong>
-                        <span>{frame.slots.length} slots</span>
-                      </div>
-                      <button onClick={(e) => { e.stopPropagation(); deleteFrame(index); }} type="button" className="frame-sidebar-delete"><Trash2 size={14} /></button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="frame-editor-area">
-                {activeFrame ? (
-                  <FrameEditor
-                    frame={activeFrame}
-                    onSlotsChange={(slots) => updateFrameSlots(activeFrameIndex, slots)}
-                    onAddSlot={(captureId, w, h) => addSlotToFrame(activeFrameIndex, captureId, w, h)}
-                    onDuplicateSlot={(slot) => duplicateSlotInFrame(activeFrameIndex, slot)}
-                    onDeleteSlot={(slotId) => deleteSlotFromFrame(activeFrameIndex, slotId)}
-                    onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}
-                    onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
-                    onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
-                    onFrameChange={(updates) => updateFrame(activeFrameIndex, updates)}
-                    onApplyTransformToAll={applyTransformToAllFrames}
-                  />
-                ) : (
-                  <div className="frame-editor-empty-state">
-                    <ImageIcon size={48} strokeWidth={1} />
-                    <strong>No frame selected</strong>
-                    <p>Add a frame to define slots for captured photos.</p>
-                    <button onClick={addFrame} type="button" className="frame-add-large"><Plus size={18} /> ADD FRAME</button>
+        {activeTab === 'printer' ? (
+          <div className="new-project-panel printer-panel">
+            <div style={{ display: 'grid', gap: 20, maxWidth: 720 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '16px 20px', background: 'rgba(255,255,255,.08)',
+                border: '1px solid rgba(255,255,255,.15)',
+              }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.16em', color: 'rgba(255,255,255,.6)' }}>
+                    ENABLE PRINT
                   </div>
-                )}
+                  <div style={{ fontSize: 13, color: 'rgba(255,255,255,.5)', marginTop: 4 }}>
+                    Tampilkan tombol PRINT di result screen
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={`toggle-row ${draft.printerSettings.enabled ? 'is-on' : ''}`}
+                  onClick={() => setDraft({
+                    ...draft,
+                    printerSettings: { ...draft.printerSettings, enabled: !draft.printerSettings.enabled },
+                  })}
+                  style={{ minWidth: 120 }}
+                >
+                  <i />{draft.printerSettings.enabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+
+              <div className="new-project-fields" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <label>
+                  <span>COPY COUNT</span>
+                  <select
+                    value={String(draft.printerSettings.copies)}
+                    onChange={(e) => setDraft({
+                      ...draft,
+                      printerSettings: { ...draft.printerSettings, copies: parseInt(e.target.value, 10) },
+                    })}
+                  >
+                    <option value="1">1 copy</option>
+                    <option value="2">2 copies</option>
+                    <option value="3">3 copies</option>
+                    <option value="4">4 copies</option>
+                    <option value="5">5 copies</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>PAPER SIZE</span>
+                  <select
+                    value={draft.printerSettings.paperSize}
+                    onChange={(e) => setDraft({
+                      ...draft,
+                      printerSettings: { ...draft.printerSettings, paperSize: e.target.value },
+                    })}
+                  >
+                    <option value="4 × 6 in">4 × 6 in</option>
+                    <option value="2 × 6 in">2 × 6 in (strip)</option>
+                    <option value="5 × 7 in">5 × 7 in</option>
+                    <option value="A4">A4</option>
+                    <option value="Letter">Letter</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>LAYOUT</span>
+                  <select
+                    value={draft.printerSettings.layout}
+                    onChange={(e) => setDraft({
+                      ...draft,
+                      printerSettings: { ...draft.printerSettings, layout: e.target.value },
+                    })}
+                  >
+                    <option value="POTRAIT">POTRAIT</option>
+                    <option value="LANDSCAPE">LANDSCAPE</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>PRINTER (OPSIONAL)</span>
+                  <input
+                    value={draft.printerSettings.printer}
+                    onChange={(e) => setDraft({
+                      ...draft,
+                      printerSettings: { ...draft.printerSettings, printer: e.target.value },
+                    })}
+                    placeholder="Default printer"
+                  />
+                </label>
+              </div>
+
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '16px 20px', background: 'rgba(255,255,255,.04)',
+                border: '1px solid rgba(255,255,255,.1)', opacity: 0.7,
+              }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.16em', color: 'rgba(255,255,255,.5)' }}>
+                    AUTO-PRINT AFTER SAVE
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginTop: 4 }}>
+                    ⚠️ Fitur dalam pengembangan
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={`toggle-row ${draft.printerSettings.autoPrintAfterSave ? 'is-on' : ''}`}
+                  disabled
+                  style={{ minWidth: 120, opacity: 0.5, cursor: 'not-allowed' }}
+                >
+                  <i />{draft.printerSettings.autoPrintAfterSave ? 'ON' : 'OFF'}
+                </button>
+              </div>
+
+              <div style={{
+                padding: '16px 20px', background: 'rgba(74,222,128,.08)',
+                border: '1px solid rgba(74,222,128,.3)', fontSize: 13,
+                color: 'rgba(255,255,255,.75)', lineHeight: 1.5,
+              }}>
+                ℹ️ Print pakai <strong>dialog print OS</strong>. User klik PRINT → pilih printer → cetak.
+                Pastikan printer sudah ter-setup di device booth.
               </div>
             </div>
           </div>

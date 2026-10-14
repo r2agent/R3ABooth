@@ -898,8 +898,15 @@ export const PhotoboothSession = ({
     if (!compositeUrl || printing) return;
     setPrinting(true);
     try {
-      const copies = event.printerSettings.copies || 1;
-      await printResult({ copies, paperSize: event.printerSettings.paperSize, dataUrl: compositeUrl, printerName: allSettings.printer.printer });
+      const ps = event.printerSettings;
+      const copies = Math.max(1, Math.min(5, ps.copies || 1));
+      await printResult({
+        copies,
+        paperSize: ps.paperSize || '4 × 6 in',
+        layout: ps.layout || 'POTRAIT',
+        dataUrl: compositeUrl,
+        printerName: ps.printer || allSettings.printer.printer,
+      });
       setPrinted(true);
     } catch { /* ignore */ }
     setPrinting(false);
@@ -1333,7 +1340,7 @@ export const PhotoboothSession = ({
             <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
               {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
             </button>
-            {allSettings.display.showPrintButton ? (
+            {(event.printerSettings.enabled && allSettings.display.showPrintButton) ? (
               <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
                 <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
               </button>

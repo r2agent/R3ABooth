@@ -12,11 +12,10 @@ export type Frame = {
   name: string;
   image: string;
   slotFrameImage?: string;
-  // ⚠️ NEW: transform foto di slot
-  photoOffsetX?: number;   // -50 to 50 (%)
-  photoOffsetY?: number;   // -50 to 50 (%)
-  photoScale?: number;     // 0.5 to 2.0 (default 1)
-  photoRotation?: number;  // -180 to 180 (deg, default 0)
+  photoOffsetX?: number;
+  photoOffsetY?: number;
+  photoScale?: number;
+  photoRotation?: number;
   slots: Slot[];
 };
 
@@ -28,9 +27,12 @@ export type OutputSettings = {
 };
 
 export type PrinterSettings = {
-  printer: string;
+  enabled: boolean;          // ⚠️ NEW: print on/off
+  printer: string;           // nama printer (opsional)
   paperSize: string;
   copies: number;
+  layout: string;            // 'POTRAIT' | 'LANDSCAPE'
+  autoPrintAfterSave: boolean;  // ⚠️ NEW: UI dulu, fungsi nanti
 };
 
 export type EventStatus = 'Ready' | 'Active' | 'Ended';
@@ -112,9 +114,12 @@ function normalizeEvent(value: Partial<R3aEvent> | null | undefined): R3aEvent {
       saveVideos: value?.outputSettings?.saveVideos === true,
     },
     printerSettings: {
-      printer: typeof value?.printerSettings?.printer === 'string' ? value.printerSettings.printer : 'No printer selected',
+      enabled: value?.printerSettings?.enabled === true,
+      printer: typeof value?.printerSettings?.printer === 'string' ? value.printerSettings.printer : '',
       paperSize: typeof value?.printerSettings?.paperSize === 'string' ? value.printerSettings.paperSize : '4 × 6 in',
       copies: typeof value?.printerSettings?.copies === 'number' && Number.isFinite(value.printerSettings.copies) ? value.printerSettings.copies : 1,
+      layout: typeof value?.printerSettings?.layout === 'string' ? value.printerSettings.layout : 'POTRAIT',
+      autoPrintAfterSave: value?.printerSettings?.autoPrintAfterSave === true,
     },
     eventStatus: value?.eventStatus === 'Active' || value?.eventStatus === 'Ended' ? value.eventStatus : 'Ready',
     createdAt: typeof value?.createdAt === 'number' ? value.createdAt : now,
@@ -215,9 +220,12 @@ export function createEmptyEvent(): R3aEvent {
       saveVideos: false,
     },
     printerSettings: {
-      printer: 'No printer selected',
+      enabled: false,
+      printer: '',
       paperSize: '4 × 6 in',
       copies: 1,
+      layout: 'POTRAIT',
+      autoPrintAfterSave: false,
     },
     eventStatus: 'Ready',
     createdAt: now,
