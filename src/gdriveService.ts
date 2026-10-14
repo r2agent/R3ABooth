@@ -3,6 +3,14 @@
 //
 // Implicit flow: no backend, no refresh token, access token lives ~1 hour.
 // Token kept in memory + sessionStorage (per-tab).
+import {
+  pkceLogin,
+  pkceLogout,
+  getValidToken as pkceGetValidToken,
+  getTokenStatus as pkceGetTokenStatus,
+} from './pkceAuth';
+
+export { startAutoRefresh, stopAutoRefresh, hasRefreshToken } from './pkceAuth';
 
 export type DriveConnectResult = {
   success: boolean;
@@ -182,10 +190,7 @@ function requestToken(
 }
 
 export function getValidToken(clientId: string): Promise<string> {
-  if (accessToken && Date.now() < tokenExpiry - 60000) {
-    return Promise.resolve(accessToken);
-  }
-  return requestToken(clientId, '');
+  return pkceGetValidToken(clientId);
 }
 
 async function fetchUserEmail(token: string): Promise<string> {
@@ -199,31 +204,12 @@ async function fetchUserEmail(token: string): Promise<string> {
 
 // --- Public API --------------------------------------------------------------
 
-export async function connectGoogleDrive(clientId: string): Promise<DriveConnectResult> {
-  if (!clientId || clientId.trim().length < 10) {
-    return { success: false, error: 'Please enter a valid Google OAuth Client ID.' };
-  }
-  try {
-    const token = await requestToken(clientId, 'consent');
-    const email = await fetchUserEmail(token);
-    setAccount(email);
-    return { success: true, account: email };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Connection failed';
-    return { success: false, error: msg };
-  }
+export async function connectGoogleDrive(_clientId: string): Promise<DriveConnectResult> {
+  return pkceLogin();
 }
 
 export async function disconnectGoogleDrive(): Promise<boolean> {
-  if (accessToken) {
-    try {
-      await fetch(`https://oauth2.googleapis.com/revoke?token=${accessToken}`, { method: 'POST' });
-    } catch { /* best-effort */ }
-  }
-  setAccessToken(null, 0);
-  setAccount(null);
-  tokenClient = null;
-  currentClientId = '';
+  pkceLogout();
   return true;
 }
 
@@ -351,12 +337,5 @@ export type TokenStatus = {
 };
 
 export function getTokenStatus(): TokenStatus {
-  const now = Date.now();
-  const hasToken = !!accessToken && now < tokenExpiry;
-  return {
-    hasToken,
-    expiresAt: accessToken ? tokenExpiry : null,
-    expiresInMs: hasToken ? tokenExpiry - now : null,
-    account: lastKnownAccount,
-  };
+  return pkceGetTokenStatus();
 }

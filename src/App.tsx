@@ -10,6 +10,7 @@ import { useCamera } from './useCamera';
 import { PhotoboothSession } from './PhotoboothSession';
 import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
 import { OperatorDashboard } from './operator/OperatorDashboard';
+import { startAutoRefresh, stopAutoRefresh } from './pkceAuth';
 import { ReminderPopup } from './ReminderPopup';
 import { ScreensaverSlideshow } from './ScreensaverSlideshow';
 import { loadAppVersion, saveAppVersion, AVAILABLE_VERSIONS, type AppVersion } from './versionStore';
@@ -1023,6 +1024,18 @@ const Settings = ({
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
+    useEffect(() => {
+    startAutoRefresh();
+    return () => stopAutoRefresh();
+  }, []);cd /workspaces/R3ABooth
+
+# Hapus folder functions & config firebase
+rm -rf functions
+rm -f firebase.json
+rm -f .firebaserc
+
+# Cek
+ls
   const [events, setEvents] = useState<R3aEvent[]>([]);
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
