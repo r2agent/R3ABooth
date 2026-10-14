@@ -68,12 +68,10 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
           ? f
           : {
               ...f,
-              // ⚠️ Copy transform
               photoOffsetX: src.photoOffsetX ?? 0,
               photoOffsetY: src.photoOffsetY ?? 0,
               photoScale: src.photoScale ?? 1,
               photoRotation: src.photoRotation ?? 0,
-              // ⚠️ Copy watermark juga
               slotFrameImage: src.slotFrameImage ?? '',
             },
       ),
@@ -204,6 +202,58 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
               <label><span>LOCATION</span><input value={draft.location} onChange={(e) => setField('location', e.target.value)} placeholder="Enter location" /></label>
             </div>
             <div className="new-project-note"><span>01</span><strong>Event details</strong><p>Set up the event that will run in the photobooth session.</p></div>
+          </div>
+        ) : null}
+
+        {/* ⚠️ TAB FRAME — INI YANG HILANG SEBELUMNYA */}
+        {activeTab === 'frame' ? (
+          <div className="new-project-panel">
+            <div className="frame-tab-layout">
+              <div className="frame-sidebar">
+                <div className="frame-sidebar-header">
+                  <span>FRAMES</span>
+                  <button onClick={addFrame} type="button" className="frame-add-button"><Plus size={16} /></button>
+                </div>
+                <div className="frame-sidebar-list">
+                  {draft.frames.length === 0 ? <p className="frame-sidebar-empty">No frames yet. Add a frame to get started.</p> : null}
+                  {draft.frames.map((frame, index) => (
+                    <div key={frame.id} className={`frame-sidebar-item ${index === activeFrameIndex ? 'is-active' : ''}`} onClick={() => setActiveFrameIndex(index)}>
+                      <div className="frame-sidebar-thumb" style={{ background: frame.image ? `url(${frame.image}) center/cover` : '#3a3431' }}>
+                        {!frame.image ? <ImageIcon size={20} /> : null}
+                      </div>
+                      <div className="frame-sidebar-info">
+                        <strong>{frame.name}</strong>
+                        <span>{frame.slots.length} slots</span>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); deleteFrame(index); }} type="button" className="frame-sidebar-delete"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="frame-editor-area">
+                {activeFrame ? (
+                  <FrameEditor
+                    frame={activeFrame}
+                    onSlotsChange={(slots) => updateFrameSlots(activeFrameIndex, slots)}
+                    onAddSlot={(captureId, w, h) => addSlotToFrame(activeFrameIndex, captureId, w, h)}
+                    onDuplicateSlot={(slot) => duplicateSlotInFrame(activeFrameIndex, slot)}
+                    onDeleteSlot={(slotId) => deleteSlotFromFrame(activeFrameIndex, slotId)}
+                    onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}
+                    onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
+                    onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
+                    onFrameChange={(updates) => updateFrame(activeFrameIndex, updates)}
+                    onApplyTransformToAll={applyTransformToAllFrames}
+                  />
+                ) : (
+                  <div className="frame-editor-empty-state">
+                    <ImageIcon size={48} strokeWidth={1} />
+                    <strong>No frame selected</strong>
+                    <p>Add a frame to define slots for captured photos.</p>
+                    <button onClick={addFrame} type="button" className="frame-add-large"><Plus size={18} /> ADD FRAME</button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         ) : null}
 
