@@ -1072,7 +1072,20 @@ function App() {
   useEffect(() => { void refreshEvents(); }, []);
 
   useEffect(() => {
-    const onHash = () => setHash(window.location.hash);
+    const onHash = () => {
+      const h = window.location.hash;
+
+      // ⚠️ Kalau #operator, paksa URL ke root (buang slug event)
+      if (h === '#operator' && window.location.pathname !== '/') {
+        window.history.replaceState({}, '', `/#operator`);
+        setUrlSlug('');
+        setCloudEvent(null);
+        setActiveEvent(null);
+        setCloudLoading(false);
+      }
+
+      setHash(h);
+    };
     window.addEventListener('hashchange', onHash);
     onHash();
     return () => window.removeEventListener('hashchange', onHash);
@@ -1269,7 +1282,13 @@ function App() {
       <OperatorDashboard
         allSettings={settings}
         onClose={() => {
-          window.location.hash = '';
+          // ⚠️ Reset total ke home
+          window.history.pushState({}, '', '/');
+          setUrlSlug('');
+          setCloudEvent(null);
+          setCloudLoading(false);
+          setActiveEvent(null);
+          setScreen('home');
           setHash('');
         }}
       />
