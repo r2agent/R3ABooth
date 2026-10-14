@@ -1,7 +1,11 @@
 /* ============================================================
-   PKCE AUTH — OAuth 2.0 with PKCE + Refresh Token
-   Backend: /api/* (Vercel API Routes)
+   PKCE AUTH — support Web + Android APK
+   Web: popup OAuth
+   APK: Capacitor Browser + custom URL scheme
    ============================================================ */
+
+import { Browser } from '@capacitor/browser';
+import { App } from '@capacitor/app';
 
 const BACKEND_URL = '/api';
 
@@ -13,14 +17,24 @@ const ACCOUNT_STORAGE_KEY = 'r3a.pkce.account';
 const ACCESS_STORAGE_KEY = 'r3a.pkce.accessToken';
 const EXPIRY_STORAGE_KEY = 'r3a.pkce.expiry';
 
-// --- Token state (memory) ----------------------------------------------------
+// Custom URL scheme — SAMA dengan yang di AndroidManifest.xml
+const APK_REDIRECT_URI = 'com.r3abooth.app://oauth/callback';
+
+// --- Detect native platform ------------------------------------------------
+
+function isNativePlatform(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
+  return !!w.Capacitor?.isNativePlatform?.();
+}
+
+// --- Token state -----------------------------------------------------------
 
 let accessToken: string | null = null;
 let tokenExpiry = 0;
 let refreshToken: string | null = null;
 let account: string | null = null;
 
-// Load dari sessionStorage saat init
 try {
   accessToken = sessionStorage.getItem(ACCESS_STORAGE_KEY);
   tokenExpiry = Number(sessionStorage.getItem(EXPIRY_STORAGE_KEY) || 0) || 0;
@@ -37,7 +51,7 @@ function persist(): void {
   } catch { /* ignore */ }
 }
 
-// --- PKCE helpers ------------------------------------------------------------
+// --- PKCE helpers ----------------------------------------------------------
 
 function generateCodeVerifier(): string {
   const array = new Uint8Array(32);
@@ -57,17 +71,129 @@ function base64UrlEncode(buffer: Uint8Array): string {
   for (let i = 0; i < buffer.length; i++) {
     str += String.fromCharCode(buffer[i]);
   }
-  return btoa(str)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-// --- Login (open popup, PKCE flow) -------------------------------------------
+// --- Tukar code → token ----------------------------------------------------
 
-export async function pkceLogin(): Promise<{ success: boolean; account?: string; error?: string }> {
-  if (!CLIENT_ID) return { success: false, error: 'Client ID not configured' };
+async function exchangeCodeForToken(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<{ success: boolean; account?: string; error?: string }> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, codeVerifier, redirectUri }),
+    });
 
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Exchange failed' };
+    }
+
+    accessToken = data.accessToken;
+    tokenExpiry = Date.now() + (data.expiresIn * 1000);
+    refreshToken = data.refreshToken;
+    account = data.email;
+    persist();
+
+    console.log('[PKCE] ✅ Login sukses! Account:', data.email);
+    return { success: true, account: data.email };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown' };
+  }
+}
+
+// ============================================================
+// APK LOGIN — pakai Capacitor Browser
+// ============================================================
+
+async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; error?: string }> {
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+  const redirectUri = APK_REDIRECT_URI;
+
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: SCOPES,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    access_type: 'offline',
+    prompt: 'consent',
+  });
+
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+  return new Promise((resolve) => {
+    let resolved = false;
+
+    // Listener untuk app URL open (callback dari Google)
+    const listenerPromise = App.addListener('appUrlOpen', async (data) => {
+      if (resolved) return;
+      console.log('[PKCE/APK] appUrlOpen:', data.url);
+
+      if (!data.url.startsWith(APK_REDIRECT_URI)) return;
+
+      resolved = true;
+
+      try {
+        const url = new URL(data.url);
+        const code = url.searchParams.get('code');
+        const error = url.searchParams.get('error');
+
+        if (error) {
+          resolve({ success: false, error });
+          return;
+        }
+        if (!code) {
+          resolve({ success: false, error: 'No code in callback' });
+          return;
+        }
+
+        const result = await exchangeCodeForToken(code, codeVerifier, redirectUri);
+        resolve(result);
+      } catch (err) {
+        resolve({ success: false, error: err instanceof Error ? err.message : 'Parse failed' });
+      }
+    });
+
+    // Buka OAuth di Chrome Custom Tab
+    void Browser.open({ url: authUrl });
+
+    // Timeout 5 menit
+    setTimeout(async () => {
+      if (resolved) return;
+      resolved = true;
+      try {
+        const listener = await listenerPromise;
+        await listener.remove();
+      } catch { /* ignore */ }
+      void Browser.close().catch(() => {});
+      resolve({ success: false, error: 'Login timeout' });
+    }, 5 * 60 * 1000);
+
+    // Cleanup setelah selesai
+    void listenerPromise.then((l) => {
+      const checkDone = setInterval(async () => {
+        if (resolved) {
+          clearInterval(checkDone);
+          try { await l.remove(); } catch { /* ignore */ }
+          void Browser.close().catch(() => {});
+        }
+      }, 1000);
+    });
+  });
+}
+
+// ============================================================
+// WEB LOGIN — pakai popup (existing)
+// ============================================================
+
+async function pkceLoginWeb(): Promise<{ success: boolean; account?: string; error?: string }> {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const redirectUri = `${window.location.origin}${BACKEND_URL}/oauthCallback`;
@@ -96,46 +222,17 @@ export async function pkceLogin(): Promise<{ success: boolean; account?: string;
         resolve({ success: false, error: event.data.error });
         return;
       }
-
       if (!event.data.code) {
         resolve({ success: false, error: 'No code received' });
         return;
       }
 
-      try {
-        const res = await fetch(`${BACKEND_URL}/exchange`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            code: event.data.code,
-            codeVerifier,
-            redirectUri,
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          resolve({ success: false, error: data.error || 'Exchange failed' });
-          return;
-        }
-
-        accessToken = data.accessToken;
-        tokenExpiry = Date.now() + (data.expiresIn * 1000);
-        refreshToken = data.refreshToken;
-        account = data.email;
-        persist();
-
-        console.log('[PKCE] ✅ Login sukses! Account:', data.email);
-
-        resolve({ success: true, account: data.email || undefined });
-      } catch (err) {
-        resolve({ success: false, error: err instanceof Error ? err.message : 'Unknown' });
-      }
+      const result = await exchangeCodeForToken(event.data.code, codeVerifier, redirectUri);
+      resolve(result);
     };
 
     window.addEventListener('message', handler);
 
-    // Timeout
     setTimeout(() => {
       window.removeEventListener('message', handler);
       if (popup && !popup.closed) popup.close();
@@ -144,14 +241,28 @@ export async function pkceLogin(): Promise<{ success: boolean; account?: string;
   });
 }
 
-// --- Auto-refresh ------------------------------------------------------------
+// --- Public: Login (auto-detect platform) -----------------------------------
+
+export async function pkceLogin(): Promise<{ success: boolean; account?: string; error?: string }> {
+  if (!CLIENT_ID) return { success: false, error: 'Client ID not configured' };
+
+  if (isNativePlatform()) {
+    console.log('[PKCE] Platform: APK (native)');
+    return pkceLoginAPK();
+  }
+
+  console.log('[PKCE] Platform: Web');
+  return pkceLoginWeb();
+}
+
+// --- Auto-refresh ----------------------------------------------------------
 
 let refreshInProgress: Promise<boolean> | null = null;
 
 export async function ensureFreshToken(): Promise<string | null> {
   if (accessToken && Date.now() < tokenExpiry - 60000) {
     const minLeft = Math.floor((tokenExpiry - Date.now()) / 60000);
-    console.log(`[PKCE] Token masih valid (${minLeft} menit lagi), skip refresh`);
+    console.log(`[PKCE] Token masih valid (${minLeft} menit lagi)`);
     return accessToken;
   }
 
@@ -165,7 +276,7 @@ export async function ensureFreshToken(): Promise<string | null> {
     return ok ? accessToken : null;
   }
 
-  console.log('[PKCE] Token expired/hampir expired, refreshing...');
+  console.log('[PKCE] Refreshing token...');
 
   refreshInProgress = (async () => {
     try {
@@ -175,19 +286,15 @@ export async function ensureFreshToken(): Promise<string | null> {
         body: JSON.stringify({ refreshToken }),
       });
 
-      if (!res.ok) {
-        console.error('[PKCE] ❌ Refresh gagal:', res.status);
-        return false;
-      }
+      if (!res.ok) return false;
 
       const data = await res.json();
       accessToken = data.accessToken;
       tokenExpiry = Date.now() + (data.expiresIn * 1000);
       persist();
-      console.log('[PKCE] ✅ Token refreshed! Expiry baru:', new Date(tokenExpiry).toLocaleString());
+      console.log('[PKCE] ✅ Token refreshed!');
       return true;
-    } catch (err) {
-      console.error('[PKCE] ❌ Refresh error:', err);
+    } catch {
       return false;
     } finally {
       refreshInProgress = null;
@@ -198,15 +305,13 @@ export async function ensureFreshToken(): Promise<string | null> {
   return ok ? accessToken : null;
 }
 
-// --- Public: get valid token -------------------------------------------------
+// --- Public ----------------------------------------------------------------
 
 export async function getValidToken(_clientId: string): Promise<string> {
   const token = await ensureFreshToken();
   if (!token) throw new Error('Token expired, please login again');
   return token;
 }
-
-// --- Public: logout ----------------------------------------------------------
 
 export function pkceLogout(): void {
   accessToken = null;
@@ -220,8 +325,6 @@ export function pkceLogout(): void {
     sessionStorage.removeItem(ACCOUNT_STORAGE_KEY);
   } catch { /* ignore */ }
 }
-
-// --- Public: status ----------------------------------------------------------
 
 export function getTokenStatus() {
   const hasToken = !!accessToken && Date.now() < tokenExpiry;
@@ -237,8 +340,6 @@ export function hasRefreshToken(): boolean {
   return !!refreshToken;
 }
 
-// --- Public: auto-refresh interval -------------------------------------------
-
 let refreshIntervalId: ReturnType<typeof setInterval> | null = null;
 
 export function startAutoRefresh(customIntervalMin?: number): void {
@@ -247,7 +348,6 @@ export function startAutoRefresh(customIntervalMin?: number): void {
     refreshIntervalId = null;
   }
 
-  // Ambil interval dari setting, atau pakai default 50 menit
   let intervalMin = customIntervalMin ?? 50;
   try {
     const raw = localStorage.getItem('r3a-booth-settings-v1');

@@ -14,6 +14,12 @@ const config: CapacitorConfig = {
     captureInput: true,
     webContentsDebuggingEnabled: true,
   },
+  plugins: {
+    Browser: {
+      // warna toolbar Chrome Custom Tab
+      toolbarColor: '#ef3f25',
+    },
+  },
 };
 
 export default config;
