@@ -1,6 +1,7 @@
 /* ============================================================
    IG FOLLOW GATE — popup full-screen sebelum photobooth start
    Muncul saat user tap frame (v1.0.0 only)
+   Full screen seperti screensaver
    ============================================================ */
 
 type Props = {
@@ -15,66 +16,59 @@ export const IGFollowGate = ({ imageSrc, onDismiss }: Props) => {
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 2147483646,
-        background: 'rgba(0,0,0,.88)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
+        zIndex: 999999,
+        background: '#000',
         cursor: 'pointer',
-        padding: 32,
-        animation: 'r3a-gate-fade .3s ease-out',
+        overflow: 'hidden',
         userSelect: 'none',
       }}
     >
+      {/* Image full screen — seperti screensaver */}
       <img
         src={imageSrc}
         alt="Follow Instagram"
         draggable={false}
         style={{
-          maxWidth: '85vw',
-          maxHeight: '65vh',
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
           objectFit: 'contain',
-          animation: 'r3a-gate-zoom .4s ease-out',
+          userSelect: 'none',
           pointerEvents: 'none',
         }}
       />
 
-      <div style={{ marginTop: 36, textAlign: 'center', pointerEvents: 'none' }}>
-        <h2
-          style={{
-            margin: '0 0 10px',
-            fontFamily: "'Space Grotesk', sans-serif",
-            fontSize: 'clamp(24px, 3.5vw, 40px)',
-            fontWeight: 700,
-            color: '#fff',
-            letterSpacing: '.12em',
-            textTransform: 'uppercase',
-          }}
-        >
-          SUDAH FOLLOW?
-        </h2>
-        <p
-          style={{
-            margin: 0,
-            color: 'rgba(255,255,255,.55)',
-            fontSize: 'clamp(12px, 1.2vw, 15px)',
-            letterSpacing: '.2em',
-            fontWeight: 600,
-          }}
-        >
-          TAP ANYWHERE UNTUK LANJUT
-        </p>
+      {/* Hint "TAP ANYWHERE" — mengambang di bawah, seperti screensaver */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 48,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          padding: '12px 28px',
+          background: 'rgba(0,0,0,0.5)',
+          border: '1px solid rgba(255,255,255,0.3)',
+          borderRadius: 999,
+          color: '#fff',
+          fontSize: 16,
+          fontWeight: 600,
+          letterSpacing: '.15em',
+          textTransform: 'uppercase',
+          fontFamily: 'inherit',
+          pointerEvents: 'none',
+          animation: 'r3a-float 2.2s ease-in-out infinite',
+          backdropFilter: 'blur(4px)',
+          zIndex: 1,
+        }}
+      >
+        TAP ANYWHERE
       </div>
 
       <style>{`
-        @keyframes r3a-gate-fade {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes r3a-gate-zoom {
-          from { transform: scale(.92); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
+        @keyframes r3a-float {
+          0%, 100% { transform: translateX(-50%) translateY(0); opacity: 0.9; }
+          50% { transform: translateX(-50%) translateY(-10px); opacity: 1; }
         }
       `}</style>
     </div>
