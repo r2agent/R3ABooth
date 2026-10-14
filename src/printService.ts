@@ -1,16 +1,70 @@
+/* ============================================================
+   PRINT SERVICE — Modular Print Provider System
+   
+   Setiap platform punya provider sendiri:
+   - Browser (window.print) — sekarang
+   - Android APK (native) — nanti
+   - Electron EXE (native) — nanti
+   - QZ Tray (web silent) — opsional nanti
+   
+   Fungsi:
+   - Auto-detect provider yang available
+   - Fallback berlapis
+   - Modular: tinggal registerProvider() untuk platform baru
+   ============================================================ */
+
 export type PrintOptions = {
   copies: number;
   paperSize: string;
   dataUrl: string;
-  layout: string;         // 'POTRAIT' | 'LANDSCAPE'
+  layout: string;
   printerName?: string;
 };
 
 export type PrintProvider = {
+  name: string;
+  isAvailable: () => Promise<boolean>;
   print: (opts: PrintOptions) => Promise<boolean>;
 };
 
-/* Ukuran kertas dalam mm */
+/* ============================================================
+   REGISTRY — kumpulan provider
+   ============================================================ */
+const providers: PrintProvider[] = [];
+let activeProvider: PrintProvider | null = null;
+
+export function registerProvider(p: PrintProvider): void {
+  // Hindari duplikat
+  if (providers.find((x) => x.name === p.name)) return;
+  providers.push(p);
+}
+
+export function getRegisteredProviders(): string[] {
+  return providers.map((p) => p.name);
+}
+
+export async function detectProvider(): Promise<PrintProvider | null> {
+  // Prioritas: dari paling atas (yang didaftarkan terakhir)
+  const sorted = [...providers].reverse();
+  for (const p of sorted) {
+    try {
+      if (await p.isAvailable()) {
+        activeProvider = p;
+        console.log(`[Print] Provider aktif: ${p.name}`);
+        return p;
+      }
+    } catch {
+      // Skip provider yang error
+    }
+  }
+  activeProvider = null;
+  console.warn('[Print] Tidak ada provider yang available');
+  return null;
+}
+
+/* ============================================================
+   BROWSER PROVIDER — pakai window.print() (dialog OS)
+   ============================================================ */
 const PAPER_SIZES_MM: Record<string, { w: number; h: number }> = {
   '4 × 6 in': { w: 102, h: 152 },
   '2 × 6 in': { w: 51, h: 152 },
@@ -21,7 +75,6 @@ const PAPER_SIZES_MM: Record<string, { w: number; h: number }> = {
 
 function getPaperSize(paperSize: string, layout: string): { w: number; h: number } {
   const base = PAPER_SIZES_MM[paperSize] || PAPER_SIZES_MM['4 × 6 in'];
-  // Kalau landscape, swap width/height
   if (layout === 'LANDSCAPE') {
     return { w: base.h, h: base.w };
   }
@@ -29,6 +82,10 @@ function getPaperSize(paperSize: string, layout: string): { w: number; h: number
 }
 
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
+  name: 'browser',
+  isAvailable: async () => {
+    return typeof window !== 'undefined' && typeof document !== 'undefined';
+  },
   print: async (opts: PrintOptions): Promise<boolean> => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
@@ -93,25 +150,43 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
   },
 };
 
-let activeProvider: PrintProvider = BROWSER_PRINT_PROVIDER;
+/* ============================================================
+   REGISTER DEFAULT PROVIDER
+   ============================================================ */
+registerProvider(BROWSER_PRINT_PROVIDER);
 
-export function setPrintProvider(provider: PrintProvider): void {
-  activeProvider = provider;
-}
-
+/* ============================================================
+   PUBLIC API
+   ============================================================ */
 export async function printResult(opts: PrintOptions): Promise<boolean> {
+  // Detect provider kalau belum
+  let provider = activeProvider;
+  if (!provider) {
+    provider = await detectProvider();
+  }
+  if (!provider) return false;
+
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
   for (let i = 0; i < copies; i++) {
-    const ok = await activeProvider.print(opts);
+    const ok = await provider.print(opts);
     if (!ok) success = false;
-    // Jeda antar copy
     if (i < copies - 1) {
       await new Promise((r) => setTimeout(r, 800));
     }
   }
   return success;
+}
+
+export function getActiveProviderName(): string | null {
+  return activeProvider?.name ?? null;
+}
+
+export function setPrintProvider(provider: PrintProvider): void {
+  // Keep backward compat — register manual
+  registerProvider(provider);
+  activeProvider = provider;
 }
 
 export function getAvailablePaperSizes(): string[] {
