@@ -1,23 +1,16 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   RefreshCw,
   X,
   ChevronLeft,
   AlertCircle,
   CheckCircle2,
-  Clock,
   Plug,
-  Camera,
-  Wifi,
   HardDrive,
-  Printer,
-  Cpu,
-  Activity,
   Play,
   Trash2,
   Download,
   RotateCcw,
-  FileText,
   Smartphone,
   Tablet,
   Monitor,
@@ -25,6 +18,7 @@ import {
   Key,
   Maximize2,
   Edit3,
+  Zap,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -34,8 +28,6 @@ import {
   type CommandType,
 } from '../statusSync';
 import { formatDeviceType } from '../deviceInfo';
-
-const REFRESH_INTERVAL_MS = 3000;
 
 /* ---------- HELPERS ---------- */
 function formatDuration(ms: number): string {
@@ -71,10 +63,10 @@ function formatTokenExpiry(expiresAt: number): string {
   return `${hour}j ${remMin}m lagi`;
 }
 
-function deviceTypeIcon(type: string) {
-  if (type === 'mobile') return <Smartphone size={16} />;
-  if (type === 'tablet') return <Tablet size={16} />;
-  return <Monitor size={16} />;
+function deviceTypeIcon(type: string, size = 16) {
+  if (type === 'mobile') return <Smartphone size={size} />;
+  if (type === 'tablet') return <Tablet size={size} />;
+  return <Monitor size={size} />;
 }
 
 /* ---------- COMPONENT ---------- */
@@ -110,7 +102,6 @@ export const OperatorDashboard = ({
     return () => clearInterval(id);
   }, []);
 
-  // Reset rename input saat ganti device
   useEffect(() => {
     setRenameInput('');
     setRenaming(false);
@@ -120,7 +111,6 @@ export const OperatorDashboard = ({
     ? tablets.filter((t) => t.currentEventSlug === eventSlug)
     : tablets;
 
-  // Hitung online/offline
   const isDeviceOnline = (t: TabletStatus): boolean => {
     const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
     const isStale = lastActivityAgo > 60;
@@ -136,19 +126,29 @@ export const OperatorDashboard = ({
       ? eventFiltered.filter(isDeviceOnline)
       : eventFiltered.filter((t) => !isDeviceOnline(t));
 
-  const selectedDevice = filteredTablets.find((t) => t.deviceId === selectedDeviceId) ?? null;
+  const selectedDevice = eventFiltered.find((t) => t.deviceId === selectedDeviceId) ?? null;
 
-  const aggregatedStats = (() => {
+  // Aggregate dari SEMUA device di event (bukan yang terfilter)
+  const aggregatedStats = useMemo(() => {
     let totalSessions = 0, totalPhotos = 0, totalUploaded = 0, totalPending = 0, totalFailed = 0;
-    for (const t of filteredTablets) {
+    let driveUsed = 0, driveLimit = 0, driveConnectedCount = 0;
+    for (const t of eventFiltered) {
       totalSessions += t.todaySessionCount ?? 0;
       totalPhotos += t.todayPhotoCount ?? 0;
       totalUploaded += t.uploadedCount ?? 0;
       totalPending += t.pendingCount ?? 0;
       totalFailed += t.failedCount ?? 0;
+      if (t.driveConnected && t.driveLimit > 0) {
+        driveConnectedCount++;
+        driveUsed += t.driveUsage ?? 0;
+        driveLimit += t.driveLimit ?? 0;
+      }
     }
-    return { totalSessions, totalPhotos, totalUploaded, totalPending, totalFailed };
-  })();
+    return {
+      totalSessions, totalPhotos, totalUploaded, totalPending, totalFailed,
+      driveUsed, driveLimit, driveConnectedCount,
+    };
+  }, [eventFiltered]);
 
   useEffect(() => {
     const originalMinWidth = document.body.style.minWidth;
@@ -199,7 +199,6 @@ export const OperatorDashboard = ({
     if (ok) {
       setActionMessage(`✅ Rename dikirim. Device akan update dalam ~5 detik.`);
       setRenameInput('');
-      // Optimistic update
       setTablets((prev) => prev.map((t) =>
         t.deviceId === selectedDevice.deviceId ? { ...t, deviceName: newName } : t
       ));
@@ -208,444 +207,966 @@ export const OperatorDashboard = ({
     }
   }, [selectedDevice, renameInput]);
 
+  const drivePercent = aggregatedStats.driveLimit > 0
+    ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
+    : 0;
+
   return (
     <>
       <style>{`
         body:has(.operator-dashboard) { min-width: 0 !important; overflow: auto !important; }
-        .operator-dashboard { padding: 24px; overflow: auto; min-height: 100vh; }
-        .device-card { transition: border-color .18s, background .18s; cursor: pointer; }
-        .device-card:hover { border-color: rgba(255,217,78,.5) !important; background: rgba(255,217,78,.04) !important; }
-        .device-card.is-selected { border-color: #ffd94e !important; background: rgba(255,217,78,.08) !important; box-shadow: 0 0 0 1px rgba(255,217,78,.3); }
-        .info-row { display: flex; justify-content: space-between; font-size: 12px; gap: 8px; }
-        .info-row span:first-child { color: rgba(255,255,255,.5); }
-        .info-row span:last-child { color: #fff; text-align: right; word-break: break-word; }
-        @media (max-width: 768px) {
+
+        .operator-dashboard {
+          --op-bg: #0e0e10;
+          --op-surface: #17171a;
+          --op-surface-2: #1e1e23;
+          --op-surface-3: #26262c;
+          --op-border: #2a2a31;
+          --op-text: #f4f4f6;
+          --op-muted: #8a8a95;
+          --op-accent: #ef3f25;
+          --op-accent-soft: rgba(239,63,37,.14);
+          --op-ok: #34d399;
+          --op-warn: #f5a524;
+          --op-info: #60a5fa;
+
+          background: var(--op-bg) !important;
+          color: var(--op-text) !important;
+          display: block !important;
+          min-height: 100vh;
+          padding: 20px !important;
+          font-family: 'DM Sans', sans-serif;
+          overflow: auto;
+        }
+
+        .op-wrap { max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+        /* ---------- TOPBAR ---------- */
+        .op-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .op-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: -.01em; }
+        .op-brand__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--op-accent); box-shadow: 0 0 0 4px var(--op-accent-soft); }
+        .op-brand small { display: block; font-weight: 500; font-size: 11.5px; color: var(--op-muted); letter-spacing: 0; margin-top: 2px; }
+        .op-topbar__spacer { flex: 1; }
+
+        .op-pill {
+          display: inline-flex; align-items: center; gap: 7px;
+          padding: 6px 12px; border-radius: 999px;
+          background: var(--op-surface); border: 1px solid var(--op-border);
+          font-size: 12.5px; font-weight: 600; color: var(--op-text);
+        }
+        .op-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--op-ok); display: block; box-shadow: 0 0 0 3px rgba(52,211,153,.18); }
+
+        .op-icon-btn {
+          width: 38px; height: 38px; border-radius: 12px;
+          display: grid; place-items: center; cursor: pointer;
+          background: var(--op-surface); border: 1px solid var(--op-border); color: var(--op-muted);
+          transition: .18s; font-family: inherit;
+        }
+        .op-icon-btn:hover { color: var(--op-text); border-color: var(--op-accent); background: var(--op-accent-soft); }
+        .op-icon-btn--accent { color: var(--op-accent); }
+
+        /* ---------- TOAST ---------- */
+        .op-toast {
+          padding: 10px 14px; border-radius: 10px;
+          background: var(--op-accent-soft); border: 1px solid rgba(239,63,37,.4);
+          font-size: 13px; word-break: break-word; color: var(--op-text);
+        }
+
+        /* ---------- STAT CARDS ---------- */
+        .op-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+
+        .op-card {
+          background: var(--op-surface);
+          border: 1px solid var(--op-border);
+          border-radius: 16px;
+          padding: 18px;
+          box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.18);
+        }
+        .op-card--flush { padding: 0; overflow: hidden; }
+
+        .op-stat__label { font-size: 11.5px; color: var(--op-muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+        .op-stat__row { display: flex; align-items: baseline; gap: 10px; margin-top: 10px; }
+        .op-stat__value { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+        .op-stat__delta { font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; }
+        .op-delta--up { color: var(--op-ok); background: rgba(52,211,153,.12); }
+        .op-delta--down { color: var(--op-accent); background: var(--op-accent-soft); }
+        .op-delta--flat { color: var(--op-info); background: rgba(96,165,250,.12); }
+        .op-spark { margin-top: 14px; display: block; width: 100%; height: 32px; overflow: visible; }
+        .op-spark polyline { fill: none; stroke: var(--op-accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+        .op-spark--ok polyline { stroke: var(--op-ok); }
+        .op-spark--info polyline { stroke: var(--op-info); }
+        .op-spark--warn polyline { stroke: var(--op-warn); }
+
+        /* ---------- MAIN GRID ---------- */
+        .op-main-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+        .op-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+        /* ---------- CARD HEAD ---------- */
+        .op-card__head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+        .op-card__title { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
+        .op-card__sub { font-size: 12px; color: var(--op-muted); margin-top: 2px; }
+        .op-card__head .op-topbar__spacer { flex: 1; }
+
+        /* ---------- SEGMENTED CONTROL ---------- */
+        .op-seg {
+          display: flex; gap: 2px;
+          background: var(--op-surface-2); border: 1px solid var(--op-border);
+          border-radius: 10px; padding: 3px;
+        }
+        .op-seg button {
+          border: 0; background: none; cursor: pointer; color: var(--op-muted);
+          font: inherit; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 7px; transition: .15s;
+          display: inline-flex; align-items: center; gap: 6px;
+        }
+        .op-seg button.is-active { background: var(--op-accent); color: #fff; }
+        .op-seg button.is-active--ok { background: var(--op-ok); color: #08261a; }
+        .op-seg button.is-active--muted { background: var(--op-surface-3); color: var(--op-text); }
+        .op-seg__dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+        .op-seg__dot--ok { background: var(--op-ok); box-shadow: 0 0 6px var(--op-ok); }
+        .op-seg__dot--off { background: #6b7280; }
+
+        /* ---------- DEVICE GRID ---------- */
+        .op-device-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 10px;
+        }
+        .op-device {
+          border: 1px solid var(--op-border);
+          background: var(--op-surface-2);
+          border-radius: 12px;
+          padding: 12px;
+          display: flex; flex-direction: column; gap: 7px;
+          cursor: pointer;
+          transition: .18s;
+          position: relative;
+        }
+        .op-device:hover { border-color: rgba(239,63,37,.5); background: rgba(239,63,37,.04); }
+        .op-device.is-selected {
+          border-color: var(--op-accent);
+          background: var(--op-accent-soft);
+          box-shadow: 0 0 0 1px rgba(239,63,37,.3);
+        }
+        .op-device.is-online { border-color: rgba(52,211,153,.35); }
+        .op-device.is-online.is-selected { border-color: var(--op-accent); }
+
+        .op-device__head { display: flex; align-items: center; gap: 8px; }
+        .op-device__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .op-device__dot--on { background: var(--op-ok); box-shadow: 0 0 6px rgba(52,211,153,.8); }
+        .op-device__dot--off { background: #6b7280; }
+        .op-device__name { font-size: 13px; font-weight: 700; color: var(--op-text); flex: 1; word-break: break-word; }
+        .op-device__icon { color: var(--op-muted); display: grid; place-items: center; }
+
+        .op-device__meta { font-size: 11px; color: var(--op-muted); }
+        .op-device__id { font-size: 10.5px; color: var(--op-muted); font-variant-numeric: tabular-nums; }
+        .op-device__event { font-size: 12px; color: rgba(244,244,246,.7); }
+
+        .op-device__row { display: flex; justify-content: space-between; font-size: 11.5px; gap: 8px; }
+        .op-device__row span:first-child { color: var(--op-muted); }
+        .op-device__row span:last-child { color: var(--op-text); text-align: right; word-break: break-word; }
+
+        .op-device__phase {
+          display: inline-block;
+          font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+          color: var(--op-accent);
+          background: var(--op-accent-soft);
+          padding: 2px 7px; border-radius: 6px;
+        }
+
+        .op-device__status {
+          font-size: 10px; font-weight: 700; letter-spacing: .12em;
+          color: var(--op-ok);
+        }
+        .op-device__status--off { color: #6b7280; }
+
+        .op-device__select-hint {
+          margin-top: 4px;
+          font-size: 10px; text-align: right;
+          color: var(--op-muted);
+        }
+        .op-device.is-selected .op-device__select-hint { color: var(--op-accent); font-weight: 700; }
+
+        /* ---------- BADGES ---------- */
+        .op-badge {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 3px 10px; border-radius: 999px;
+          font-size: 11px; font-weight: 700;
+        }
+        .op-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+        .op-badge--ok { color: var(--op-ok); background: rgba(52,211,153,.12); }
+        .op-badge--warn { color: var(--op-warn); background: rgba(245,165,36,.13); }
+        .op-badge--err { color: var(--op-accent); background: var(--op-accent-soft); }
+        .op-badge--info { color: var(--op-info); background: rgba(96,165,250,.12); }
+        .op-badge--muted { color: var(--op-muted); background: var(--op-surface-3); }
+
+        /* ---------- DEVICE DETAIL ---------- */
+        .op-detail-head {
+          display: flex; justify-content: space-between; align-items: center;
+          gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+        }
+        .op-detail-eyebrow { font-size: 10.5px; color: var(--op-muted); letter-spacing: .1em; margin-bottom: 4px; }
+        .op-detail-title { font-size: 17px; font-weight: 700; color: var(--op-text); margin: 0; }
+
+        .op-section-title {
+          font-size: 11.5px; letter-spacing: .1em; color: var(--op-muted);
+          font-weight: 700; text-transform: uppercase;
+          margin: 0 0 10px;
+        }
+
+        .op-section { margin-bottom: 18px; }
+        .op-section:last-child { margin-bottom: 0; }
+
+        .op-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .op-info-card {
+          border: 1px solid var(--op-border);
+          background: var(--op-surface-2);
+          border-radius: 10px;
+          padding: 12px;
+        }
+        .op-info-card__label {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 10.5px; color: var(--op-muted); letter-spacing: .06em; margin-bottom: 6px;
+        }
+        .op-info-card__value { font-size: 14px; font-weight: 700; word-break: break-word; }
+
+        /* ---------- RENAME ---------- */
+        .op-rename-box {
+          padding: 14px;
+          background: var(--op-surface-2);
+          border: 1px solid var(--op-border);
+          border-radius: 12px;
+        }
+        .op-rename-box__head {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 11.5px; font-weight: 700; letter-spacing: .1em;
+          color: var(--op-accent); margin-bottom: 12px;
+        }
+        .op-rename-label {
+          font-size: 10.5px; color: var(--op-muted);
+          letter-spacing: .06em; margin-bottom: 5px;
+        }
+        .op-rename-current {
+          padding: 10px 14px;
+          background: rgba(0,0,0,.35);
+          border: 1px solid var(--op-border);
+          border-radius: 8px;
+          font-size: 14px; font-weight: 700;
+          word-break: break-all;
+          margin-bottom: 12px;
+        }
+        .op-rename-row { display: flex; gap: 8px; flex-wrap: wrap; }
+        .op-rename-input {
+          flex: 1; min-width: 200px;
+          padding: 10px 14px;
+          background: var(--op-surface);
+          border: 1px solid var(--op-border);
+          border-radius: 8px;
+          color: var(--op-text);
+          font-size: 13px; font-family: inherit;
+          outline: none;
+          transition: .15s;
+        }
+        .op-rename-input:focus { border-color: var(--op-accent); box-shadow: 0 0 0 3px var(--op-accent-soft); }
+        .op-rename-input::placeholder { color: var(--op-muted); }
+
+        .op-btn {
+          display: inline-flex; align-items: center; gap: 6px;
+          padding: 10px 18px;
+          border: 0; border-radius: 8px;
+          font-family: inherit; font-size: 12px; font-weight: 700; letter-spacing: .06em;
+          cursor: pointer; transition: .15s;
+          white-space: nowrap;
+        }
+        .op-btn--accent { background: var(--op-accent); color: #fff; }
+        .op-btn--accent:hover:not(:disabled) { background: #d63320; }
+        .op-btn--accent:disabled { background: #3a3a42; color: var(--op-muted); cursor: not-allowed; }
+        .op-btn--ghost { background: var(--op-surface-3); color: var(--op-text); border: 1px solid var(--op-border); }
+        .op-btn--ghost:hover { background: var(--op-surface-2); border-color: var(--op-accent); color: var(--op-accent); }
+
+        /* ---------- STORAGE BAR ---------- */
+        .op-bar { height: 8px; border-radius: 999px; background: var(--op-surface-3); overflow: hidden; }
+        .op-bar__fill { height: 100%; border-radius: 999px; transition: width .3s; }
+        .op-bar__fill--ok { background: var(--op-ok); }
+        .op-bar__fill--warn { background: var(--op-warn); }
+        .op-bar__fill--err { background: var(--op-accent); }
+
+        /* ---------- STATUS ROWS ---------- */
+        .op-row {
+          display: flex; align-items: center; gap: 10px;
+          padding: 11px 0; border-bottom: 1px solid var(--op-border);
+        }
+        .op-row:last-child { border-bottom: 0; padding-bottom: 0; }
+        .op-row:first-child { padding-top: 0; }
+        .op-row__label { flex: 1; font-size: 13px; font-weight: 500; color: var(--op-text); }
+        .op-row__meta { font-size: 11.5px; color: var(--op-muted); }
+        .op-row__value { font-size: 13px; font-weight: 700; color: var(--op-text); font-variant-numeric: tabular-nums; }
+
+        /* ---------- QUICK ACTIONS (CIRCULAR) ---------- */
+        .op-qa-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 16px 8px;
+        }
+        .op-qa {
+          display: flex; flex-direction: column; align-items: center; gap: 9px;
+          background: none; border: 0; cursor: pointer;
+          color: var(--op-text); font-family: inherit;
+          font-size: 11px; font-weight: 600; text-align: center; line-height: 1.3;
+          padding: 0;
+        }
+        .op-qa:disabled { cursor: not-allowed; opacity: .4; }
+        .op-qa__btn {
+          width: 54px; height: 54px; border-radius: 50%;
+          display: grid; place-items: center;
+          background: var(--op-surface-2);
+          border: 1px solid var(--op-border);
+          color: var(--op-text);
+          transition: .18s;
+        }
+        .op-qa:hover:not(:disabled) .op-qa__btn {
+          border-color: var(--op-accent);
+          color: var(--op-accent);
+          background: var(--op-accent-soft);
+          transform: translateY(-2px);
+        }
+        .op-qa--primary .op-qa__btn {
+          background: var(--op-accent);
+          border-color: var(--op-accent);
+          color: #fff;
+          box-shadow: 0 6px 18px var(--op-accent-soft);
+        }
+        .op-qa--primary:hover:not(:disabled) .op-qa__btn {
+          filter: brightness(1.08);
+          color: #fff;
+          background: var(--op-accent);
+        }
+        .op-qa--danger .op-qa__btn { color: #ff8574; }
+        .op-qa--info .op-qa__btn { color: var(--op-info); }
+
+        .op-qa-hint {
+          padding: 12px; margin-bottom: 14px;
+          font-size: 12px; color: var(--op-muted);
+          text-align: center;
+          border: 1px dashed var(--op-border);
+          border-radius: 10px;
+          background: var(--op-surface-2);
+        }
+
+        /* ---------- EMPTY STATE ---------- */
+        .op-empty {
+          padding: 28px 0;
+          text-align: center;
+          font-size: 13px;
+          color: var(--op-muted);
+        }
+
+        /* ---------- RESPONSIVE ---------- */
+        @media (max-width: 1080px) {
+          .op-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .op-main-grid { grid-template-columns: minmax(0, 1fr); }
+        }
+        @media (max-width: 640px) {
           .operator-dashboard { padding: 12px !important; }
-          .op-grid { grid-template-columns: 1fr !important; }
-          .op-grid-stats { grid-template-columns: repeat(2, 1fr) !important; }
-          .op-grid-device { grid-template-columns: repeat(2, 1fr) !important; }
-          .op-grid-tablets { grid-template-columns: 1fr !important; }
+          .op-stats { grid-template-columns: minmax(0, 1fr); }
+          .op-qa-grid { grid-template-columns: repeat(3, 1fr); }
+          .op-device-grid { grid-template-columns: minmax(0, 1fr); }
         }
       `}</style>
 
       <main className="photobooth-screen photobooth-kiosk operator-dashboard">
-        <div className="photobooth-kiosk-header">
-          <div className="photobooth-project">
-            <span>R3A BOOTH</span>
-            <strong>
-              OPERATOR DASHBOARD
-              {eventSlug ? <span style={{ color: '#ffd94e', marginLeft: 8 }}>— {eventSlug}</span> : null}
-            </strong>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div className="op-wrap">
+
+          {/* ============ TOPBAR ============ */}
+          <header className="op-topbar">
+            <div className="op-brand">
+              <span className="op-brand__dot" />
+              <div>
+                R3A Booth
+                <small>
+                  Operator Dashboard
+                  {eventSlug ? <> · <span style={{ color: 'var(--op-accent)' }}>{eventSlug}</span></> : null}
+                </small>
+              </div>
+            </div>
+
+            <div className="op-topbar__spacer" />
+
+            <span className="op-pill"><i /> {onlineCount > 0 ? 'Booth Online' : 'Menunggu Device'}</span>
+            <span className="op-pill">{onlineCount} / {eventFiltered.length} device</span>
+
             {onBackToPhotobooth && eventSlug ? (
-              <button className="photobooth-exit" onClick={onBackToPhotobooth} type="button" style={{ background: '#4ade80', color: '#000', borderColor: 'transparent' }}>
-                <ChevronLeft size={24} /> BACK TO PHOTOBOOTH
+              <button
+                type="button"
+                className="op-icon-btn op-icon-btn--accent"
+                onClick={onBackToPhotobooth}
+                title="Back to Photobooth"
+                aria-label="Back to Photobooth"
+              >
+                <ChevronLeft size={18} />
               </button>
             ) : null}
-            <button className="photobooth-exit" onClick={onClose} type="button"><X size={24} /> CLOSE</button>
+
+            <button
+              type="button"
+              className="op-icon-btn"
+              onClick={onClose}
+              title="Close"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </header>
+
+          {/* ============ TOAST ============ */}
+          {actionMessage ? <div className="op-toast">{actionMessage}</div> : null}
+
+          {/* ============ STAT CARDS ============ */}
+          <section className="op-stats">
+            <StatCard
+              label="Sesi Hari Ini"
+              value={String(aggregatedStats.totalSessions)}
+              delta={aggregatedStats.totalSessions > 0 ? `+${aggregatedStats.totalSessions}` : '±0'}
+              deltaTone="up"
+              spark="0,25 12,21 24,23 36,14 48,18 60,10 72,13 84,6 100,9"
+            />
+            <StatCard
+              label="Foto Hari Ini"
+              value={String(aggregatedStats.totalPhotos)}
+              delta={aggregatedStats.totalPhotos > 0 ? `+${aggregatedStats.totalPhotos}` : '±0'}
+              deltaTone="up"
+              spark="0,21 12,23 24,17 36,19 48,12 60,15 72,9 84,11 100,5"
+            />
+            <StatCard
+              label="Uploaded"
+              value={String(aggregatedStats.totalUploaded)}
+              delta={aggregatedStats.totalPending > 0 ? `${aggregatedStats.totalPending} pending` : 'Clean'}
+              deltaTone={aggregatedStats.totalPending > 0 ? 'flat' : 'up'}
+              spark="0,21 12,23 24,17 36,19 48,12 60,15 72,9 84,11 100,5"
+              tone="ok"
+            />
+            <StatCard
+              label="Failed"
+              value={String(aggregatedStats.totalFailed)}
+              delta={aggregatedStats.totalFailed === 0 ? 'Clean' : 'Perlu cek'}
+              deltaTone={aggregatedStats.totalFailed === 0 ? 'up' : 'down'}
+              spark="0,20 12,22 24,18 36,21 48,20 60,22 72,21 84,23 100,22"
+              tone={aggregatedStats.totalFailed > 0 ? 'warn' : 'ok'}
+            />
+          </section>
+
+          {/* ============ MAIN GRID ============ */}
+          <div className="op-main-grid">
+
+            {/* ---------- LEFT COLUMN ---------- */}
+            <div className="op-col">
+
+              {/* LIVE DEVICES */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div>
+                    <div className="op-card__title">
+                      Live Devices <span style={{ color: 'var(--op-muted)', fontWeight: 500 }}>({filteredTablets.length})</span>
+                    </div>
+                    <div className="op-card__sub">Update tiap 1 detik · klik device untuk pilih</div>
+                  </div>
+                  <div className="op-topbar__spacer" />
+                  <div className="op-seg">
+                    <button
+                      type="button"
+                      className={deviceFilter === 'all' ? 'is-active' : ''}
+                      onClick={() => setDeviceFilter('all')}
+                    >
+                      ALL ({eventFiltered.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={deviceFilter === 'online' ? 'is-active is-active--ok' : ''}
+                      onClick={() => setDeviceFilter('online')}
+                    >
+                      <span className="op-seg__dot op-seg__dot--ok" />
+                      ONLINE ({onlineCount})
+                    </button>
+                    <button
+                      type="button"
+                      className={deviceFilter === 'offline' ? 'is-active is-active--muted' : ''}
+                      onClick={() => setDeviceFilter('offline')}
+                    >
+                      <span className="op-seg__dot op-seg__dot--off" />
+                      OFFLINE ({offlineCount})
+                    </button>
+                  </div>
+                </div>
+
+                {filteredTablets.length === 0 ? (
+                  <div className="op-empty">
+                    {deviceFilter === 'online'
+                      ? '✅ Tidak ada device online saat ini'
+                      : deviceFilter === 'offline'
+                        ? '✅ Semua device online'
+                        : eventSlug
+                          ? `Tidak ada device untuk event "${eventSlug}"`
+                          : 'Tidak ada device terdeteksi'}
+                  </div>
+                ) : (
+                  <div className="op-device-grid">
+                    {filteredTablets.map((t) => {
+                      const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
+                      const isStale = lastActivityAgo > 60;
+                      const isOnline = t.online && !isStale;
+                      const isSelected = selectedDeviceId === t.deviceId;
+                      const openDuration = t.eventOpenedAt > 0 ? Date.now() - t.eventOpenedAt : 0;
+                      const hasCustomName = !!(t.deviceName && t.deviceName.trim());
+
+                      return (
+                        <div
+                          key={t.deviceId}
+                          onClick={() => setSelectedDeviceId(isSelected ? null : t.deviceId)}
+                          className={[
+                            'op-device',
+                            isOnline ? 'is-online' : '',
+                            isSelected ? 'is-selected' : '',
+                          ].join(' ')}
+                        >
+                          <div className="op-device__head">
+                            <span className={`op-device__dot ${isOnline ? 'op-device__dot--on' : 'op-device__dot--off'}`} />
+                            <strong className="op-device__name">
+                              {hasCustomName
+                                ? t.deviceName
+                                : `${t.browser || 'Browser'} - ${formatDeviceType(t.deviceType || 'unknown')} - ${t.os || 'OS'}`}
+                            </strong>
+                            <span className="op-device__icon">{deviceTypeIcon(t.deviceType || 'desktop', 16)}</span>
+                          </div>
+
+                          {hasCustomName ? (
+                            <div className="op-device__meta">
+                              {t.browser || 'Browser'} · {formatDeviceType(t.deviceType || 'unknown')} · {t.os || 'OS'}
+                            </div>
+                          ) : null}
+
+                          <div className="op-device__id">ID: {t.deviceId.slice(-8)}</div>
+
+                          {t.currentEventName ? (
+                            <div className="op-device__event">📸 {t.currentEventName}</div>
+                          ) : (
+                            <div className="op-device__event" style={{ color: 'var(--op-muted)' }}>Belum ada event</div>
+                          )}
+
+                          <div className="op-device__row">
+                            <span>Phase</span>
+                            <span className="op-device__phase">{t.currentPhase.toUpperCase()}</span>
+                          </div>
+
+                          <div className="op-device__row">
+                            <span>Foto</span>
+                            <span>{t.photoCount} / {t.totalCaptures}</span>
+                          </div>
+
+                          {openDuration > 0 ? (
+                            <div className="op-device__row">
+                              <span>Buka event</span>
+                              <span>{formatDuration(openDuration)}</span>
+                            </div>
+                          ) : null}
+
+                          <div className={`op-device__status ${isOnline ? '' : 'op-device__status--off'}`}>
+                            ● {isOnline ? 'ONLINE' : 'OFFLINE'}
+                          </div>
+
+                          <div className="op-device__select-hint">
+                            {isSelected ? '▼ TERPILIH' : 'Klik untuk pilih'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* DEVICE DETAIL */}
+              {selectedDevice ? (
+                <div className="op-card">
+                  <div className="op-detail-head">
+                    <div>
+                      <div className="op-detail-eyebrow">DEVICE DETAIL</div>
+                      <h3 className="op-detail-title">
+                        {selectedDevice.deviceName || `${selectedDevice.browser} · ${formatDeviceType(selectedDevice.deviceType || 'unknown')} · ${selectedDevice.os}`}
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      className="op-btn op-btn--ghost"
+                      onClick={() => setSelectedDeviceId(null)}
+                    >
+                      <X size={14} /> TUTUP
+                    </button>
+                  </div>
+
+                  {/* RENAME */}
+                  <div className="op-section">
+                    <div className="op-rename-box">
+                      <div className="op-rename-box__head">
+                        <Edit3 size={14} /> DEVICE MANAGEMENT
+                      </div>
+
+                      <div className="op-rename-label">NAMA SEKARANG</div>
+                      <div className="op-rename-current">
+                        {selectedDevice.deviceName
+                          || `${selectedDevice.browser} - ${formatDeviceType(selectedDevice.deviceType || 'unknown')} - ${selectedDevice.os}`}
+                      </div>
+
+                      <div className="op-rename-label">NAMA BARU</div>
+                      <div className="op-rename-row">
+                        <input
+                          type="text"
+                          className="op-rename-input"
+                          value={renameInput}
+                          onChange={(e) => setRenameInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && renameInput.trim()) void handleRename();
+                          }}
+                          placeholder="Contoh: Booth Utama, Booth Pintu Masuk…"
+                        />
+                        <button
+                          type="button"
+                          className="op-btn op-btn--accent"
+                          onClick={handleRename}
+                          disabled={renaming || !renameInput.trim()}
+                        >
+                          {renaming ? 'MENGIRIM…' : 'RENAME'}
+                        </button>
+                      </div>
+                      <p style={{ margin: '10px 0 0', fontSize: 11.5, color: 'var(--op-muted)', lineHeight: 1.5 }}>
+                        💡 Nama baru diterapkan dalam ~5 detik setelah device online &amp; menerima perintah.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* IDENTITY */}
+                  <div className="op-section">
+                    <h4 className="op-section-title">Identitas Device</h4>
+                    <div className="op-info-grid">
+                      <InfoCard icon={<Monitor size={14} />} label="TIPE" value={formatDeviceType(selectedDevice.deviceType || 'unknown')} />
+                      <InfoCard icon={<Globe size={14} />} label="BROWSER" value={selectedDevice.browser || '—'} />
+                      <InfoCard icon={<Monitor size={14} />} label="OS" value={selectedDevice.os || '—'} />
+                      <InfoCard icon={<Monitor size={14} />} label="SCREEN" value={selectedDevice.screenSize || '—'} />
+                    </div>
+                  </div>
+
+                  {/* DRIVE STORAGE */}
+                  <div className="op-section">
+                    <h4 className="op-section-title">Storage Google Drive (Device Ini)</h4>
+                    {selectedDevice.driveConnected && selectedDevice.driveLimit > 0 ? (
+                      <>
+                        <div className="op-info-grid" style={{ marginBottom: 12 }}>
+                          <InfoCard icon={<HardDrive size={14} />} label="FREE" value={formatBytes(Math.max(0, selectedDevice.driveLimit - selectedDevice.driveUsage))} color="var(--op-ok)" />
+                          <InfoCard icon={<HardDrive size={14} />} label="USED" value={formatBytes(selectedDevice.driveUsage)} color="var(--op-warn)" />
+                          <InfoCard icon={<HardDrive size={14} />} label="TOTAL LIMIT" value={formatBytes(selectedDevice.driveLimit)} />
+                        </div>
+                        <div className="op-bar">
+                          <div
+                            className={`op-bar__fill ${(selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.9 ? 'op-bar__fill--err' : (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.75 ? 'op-bar__fill--warn' : 'op-bar__fill--ok'}`}
+                            style={{ width: `${Math.min(100, (selectedDevice.driveUsage / selectedDevice.driveLimit) * 100)}%` }}
+                          />
+                        </div>
+                        <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--op-muted)' }}>
+                          {((selectedDevice.driveUsage / selectedDevice.driveLimit) * 100).toFixed(1)}% terpakai
+                        </p>
+                      </>
+                    ) : (
+                      <p style={{ color: 'var(--op-muted)', fontSize: 13, margin: 0 }}>
+                        Drive tidak terhubung — quota tidak tersedia.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* DRIVE & UPLOAD */}
+                  <div className="op-section">
+                    <h4 className="op-section-title">Google Drive &amp; Upload</h4>
+                    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                      <div className="op-info-card">
+                        <div className="op-info-card__label"><HardDrive size={12} /> DRIVE STATUS</div>
+                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                          <span className="op-row__label">Status</span>
+                          {selectedDevice.driveConnected
+                            ? <span className="op-badge op-badge--ok">Connected</span>
+                            : <span className="op-badge op-badge--err">Not connected</span>}
+                        </div>
+                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                          <span className="op-row__label">Account</span>
+                          <span className="op-row__value" style={{ fontSize: 12, fontWeight: 600 }}>{selectedDevice.driveAccount || '—'}</span>
+                        </div>
+                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 0 }}>
+                          <span className="op-row__label">Token</span>
+                          <span className="op-row__value" style={{ fontSize: 12, color: selectedDevice.driveTokenExpiresAt > Date.now() ? 'var(--op-ok)' : 'var(--op-accent)' }}>
+                            {formatTokenExpiry(selectedDevice.driveTokenExpiresAt ?? 0)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="op-info-card">
+                        <div className="op-info-card__label"><CheckCircle2 size={12} /> UPLOAD STATUS</div>
+                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                          <span className="op-row__label">Uploaded</span>
+                          <span className="op-row__value" style={{ color: 'var(--op-ok)' }}>{selectedDevice.uploadedCount ?? 0}</span>
+                        </div>
+                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 6 }}>
+                          <span className="op-row__label">Pending</span>
+                          <span className="op-row__value" style={{ color: 'var(--op-warn)' }}>{selectedDevice.pendingCount ?? 0}</span>
+                        </div>
+                        <div className="op-row" style={{ paddingTop: 6, paddingBottom: 0 }}>
+                          <span className="op-row__label">Failed</span>
+                          <span className="op-row__value" style={{ color: 'var(--op-accent)' }}>{selectedDevice.failedCount ?? 0}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* EVENT DURATION */}
+                  {selectedDevice.eventOpenedAt > 0 ? (
+                    <div className="op-section">
+                      <h4 className="op-section-title">Durasi Event Terbuka</h4>
+                      <div className="op-info-card">
+                        <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--op-accent)', letterSpacing: '-.02em' }}>
+                          {formatDuration(Date.now() - selectedDevice.eventOpenedAt)}
+                        </div>
+                        <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--op-muted)' }}>
+                          Dibuka: {new Date(selectedDevice.eventOpenedAt).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            {/* ---------- RIGHT COLUMN ---------- */}
+            <div className="op-col">
+
+              {/* QUICK ACTIONS */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div>
+                    <div className="op-card__title">
+                      <Zap size={14} style={{ verticalAlign: 'middle', marginRight: 6, color: 'var(--op-accent)' }} />
+                      Quick Actions
+                    </div>
+                    <div className="op-card__sub">
+                      {selectedDevice
+                        ? <>→ {selectedDevice.browser} · {selectedDevice.os}</>
+                        : 'Pilih device dulu'}
+                    </div>
+                  </div>
+                </div>
+
+                {!selectedDevice ? (
+                  <div className="op-qa-hint">
+                    Klik salah satu device di kiri untuk mengaktifkan aksi.
+                  </div>
+                ) : null}
+
+                <div className="op-qa-grid">
+                  <QaButton
+                    icon={<Maximize2 size={20} />}
+                    label="Fullscreen"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('force-fullscreen', 'Force Fullscreen')}
+                  />
+                  <QaButton
+                    icon={<Key size={20} />}
+                    label="Refresh Token"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('refresh-token', 'Refresh Token')}
+                    tone="info"
+                  />
+                  <QaButton
+                    icon={<Plug size={20} />}
+                    label="Reconnect"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('reconnect-drive', 'Reconnect Drive')}
+                    tone="info"
+                  />
+                  <QaButton
+                    icon={<RefreshCw size={20} />}
+                    label="Retry Upload"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('retry-all', 'Retry Upload')}
+                    tone="primary"
+                  />
+                  <QaButton
+                    icon={<Trash2 size={20} />}
+                    label="Clear Cache"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('clear-cache', 'Clear Cache')}
+                  />
+                  <QaButton
+                    icon={<RotateCcw size={20} />}
+                    label="Reset Uptime"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('reset-uptime', 'Reset Uptime')}
+                  />
+                  <QaButton
+                    icon={<Trash2 size={20} />}
+                    label="Clear Stats"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('clear-stats', 'Clear Stats')}
+                  />
+                  <QaButton
+                    icon={<Download size={20} />}
+                    label="Logs"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('download-logs', 'Download Logs')}
+                  />
+                  <QaButton
+                    icon={<Play size={20} />}
+                    label="Reload App"
+                    disabled={!selectedDevice}
+                    onClick={() => handleCommand('reload-app', 'Reload App')}
+                    tone="danger"
+                  />
+                </div>
+              </div>
+
+              {/* HEALTH SUMMARY */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div>
+                    <div className="op-card__title">Ringkasan Health</div>
+                    <div className="op-card__sub">{eventFiltered.length} device terdeteksi</div>
+                  </div>
+                </div>
+
+                <div className="op-row">
+                  <span className="op-row__label">Online</span>
+                  <span className="op-badge op-badge--ok">{onlineCount}</span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Offline</span>
+                  <span className="op-badge op-badge--muted">{offlineCount}</span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Drive Connected</span>
+                  <span className="op-badge op-badge--info">{aggregatedStats.driveConnectedCount}</span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Pending Upload</span>
+                  <span className={`op-badge ${aggregatedStats.totalPending > 0 ? 'op-badge--warn' : 'op-badge--ok'}`}>
+                    {aggregatedStats.totalPending}
+                  </span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Failed Upload</span>
+                  <span className={`op-badge ${aggregatedStats.totalFailed > 0 ? 'op-badge--err' : 'op-badge--ok'}`}>
+                    {aggregatedStats.totalFailed}
+                  </span>
+                </div>
+              </div>
+
+              {/* STORAGE SUMMARY */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div>
+                    <div className="op-card__title">Storage Drive</div>
+                    <div className="op-card__sub">Total dari device yang connected</div>
+                  </div>
+                  <div className="op-topbar__spacer" />
+                  <span className="op-row__meta">
+                    {aggregatedStats.driveLimit > 0
+                      ? `${formatBytes(aggregatedStats.driveUsed)} / ${formatBytes(aggregatedStats.driveLimit)}`
+                      : '—'}
+                  </span>
+                </div>
+
+                <div className="op-bar">
+                  <div
+                    className={`op-bar__fill ${drivePercent > 90 ? 'op-bar__fill--err' : drivePercent > 75 ? 'op-bar__fill--warn' : 'op-bar__fill--ok'}`}
+                    style={{ width: `${Math.min(100, drivePercent)}%` }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 12, color: 'var(--op-muted)' }}>
+                  <span>{drivePercent.toFixed(1)}% terpakai</span>
+                  <span>
+                    {aggregatedStats.driveLimit > 0
+                      ? `${formatBytes(Math.max(0, aggregatedStats.driveLimit - aggregatedStats.driveUsed))} tersisa`
+                      : 'Belum terhubung'}
+                  </span>
+                </div>
+              </div>
+
+            </div>
           </div>
         </div>
-
-        <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 12, margin: '0 0 16px' }}>
-          Live update tiap 1 detik
-        </p>
-
-        {actionMessage ? (
-          <div style={{ padding: '10px 14px', background: 'rgba(239,63,37,.15)', border: '1px solid rgba(239,63,37,.4)', marginBottom: 16, fontSize: 13, wordBreak: 'break-word' }}>
-            {actionMessage}
-          </div>
-        ) : null}
-
-        {/* LIVE DEVICES */}
-        <section style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
-            <h3 style={{ margin: 0, fontSize: 14, letterSpacing: '.1em' }}>
-              LIVE DEVICES ({filteredTablets.length})
-              {eventSlug ? <span style={{ color: '#ffd94e', marginLeft: 8, fontSize: 12 }}>• Event: {eventSlug}</span> : null}
-            </h3>
-          </div>
-
-          {/* FILTER TABS — Online/Offline/All */}
-          <div style={{
-            display: 'flex', gap: 0, marginBottom: 12,
-            border: '1px solid rgba(255,255,255,.15)',
-            borderRadius: 6, overflow: 'hidden',
-            background: 'rgba(0,0,0,.2)',
-          }}>
-            <button
-              type="button"
-              onClick={() => setDeviceFilter('all')}
-              style={{
-                flex: 1, padding: '10px 16px',
-                background: deviceFilter === 'all' ? 'rgba(255,217,78,.15)' : 'transparent',
-                border: 'none',
-                color: deviceFilter === 'all' ? '#ffd94e' : 'rgba(255,255,255,.6)',
-                fontWeight: 700, fontSize: 12, letterSpacing: '.08em',
-                cursor: 'pointer',
-                borderRight: '1px solid rgba(255,255,255,.1)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}
-            >
-              ALL ({eventFiltered.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setDeviceFilter('online')}
-              style={{
-                flex: 1, padding: '10px 16px',
-                background: deviceFilter === 'online' ? 'rgba(74,222,128,.15)' : 'transparent',
-                border: 'none',
-                color: deviceFilter === 'online' ? '#4ade80' : 'rgba(255,255,255,.6)',
-                fontWeight: 700, fontSize: 12, letterSpacing: '.08em',
-                cursor: 'pointer',
-                borderRight: '1px solid rgba(255,255,255,.1)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80' }} />
-              ONLINE ({onlineCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setDeviceFilter('offline')}
-              style={{
-                flex: 1, padding: '10px 16px',
-                background: deviceFilter === 'offline' ? 'rgba(255,255,255,.08)' : 'transparent',
-                border: 'none',
-                color: deviceFilter === 'offline' ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.6)',
-                fontWeight: 700, fontSize: 12, letterSpacing: '.08em',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6b7280' }} />
-              OFFLINE ({offlineCount})
-            </button>
-          </div>
-
-          {filteredTablets.length === 0 ? (
-            <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0, textAlign: 'center', padding: '24px 0' }}>
-              {deviceFilter === 'online'
-                ? '✅ Tidak ada device online saat ini'
-                : deviceFilter === 'offline'
-                  ? '✅ Semua device online'
-                  : eventSlug
-                    ? `Tidak ada device untuk event "${eventSlug}"`
-                    : 'Tidak ada device terdeteksi'}
-            </p>
-          ) : (
-            <div className="op-grid-tablets" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
-              {filteredTablets.map((t) => {
-                const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
-                const isStale = lastActivityAgo > 60;
-                const isOnline = t.online && !isStale;
-                const isSelected = selectedDeviceId === t.deviceId;
-                const openDuration = t.eventOpenedAt > 0 ? Date.now() - t.eventOpenedAt : 0;
-                const hasCustomName = t.deviceName && t.deviceName.trim();
-
-                return (
-                  <div
-                    key={t.deviceId}
-                    onClick={() => setSelectedDeviceId(isSelected ? null : t.deviceId)}
-                    className={`device-card ${isSelected ? 'is-selected' : ''}`}
-                    style={{
-                      border: `1px solid ${isOnline ? 'rgba(74,222,128,.4)' : 'rgba(255,255,255,.1)'}`,
-                      padding: 12,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 6,
-                      background: isOnline ? 'rgba(74,222,128,.05)' : 'transparent',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: isOnline ? '#4ade80' : '#6b7280', flexShrink: 0 }} />
-                      <strong style={{ fontSize: 13, color: '#fff', wordBreak: 'break-word', flex: 1 }}>
-                        {hasCustomName ? t.deviceName : `${t.browser || 'Browser'} - ${formatDeviceType(t.deviceType || 'unknown')} - ${t.os || 'OS'}`}
-                      </strong>
-                      <span style={{ color: 'rgba(255,255,255,.6)' }}>
-                        {deviceTypeIcon(t.deviceType || 'desktop')}
-                      </span>
-                    </div>
-
-                    {hasCustomName ? (
-                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
-                        {t.browser || 'Browser'} · {formatDeviceType(t.deviceType || 'unknown')} · {t.os || 'OS'}
-                      </div>
-                    ) : null}
-
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
-                      ID: {t.deviceId.slice(-8)}
-                    </div>
-
-                    {t.currentEventName ? (
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.7)' }}>📸 {t.currentEventName}</div>
-                    ) : (
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>Belum ada event</div>
-                    )}
-
-                    <div className="info-row">
-                      <span>Phase:</span>
-                      <span style={{ color: '#ffd94e', fontWeight: 600 }}>{t.currentPhase.toUpperCase()}</span>
-                    </div>
-
-                    <div className="info-row">
-                      <span>Foto:</span>
-                      <span>{t.photoCount} / {t.totalCaptures}</span>
-                    </div>
-
-                    {openDuration > 0 ? (
-                      <div className="info-row">
-                        <span>Buka event:</span>
-                        <span>{formatDuration(openDuration)}</span>
-                      </div>
-                    ) : null}
-
-                    <div style={{ fontSize: 11, color: isOnline ? '#4ade80' : '#6b7280', marginTop: 4, fontWeight: 600, letterSpacing: '.1em' }}>
-                      {isOnline ? '● ONLINE' : '● OFFLINE'}
-                    </div>
-
-                    <div style={{ marginTop: 6, fontSize: 10, color: isSelected ? '#ffd94e' : 'rgba(255,255,255,.3)', textAlign: 'right' }}>
-                      {isSelected ? '▼ TERPILIH' : 'Klik untuk pilih'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* DEVICE DETAIL */}
-        {selectedDevice ? (
-          <section style={{ marginBottom: 16, border: '2px solid rgba(255,217,78,.4)', padding: 16, background: 'rgba(255,217,78,.03)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-              <div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.1em', marginBottom: 4 }}>DEVICE DETAIL</div>
-                <h3 style={{ margin: 0, fontSize: 18, color: '#fff' }}>
-                  {selectedDevice.browser} - {formatDeviceType(selectedDevice.deviceType || 'unknown')} - {selectedDevice.os}
-                </h3>
-              </div>
-              <button onClick={() => setSelectedDeviceId(null)} type="button" style={{ padding: '8px 16px', background: 'rgba(255,255,255,.1)', color: '#fff', border: '1px solid rgba(255,255,255,.2)', fontWeight: 600, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <X size={14} /> BATAL
-              </button>
-            </div>
-
-            {/* ⚠️ DEVICE MANAGEMENT — Rename */}
-            <div style={{ marginBottom: 16, padding: 16, background: 'rgba(255,217,78,.06)', border: '1px solid rgba(255,217,78,.25)', borderRadius: 6 }}>
-              <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: '#ffd94e', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Edit3 size={14} /> DEVICE MANAGEMENT
-              </h4>
-
-              {/* Current name */}
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em', marginBottom: 4 }}>
-                  NAMA SEKARANG
-                </div>
-                <div style={{
-                  padding: '10px 14px',
-                  background: 'rgba(0,0,0,.3)',
-                  border: '1px solid rgba(255,255,255,.1)',
-                  fontFamily: "'Space Grotesk', sans-serif",
-                  fontSize: 14, fontWeight: 700,
-                  color: '#fff',
-                  wordBreak: 'break-all',
-                }}>
-                  {selectedDevice.deviceName || `${selectedDevice.browser} - ${formatDeviceType(selectedDevice.deviceType || 'unknown')} - ${selectedDevice.os}`}
-                </div>
-              </div>
-
-              {/* Rename input */}
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em', marginBottom: 4 }}>
-                  NAMA BARU
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <input
-                    type="text"
-                    value={renameInput}
-                    onChange={(e) => setRenameInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && renameInput.trim()) {
-                        void handleRename();
-                      }
-                    }}
-                    placeholder="Contoh: Booth Utama, Booth Pintu Masuk, dll"
-                    style={{
-                      flex: 1, minWidth: 200,
-                      padding: '10px 14px',
-                      background: 'rgba(255,255,255,.06)',
-                      border: '1px solid rgba(255,255,255,.15)',
-                      color: '#fff',
-                      fontSize: 13,
-                      outline: 'none',
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRename}
-                    disabled={renaming || !renameInput.trim()}
-                    style={{
-                      padding: '10px 20px',
-                      background: renaming || !renameInput.trim() ? '#555' : '#ffd94e',
-                      color: renaming || !renameInput.trim() ? '#aaa' : '#000',
-                      border: 'none',
-                      fontWeight: 700, fontSize: 12, letterSpacing: '.06em',
-                      cursor: renaming || !renameInput.trim() ? 'not-allowed' : 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {renaming ? 'MENGIRIM...' : 'RENAME'}
-                  </button>
-                </div>
-                <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)', lineHeight: 1.4 }}>
-                  💡 Nama baru akan diterapkan di device dalam ~5 detik setelah device online &amp; menerima perintah.
-                </p>
-              </div>
-            </div>
-
-            {/* Identitas */}
-            <div style={{ marginBottom: 16 }}>
-              <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>IDENTITAS DEVICE</h4>
-              <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-                <InfoCard icon={<Monitor size={16} />} label="TIPE" value={formatDeviceType(selectedDevice.deviceType || 'unknown')} />
-                <InfoCard icon={<Globe size={16} />} label="BROWSER" value={selectedDevice.browser || '—'} />
-                <InfoCard icon={<Monitor size={16} />} label="OS" value={selectedDevice.os || '—'} />
-                <InfoCard icon={<Monitor size={16} />} label="SCREEN" value={selectedDevice.screenSize || '—'} />
-              </div>
-            </div>
-
-            {/* Storage Google Drive */}
-            <div style={{ marginBottom: 16 }}>
-              <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>STORAGE GOOGLE DRIVE (DEVICE INI)</h4>
-              {selectedDevice.driveConnected && selectedDevice.driveLimit > 0 ? (
-                <>
-                  <div className="op-grid-device" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 10 }}>
-                    <InfoCard icon={<HardDrive size={16} />} label="FREE" value={formatBytes(Math.max(0, selectedDevice.driveLimit - selectedDevice.driveUsage))} color="#4ade80" />
-                    <InfoCard icon={<HardDrive size={16} />} label="USED" value={formatBytes(selectedDevice.driveUsage)} color="#facc15" />
-                    <InfoCard icon={<HardDrive size={16} />} label="TOTAL LIMIT" value={formatBytes(selectedDevice.driveLimit)} />
-                  </div>
-                  <div style={{ height: 8, background: 'rgba(255,255,255,.1)', borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%',
-                      width: `${Math.min(100, (selectedDevice.driveUsage / selectedDevice.driveLimit) * 100)}%`,
-                      background: (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.9 ? '#ef4444'
-                        : (selectedDevice.driveUsage / selectedDevice.driveLimit) > 0.75 ? '#facc15' : '#4ade80',
-                      transition: 'width .3s',
-                    }} />
-                  </div>
-                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
-                    {((selectedDevice.driveUsage / selectedDevice.driveLimit) * 100).toFixed(1)}% used
-                  </p>
-                </>
-              ) : (
-                <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, margin: 0 }}>Drive tidak terhubung — quota tidak tersedia.</p>
-              )}
-            </div>
-
-            {/* Drive & Upload */}
-            <div style={{ marginBottom: 16 }}>
-              <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>GOOGLE DRIVE & UPLOAD</h4>
-              <div className="op-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr' }}>
-                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-                  <h5 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>DRIVE STATUS</h5>
-                  <div className="info-row" style={{ marginBottom: 6 }}>
-                    <span>Status:</span>
-                    <span style={{ color: selectedDevice.driveConnected ? '#4ade80' : '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {selectedDevice.driveConnected ? <><CheckCircle2 size={12} /> Connected</> : <><AlertCircle size={12} /> Not connected</>}
-                    </span>
-                  </div>
-                  <div className="info-row" style={{ marginBottom: 6 }}>
-                    <span>Account:</span>
-                    <span>{selectedDevice.driveAccount || '—'}</span>
-                  </div>
-                  <div className="info-row">
-                    <span>Token:</span>
-                    <span style={{ color: selectedDevice.driveTokenExpiresAt > Date.now() ? '#4ade80' : '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <Key size={12} /> {formatTokenExpiry(selectedDevice.driveTokenExpiresAt ?? 0)}
-                    </span>
-                  </div>
-                </div>
-                <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-                  <h5 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>UPLOAD STATUS</h5>
-                  <div className="info-row" style={{ marginBottom: 6 }}><span>Uploaded:</span><span style={{ color: '#4ade80' }}>{selectedDevice.uploadedCount ?? 0}</span></div>
-                  <div className="info-row" style={{ marginBottom: 6 }}><span>Pending:</span><span style={{ color: '#facc15' }}>{selectedDevice.pendingCount ?? 0}</span></div>
-                  <div className="info-row"><span>Failed:</span><span style={{ color: '#ef4444' }}>{selectedDevice.failedCount ?? 0}</span></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Durasi */}
-            {selectedDevice.eventOpenedAt > 0 ? (
-              <div style={{ marginBottom: 16, border: '1px solid rgba(255,255,255,.1)', padding: 16 }}>
-                <h4 style={{ margin: '0 0 10px', fontSize: 12, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>DURASI EVENT TERBUKA</h4>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#ffd94e' }}>
-                  {formatDuration(Date.now() - selectedDevice.eventOpenedAt)}
-                </div>
-                <p style={{ margin: '6px 0 0', fontSize: 12, color: 'rgba(255,255,255,.5)' }}>
-                  Dibuka: {new Date(selectedDevice.eventOpenedAt).toLocaleTimeString()}
-                </p>
-              </div>
-            ) : null}
-
-            {/* Quick Actions */}
-            <div style={{ marginTop: 20 }}>
-              <h4 style={{ margin: '0 0 12px', fontSize: 12, letterSpacing: '.1em', color: '#ffd94e' }}>
-                ⚡ QUICK ACTIONS → {selectedDevice.browser} ({selectedDevice.os})
-              </h4>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <ActionButton icon={<Maximize2 size={16} />} label="FORCE FULLSCREEN" onClick={() => handleCommand('force-fullscreen', 'Force Fullscreen')} color="#9333ea" />
-                <ActionButton icon={<Key size={16} />} label="REFRESH TOKEN" onClick={() => handleCommand('refresh-token', 'Refresh Token')} color="#0ea5e9" />
-                <ActionButton icon={<Plug size={16} />} label="RECONNECT DRIVE" onClick={() => handleCommand('reconnect-drive', 'Reconnect Drive')} color="#2563eb" />
-                <ActionButton icon={<RefreshCw size={16} />} label="RETRY UPLOAD" onClick={() => handleCommand('retry-all', 'Retry Upload')} color="#ef3f25" />
-                <ActionButton icon={<Trash2 size={16} />} label="CLEAR CACHE" onClick={() => handleCommand('clear-cache', 'Clear Cache')} color="#6b7280" />
-                <ActionButton icon={<RotateCcw size={16} />} label="RESET UPTIME" onClick={() => handleCommand('reset-uptime', 'Reset Uptime')} color="#6b7280" />
-                <ActionButton icon={<Trash2 size={16} />} label="CLEAR STATS" onClick={() => handleCommand('clear-stats', 'Clear Stats')} color="#6b7280" />
-                <ActionButton icon={<Download size={16} />} label="DOWNLOAD LOGS" onClick={() => handleCommand('download-logs', 'Download Logs')} color="#6b7280" />
-                <ActionButton icon={<Play size={16} />} label="RELOAD APP" onClick={() => handleCommand('reload-app', 'Reload App')} color="#dc2626" />
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {/* STATISTIK AGREGAT */}
-        <section style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 14, letterSpacing: '.1em' }}>STATISTIK HARI INI (SEMUA BOOTH)</h3>
-          <div className="op-grid-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
-            <StatCard label="Total Sesi" value={String(aggregatedStats.totalSessions)} color="#60a5fa" />
-            <StatCard label="Total Foto" value={String(aggregatedStats.totalPhotos)} color="#a78bfa" />
-            <StatCard label="Uploaded" value={String(aggregatedStats.totalUploaded)} color="#4ade80" />
-            <StatCard label="Pending" value={String(aggregatedStats.totalPending)} color="#facc15" />
-            <StatCard label="Failed" value={String(aggregatedStats.totalFailed)} color="#ef4444" />
-          </div>
-          <p style={{ margin: '8px 0 0', fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
-            * Dihitung dari {filteredTablets.length} device aktif
-          </p>
-        </section>
       </main>
     </>
   );
 };
 
 /* ---------- SUB COMPONENTS ---------- */
-const InfoCard = ({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color?: string }) => (
-  <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-      <span style={{ color: 'rgba(255,255,255,.5)' }}>{icon}</span>
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', letterSpacing: '.06em' }}>{label}</span>
+
+const InfoCard = ({
+  icon, label, value, color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  color?: string;
+}) => (
+  <div className="op-info-card">
+    <div className="op-info-card__label">
+      {icon}
+      <span>{label}</span>
     </div>
-    <strong style={{ fontSize: 14, color: color || '#fff', wordBreak: 'break-word' }}>{value}</strong>
+    <div className="op-info-card__value" style={{ color: color || 'var(--op-text)' }}>
+      {value}
+    </div>
   </div>
 );
 
-const StatCard = ({ label, value, color }: { label: string; value: string; color: string }) => (
-  <div style={{ border: '1px solid rgba(255,255,255,.1)', padding: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-    <span style={{ fontSize: 11, letterSpacing: '.1em', color: 'rgba(255,255,255,.5)' }}>{label.toUpperCase()}</span>
-    <span style={{ fontSize: 22, fontWeight: 700, color }}>{value}</span>
-  </div>
-);
+const StatCard = ({
+  label, value, delta, deltaTone, spark, tone,
+}: {
+  label: string;
+  value: string;
+  delta: string;
+  deltaTone: 'up' | 'down' | 'flat';
+  spark: string;
+  tone?: 'ok' | 'warn' | 'info';
+}) => {
+  const toneClass = tone ? `op-spark--${tone}` : '';
+  return (
+    <div className="op-card">
+      <div className="op-stat__label">{label}</div>
+      <div className="op-stat__row">
+        <span className="op-stat__value">{value}</span>
+        <span className={`op-stat__delta op-delta--${deltaTone}`}>{delta}</span>
+      </div>
+      <svg className={`op-spark ${toneClass}`} viewBox="0 0 100 32" preserveAspectRatio="none">
+        <polyline points={spark} />
+      </svg>
+    </div>
+  );
+};
 
-const ActionButton = ({ icon, label, onClick, disabled, color }: { icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; color: string }) => (
-  <button onClick={onClick} disabled={disabled} type="button" style={{ padding: '10px 16px', background: disabled ? '#555' : color, color: '#fff', border: 'none', fontWeight: 600, fontSize: 12, cursor: disabled ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: disabled ? 0.5 : 1 }}>
-    {icon} {label}
-  </button>
-);
+const QaButton = ({
+  icon, label, onClick, disabled, tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: 'primary' | 'danger' | 'info';
+}) => {
+  const toneClass = tone ? `op-qa--${tone}` : '';
+  return (
+    <button
+      type="button"
+      className={`op-qa ${toneClass}`}
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+    >
+      <span className="op-qa__btn">{icon}</span>
+      <span>{label}</span>
+    </button>
+  );
+};
