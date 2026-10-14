@@ -1,3 +1,4 @@
+import { Camera } from '@capacitor/camera';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
@@ -1024,10 +1025,44 @@ const Settings = ({
 
 function App() {
   const [screen, setScreen] = useState<Screen>('home');
-    useEffect(() => {
+
+  useEffect(() => {
     startAutoRefresh();
     return () => stopAutoRefresh();
   }, []);
+
+  // ⚠️ REQUEST CAMERA PERMISSION (khusus Android APK)
+  useEffect(() => {
+    const requestPermissions = async () => {
+      try {
+        const isNative =
+          typeof window !== 'undefined' &&
+          !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })
+            .Capacitor?.isNativePlatform?.();
+
+        if (!isNative) {
+          console.log('[Permissions] Web mode — skip native permission');
+          return;
+        }
+
+        console.log('[Permissions] Requesting camera permission...');
+        const status = await Camera.checkPermissions();
+        console.log('[Permissions] Current status:', status);
+
+        if (status.camera !== 'granted') {
+          const result = await Camera.requestPermissions({ permissions: ['camera'] });
+          console.log('[Permissions] After request:', result);
+        } else {
+          console.log('[Permissions] Camera already granted ✅');
+        }
+      } catch (err) {
+        console.warn('[Permissions] Error:', err);
+      }
+    };
+
+    void requestPermissions();
+  }, []);
+
   const [events, setEvents] = useState<R3aEvent[]>([]);
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
