@@ -13,11 +13,20 @@ const config: CapacitorConfig = {
     allowMixedContent: true,
     captureInput: true,
     webContentsDebuggingEnabled: true,
+    backgroundColor: '#1a1614',
   },
   plugins: {
     Browser: {
-      // warna toolbar Chrome Custom Tab
       toolbarColor: '#ef3f25',
+    },
+    SplashScreen: {
+      launchShowDuration: 1500,
+      backgroundColor: '#1a1614',
+      showSpinner: false,
+      androidSplashResourceName: 'splash',
+      androidScaleType: 'CENTER_CROP',
+      splashFullScreen: true,
+      splashImmersive: true,
     },
   },
 };

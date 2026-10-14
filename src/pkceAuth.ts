@@ -10,25 +10,23 @@ import { App } from '@capacitor/app';
 const BACKEND_URL = '/api';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string) || '';
-const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+// ⚠️ FIX: pakai scope 'drive' full access (bukan 'drive.file')
+// 'drive.file' cuma bisa akses file/folder yang dibuat app
+// 'drive' bisa akses semua file/folder termasuk yang dibuat manual
+const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email';
 
 const REFRESH_STORAGE_KEY = 'r3a.pkce.refreshToken';
 const ACCOUNT_STORAGE_KEY = 'r3a.pkce.account';
 const ACCESS_STORAGE_KEY = 'r3a.pkce.accessToken';
 const EXPIRY_STORAGE_KEY = 'r3a.pkce.expiry';
 
-// Custom URL scheme yang di-intercept Android — SAMA dengan yang di AndroidManifest.xml
 const APK_REDIRECT_URI = 'com.r3abooth.app://oauth/callback';
-
-// --- Detect native platform ------------------------------------------------
 
 function isNativePlatform(): boolean {
   if (typeof window === 'undefined') return false;
   const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
   return !!w.Capacitor?.isNativePlatform?.();
 }
-
-// --- Token state -----------------------------------------------------------
 
 let accessToken: string | null = null;
 let tokenExpiry = 0;
@@ -51,8 +49,6 @@ function persist(): void {
   } catch { /* ignore */ }
 }
 
-// --- PKCE helpers ----------------------------------------------------------
-
 function generateCodeVerifier(): string {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
@@ -73,8 +69,6 @@ function base64UrlEncode(buffer: Uint8Array): string {
   }
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-
-// --- Tukar code → token ----------------------------------------------------
 
 async function exchangeCodeForToken(
   code: string,
@@ -106,18 +100,10 @@ async function exchangeCodeForToken(
   }
 }
 
-// ============================================================
-// APK LOGIN — Capacitor Browser + custom URL scheme
-// ============================================================
-
 async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; error?: string }> {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-  // ⚠️ Redirect URI = HTTPS (sama dengan Web) — backend akan redirect ke custom scheme
   const redirectUri = `${window.location.origin}${BACKEND_URL}/oauthCallback`;
-
-  // ⚠️ State dengan prefix "apk:" — biar backend tahu harus redirect ke custom scheme
   const statePrefix = `apk:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const params = new URLSearchParams({
@@ -150,14 +136,8 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
         const code = url.searchParams.get('code');
         const error = url.searchParams.get('error');
 
-        if (error) {
-          resolve({ success: false, error });
-          return;
-        }
-        if (!code) {
-          resolve({ success: false, error: 'No code in callback' });
-          return;
-        }
+        if (error) { resolve({ success: false, error }); return; }
+        if (!code) { resolve({ success: false, error: 'No code in callback' }); return; }
 
         const result = await exchangeCodeForToken(code, codeVerifier, redirectUri);
         resolve(result);
@@ -166,10 +146,8 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
       }
     });
 
-    // Buka OAuth di Chrome Custom Tab
     void Browser.open({ url: authUrl });
 
-    // Timeout 5 menit
     setTimeout(async () => {
       if (resolved) return;
       resolved = true;
@@ -181,7 +159,6 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
       resolve({ success: false, error: 'Login timeout' });
     }, 5 * 60 * 1000);
 
-    // Cleanup setelah selesai
     void listenerPromise.then((l) => {
       const checkDone = setInterval(async () => {
         if (resolved) {
@@ -193,10 +170,6 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
     });
   });
 }
-
-// ============================================================
-// WEB LOGIN — popup (existing)
-// ============================================================
 
 async function pkceLoginWeb(): Promise<{ success: boolean; account?: string; error?: string }> {
   const codeVerifier = generateCodeVerifier();
@@ -223,14 +196,8 @@ async function pkceLoginWeb(): Promise<{ success: boolean; account?: string; err
       if (event.data?.type !== 'r3a-oauth-callback') return;
       window.removeEventListener('message', handler);
 
-      if (event.data.error) {
-        resolve({ success: false, error: event.data.error });
-        return;
-      }
-      if (!event.data.code) {
-        resolve({ success: false, error: 'No code received' });
-        return;
-      }
+      if (event.data.error) { resolve({ success: false, error: event.data.error }); return; }
+      if (!event.data.code) { resolve({ success: false, error: 'No code received' }); return; }
 
       const result = await exchangeCodeForToken(event.data.code, codeVerifier, redirectUri);
       resolve(result);
@@ -246,8 +213,6 @@ async function pkceLoginWeb(): Promise<{ success: boolean; account?: string; err
   });
 }
 
-// --- Public: Login (auto-detect platform) -----------------------------------
-
 export async function pkceLogin(): Promise<{ success: boolean; account?: string; error?: string }> {
   if (!CLIENT_ID) return { success: false, error: 'Client ID not configured' };
 
@@ -259,8 +224,6 @@ export async function pkceLogin(): Promise<{ success: boolean; account?: string;
   console.log('[PKCE] Platform: Web');
   return pkceLoginWeb();
 }
-
-// --- Auto-refresh ----------------------------------------------------------
 
 let refreshInProgress: Promise<boolean> | null = null;
 
@@ -309,8 +272,6 @@ export async function ensureFreshToken(): Promise<string | null> {
   const ok = await refreshInProgress;
   return ok ? accessToken : null;
 }
-
-// --- Public ----------------------------------------------------------------
 
 export async function getValidToken(_clientId: string): Promise<string> {
   const token = await ensureFreshToken();

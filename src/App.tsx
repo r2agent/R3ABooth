@@ -1,4 +1,6 @@
 import { Camera } from '@capacitor/camera';
+import { App as CapApp } from '@capacitor/app';
+import { KeepAwake } from '@capacitor-community/keep-awake';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
@@ -66,6 +68,15 @@ function getSlugFromUrl(): string {
   if (typeof window === 'undefined') return '';
   const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
   return path;
+}
+
+/* ============================================================
+   HELPER: detect native platform (APK)
+   ============================================================ */
+function isNativePlatform(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
+  return !!w.Capacitor?.isNativePlatform?.();
 }
 
 const WithReminder = ({
@@ -1035,10 +1046,7 @@ function App() {
   useEffect(() => {
     const requestPermissions = async () => {
       try {
-        const isNative =
-          typeof window !== 'undefined' &&
-          !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } })
-            .Capacitor?.isNativePlatform?.();
+        const isNative = isNativePlatform();
 
         if (!isNative) {
           console.log('[Permissions] Web mode — skip native permission');
@@ -1061,6 +1069,49 @@ function App() {
     };
 
     void requestPermissions();
+  }, []);
+
+  // ⚠️ BACK BUTTON HANDLING (Android) — biar tidak close app langsung
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+
+    const listenerPromise = CapApp.addListener('backButton', () => {
+      // Kalau di home → minimize app
+      if (screenRef.current === 'home') {
+        void CapApp.minimizeApp();
+        return;
+      }
+      // Di screen lain → kembali ke home
+      setScreen('home');
+      setUrlSlug('');
+      setCloudEvent(null);
+      setActiveEvent(null);
+      setEditingEvent(null);
+      window.history.pushState({}, '', '/');
+    });
+
+    return () => {
+      void listenerPromise.then((l) => l.remove());
+    };
+  }, []);
+
+  // ⚠️ KEEP SCREEN AWAKE (Android) — biar layar tidak sleep
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+
+    void KeepAwake.keepAwake().catch(() => {});
+    return () => {
+      void KeepAwake.allowSleep().catch(() => {});
+    };
+  }, []);
+
+  // ⚠️ FULLSCREEN saat app dibuka (Android)
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+
+    try {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } catch { /* ignore */ }
   }, []);
 
   const [events, setEvents] = useState<R3aEvent[]>([]);

@@ -27,6 +27,7 @@ import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
 import { IGFollowGate } from './IGFollowGate';
 import { loadAppVersion } from './versionStore';
+import { saveFileFromDataUrl } from './fileSaver';
 
 const igGateImage = '/ig-gate.jpg';
 
@@ -841,13 +842,14 @@ export const PhotoboothSession = ({
       }
 
       if (allSettings.storage.autoDownloadResult) {
+        // ⚠️ Pakai fileSaver — Web: download, APK: simpan ke Documents/R3ABooth/
         for (const sp of slotPhotos) {
-          downloadDataUrl(sp.dataUrl, `slot-${String(sp.index).padStart(2, '0')}.jpg`);
+          void saveFileFromDataUrl(sp.dataUrl, `slot-${String(sp.index).padStart(2, '0')}.jpg`);
         }
         if (slideshowVideo) {
-          downloadDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
+          void saveFileFromDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
         }
-        downloadDataUrl(compositeUrl, 'final-result.jpg');
+        void saveFileFromDataUrl(compositeUrl, 'final-result.jpg');
       }
 
       const gd = allSettings.googleDrive;
