@@ -226,8 +226,6 @@ export const OperatorDashboard = ({
     ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
     : 0;
 
-  const isDetailOpen = !!selectedDevice;
-
   return (
     <>
       <style>{`
@@ -250,11 +248,19 @@ export const OperatorDashboard = ({
           --op-nav-bg: rgba(14,14,16,.88);
           --op-overlay: rgba(0,0,0,.35);
 
+          --op-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+          --op-ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+          --op-ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+          --op-theme-dur: .35s;
+
           background: var(--op-bg);
           color: var(--op-text);
           min-height: 100vh;
           font-family: 'DM Sans', sans-serif;
           display: block;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            color var(--op-theme-dur) var(--op-ease-std);
         }
         .operator-dashboard[data-op-theme="light"] {
           --op-bg: #f4f4f6;
@@ -268,16 +274,50 @@ export const OperatorDashboard = ({
           --op-overlay: rgba(16,16,20,.06);
         }
 
+        /* ============ ENTRANCE ANIMATION ============ */
+        @keyframes op-fade-up {
+          from {
+            opacity: 0;
+            transform: translateY(14px) scale(.985);
+            filter: blur(4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0);
+          }
+        }
+        @keyframes op-nav-in {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes op-detail-in {
+          from { opacity: 0; transform: translateX(18px) scale(.99); }
+          to { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes op-draw {
+          to { stroke-dashoffset: 0; }
+        }
+
+        .op-anim-in {
+          animation: op-fade-up .55s var(--op-ease-out) both;
+          will-change: transform, opacity, filter;
+        }
+
         /* ============ STICKY NAV ============ */
         .op-nav {
           position: sticky;
           top: 0;
           z-index: 100;
           background: var(--op-nav-bg);
-          backdrop-filter: blur(14px);
-          -webkit-backdrop-filter: blur(14px);
+          backdrop-filter: blur(14px) saturate(1.5);
+          -webkit-backdrop-filter: blur(14px) saturate(1.5);
           border-bottom: 1px solid var(--op-border);
           padding: 10px 16px;
+          animation: op-nav-in .5s var(--op-ease-out) both;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-nav__inner {
           max-width: 1440px;
@@ -296,6 +336,7 @@ export const OperatorDashboard = ({
           background: var(--op-accent);
           box-shadow: 0 0 0 4px var(--op-accent-soft);
           flex-shrink: 0;
+          transition: box-shadow .3s var(--op-ease-std);
         }
         .op-brand__text {
           display: flex; flex-direction: column; min-width: 0;
@@ -309,8 +350,7 @@ export const OperatorDashboard = ({
         .op-nav__spacer { flex: 1; min-width: 8px; }
         .op-nav__status {
           display: flex; align-items: center; gap: 6px;
-          flex-wrap: nowrap;
-          overflow: hidden;
+          flex-wrap: nowrap; overflow: hidden;
         }
         .op-nav__actions {
           display: flex; align-items: center; gap: 6px;
@@ -324,6 +364,10 @@ export const OperatorDashboard = ({
           border: 1px solid var(--op-border);
           font-size: 11.5px; font-weight: 600;
           white-space: nowrap;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std),
+            color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-pill i {
           width: 6px; height: 6px; border-radius: 50%;
@@ -337,10 +381,15 @@ export const OperatorDashboard = ({
           background: var(--op-surface);
           border: 1px solid var(--op-border);
           color: var(--op-muted);
-          transition: .18s;
           flex-shrink: 0;
+          transition:
+            transform .28s var(--op-ease-spring),
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std),
+            color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-icon-btn:hover { color: var(--op-text); border-color: var(--op-accent); }
+        .op-icon-btn:active { transform: scale(.9); transition-duration: .08s; }
         .op-icon-btn--accent { color: var(--op-accent); }
         .op-icon-btn--accent:hover { background: var(--op-accent-soft); }
 
@@ -361,6 +410,7 @@ export const OperatorDashboard = ({
           border: 1px solid rgba(239,63,37,.4);
           font-size: 13px; word-break: break-word;
           color: var(--op-text);
+          animation: op-fade-up .4s var(--op-ease-out) both;
         }
 
         /* ============ STAT CARDS ============ */
@@ -369,6 +419,10 @@ export const OperatorDashboard = ({
           grid-template-columns: repeat(4, minmax(0, 1fr));
           gap: 12px;
         }
+        .op-stats > .op-card:nth-child(1) { animation-delay: .04s; }
+        .op-stats > .op-card:nth-child(2) { animation-delay: .09s; }
+        .op-stats > .op-card:nth-child(3) { animation-delay: .14s; }
+        .op-stats > .op-card:nth-child(4) { animation-delay: .19s; }
 
         .op-card {
           background: var(--op-surface);
@@ -376,34 +430,57 @@ export const OperatorDashboard = ({
           border-radius: 16px;
           padding: 16px;
           box-shadow: 0 1px 2px var(--op-overlay);
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std),
+            box-shadow .4s var(--op-ease-out),
+            transform .4s var(--op-ease-out);
         }
 
         .op-stat__label {
           font-size: 11px; color: var(--op-muted);
-          font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+          font-weight: 600; letter-spacing: .06em;
+          text-transform: uppercase;
+          transition: color var(--op-theme-dur) var(--op-ease-std);
         }
+        .op-stat__label-long { display: inline; }
+        .op-stat__label-short { display: none; }
+
         .op-stat__row {
-          display: flex; align-items: baseline; gap: 8px; margin-top: 8px;
+          display: flex; align-items: baseline; gap: 8px;
+          margin-top: 8px;
           flex-wrap: wrap;
         }
         .op-stat__value {
           font-size: 24px; font-weight: 700;
           letter-spacing: -.02em; line-height: 1;
+          transition: color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-stat__delta {
           font-size: 11px; font-weight: 700;
           padding: 3px 7px; border-radius: 999px;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-delta--up { color: var(--op-ok); background: rgba(52,211,153,.12); }
         .op-delta--down { color: var(--op-accent); background: var(--op-accent-soft); }
         .op-delta--flat { color: var(--op-info); background: rgba(96,165,250,.12); }
+
         .op-spark {
-          margin-top: 10px; display: block; width: 100%; height: 28px;
+          margin-top: 10px; display: block;
+          width: 100%; height: 28px;
           overflow: visible;
         }
         .op-spark polyline {
           fill: none; stroke: var(--op-accent);
-          stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+          stroke-width: 2;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          stroke-dasharray: 220;
+          stroke-dashoffset: 220;
+          animation: op-draw 1.1s var(--op-ease-out) forwards;
+          animation-delay: inherit;
         }
         .op-spark--ok polyline { stroke: var(--op-ok); }
         .op-spark--info polyline { stroke: var(--op-info); }
@@ -413,9 +490,13 @@ export const OperatorDashboard = ({
         .op-main-grid {
           display: grid;
           grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
-          gap: 14px; align-items: start;
+          gap: 14px;
+          align-items: start;
         }
-        .op-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .op-col {
+          display: flex; flex-direction: column;
+          gap: 14px; min-width: 0;
+        }
 
         /* ============ CARD HEAD ============ */
         .op-card__head {
@@ -427,11 +508,13 @@ export const OperatorDashboard = ({
           align-items: stretch;
         }
         .op-card__title {
-          font-size: 14px; font-weight: 700; letter-spacing: -.01em;
+          font-size: 14px; font-weight: 700;
+          letter-spacing: -.01em;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .op-card__sub {
-          font-size: 11.5px; color: var(--op-muted); margin-top: 2px;
+          font-size: 11.5px; color: var(--op-muted);
+          margin-top: 2px;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .op-card__spacer { flex: 1; min-width: 8px; }
@@ -442,11 +525,15 @@ export const OperatorDashboard = ({
           background: var(--op-surface-2);
           border: 1px solid var(--op-border);
           color: var(--op-text);
-          cursor: pointer;
-          flex-shrink: 0;
-          transition: .15s;
+          cursor: pointer; flex-shrink: 0;
+          transition:
+            transform .28s var(--op-ease-spring),
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std),
+            color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-back-btn:hover { border-color: var(--op-accent); color: var(--op-accent); }
+        .op-back-btn:active { transform: scale(.9); transition-duration: .08s; }
 
         /* ============ SEGMENTED CONTROL ============ */
         .op-seg {
@@ -455,16 +542,23 @@ export const OperatorDashboard = ({
           border: 1px solid var(--op-border);
           border-radius: 10px; padding: 3px;
           align-self: flex-start;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-seg button {
           border: 0; background: none; cursor: pointer;
           color: var(--op-muted); font: inherit;
           font-size: 11.5px; font-weight: 600;
           padding: 6px 11px; border-radius: 7px;
-          transition: .15s;
           display: inline-flex; align-items: center; gap: 5px;
           white-space: nowrap;
+          transition:
+            background-color .3s var(--op-ease-std),
+            color .3s var(--op-ease-std),
+            transform .28s var(--op-ease-spring);
         }
+        .op-seg button:active { transform: scale(.96); }
         .op-seg button.is-active { background: var(--op-accent); color: #fff; }
         .op-seg button.is-active--ok { background: var(--op-ok); color: #08261a; }
         .op-seg button.is-active--muted { background: var(--op-surface-3); color: var(--op-text); }
@@ -478,6 +572,14 @@ export const OperatorDashboard = ({
           grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
           gap: 10px;
         }
+        .op-device-grid > .op-device:nth-child(1) { animation-delay: .05s; }
+        .op-device-grid > .op-device:nth-child(2) { animation-delay: .09s; }
+        .op-device-grid > .op-device:nth-child(3) { animation-delay: .13s; }
+        .op-device-grid > .op-device:nth-child(4) { animation-delay: .17s; }
+        .op-device-grid > .op-device:nth-child(5) { animation-delay: .21s; }
+        .op-device-grid > .op-device:nth-child(6) { animation-delay: .25s; }
+        .op-device-grid > .op-device:nth-child(n+7) { animation-delay: .28s; }
+
         .op-device {
           border: 1px solid var(--op-border);
           background: var(--op-surface-2);
@@ -485,9 +587,18 @@ export const OperatorDashboard = ({
           padding: 12px;
           display: flex; flex-direction: column; gap: 6px;
           cursor: pointer;
-          transition: .18s;
+          transition:
+            transform .32s var(--op-ease-spring),
+            border-color .3s var(--op-ease-std),
+            background-color .3s var(--op-ease-std),
+            box-shadow .3s var(--op-ease-out);
         }
-        .op-device:hover { border-color: rgba(239,63,37,.5); background: var(--op-accent-soft); }
+        .op-device:hover {
+          border-color: rgba(239,63,37,.5);
+          background: var(--op-accent-soft);
+          transform: translateY(-2px);
+        }
+        .op-device:active { transform: scale(.98); transition-duration: .1s; }
         .op-device.is-selected {
           border-color: var(--op-accent);
           background: var(--op-accent-soft);
@@ -498,7 +609,8 @@ export const OperatorDashboard = ({
 
         .op-device__head { display: flex; align-items: center; gap: 8px; }
         .op-device__dot {
-          width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+          width: 8px; height: 8px; border-radius: 50%;
+          flex-shrink: 0;
         }
         .op-device__dot--on { background: var(--op-ok); box-shadow: 0 0 6px rgba(52,211,153,.8); }
         .op-device__dot--off { background: #6b7280; }
@@ -534,13 +646,19 @@ export const OperatorDashboard = ({
         }
 
         /* ============ DETAIL VIEW (INLINE) ============ */
-        .op-detail { display: flex; flex-direction: column; gap: 14px; }
+        .op-detail {
+          display: flex; flex-direction: column; gap: 14px;
+          animation: op-detail-in .5s var(--op-ease-out) both;
+        }
 
         .op-badge {
           display: inline-flex; align-items: center; gap: 5px;
           padding: 3px 9px; border-radius: 999px;
           font-size: 10.5px; font-weight: 700;
           white-space: nowrap;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-badge::before {
           content: ""; width: 6px; height: 6px;
@@ -570,6 +688,9 @@ export const OperatorDashboard = ({
           border-radius: 10px;
           padding: 11px;
           min-width: 0;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-info-card__label {
           display: flex; align-items: center; gap: 5px;
@@ -587,6 +708,9 @@ export const OperatorDashboard = ({
           background: var(--op-surface-2);
           border: 1px solid var(--op-border);
           border-radius: 12px;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-rename-box__head {
           display: flex; align-items: center; gap: 7px;
@@ -605,6 +729,9 @@ export const OperatorDashboard = ({
           font-size: 13px; font-weight: 700;
           word-break: break-all;
           margin-bottom: 12px;
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-rename-row { display: flex; gap: 8px; flex-wrap: wrap; }
         .op-input {
@@ -615,7 +742,11 @@ export const OperatorDashboard = ({
           border-radius: 8px;
           color: var(--op-text);
           font-size: 13px; font-family: inherit;
-          outline: none; transition: .15s;
+          outline: none;
+          transition:
+            border-color .25s var(--op-ease-std),
+            box-shadow .25s var(--op-ease-std),
+            background-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-input:focus {
           border-color: var(--op-accent);
@@ -628,8 +759,14 @@ export const OperatorDashboard = ({
           padding: 10px 16px; border: 0; border-radius: 8px;
           font-family: inherit; font-size: 12px; font-weight: 700;
           letter-spacing: .06em; cursor: pointer;
-          transition: .15s; white-space: nowrap;
+          white-space: nowrap;
+          transition:
+            transform .28s var(--op-ease-spring),
+            background-color .25s var(--op-ease-std),
+            color .25s var(--op-ease-std),
+            border-color .25s var(--op-ease-std);
         }
+        .op-btn:active:not(:disabled) { transform: scale(.96); }
         .op-btn--accent { background: var(--op-accent); color: #fff; }
         .op-btn--accent:hover:not(:disabled) { background: #d63320; }
         .op-btn--accent:disabled {
@@ -650,11 +787,13 @@ export const OperatorDashboard = ({
         /* bar */
         .op-bar {
           height: 8px; border-radius: 999px;
-          background: var(--op-surface-3); overflow: hidden;
+          background: var(--op-surface-3);
+          overflow: hidden;
+          transition: background-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-bar__fill {
           height: 100%; border-radius: 999px;
-          transition: width .3s;
+          transition: width .55s var(--op-ease-out), background-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-bar__fill--ok { background: var(--op-ok); }
         .op-bar__fill--warn { background: var(--op-warn); }
@@ -665,6 +804,7 @@ export const OperatorDashboard = ({
           display: flex; align-items: center; gap: 10px;
           padding: 10px 0;
           border-bottom: 1px solid var(--op-border);
+          transition: border-color var(--op-theme-dur) var(--op-ease-std);
         }
         .op-row:last-child { border-bottom: 0; padding-bottom: 0; }
         .op-row:first-child { padding-top: 0; }
@@ -700,13 +840,23 @@ export const OperatorDashboard = ({
           background: var(--op-surface-2);
           border: 1px solid var(--op-border);
           color: var(--op-text);
-          transition: .18s;
+          transition:
+            transform .32s var(--op-ease-spring),
+            background-color .25s var(--op-ease-std),
+            border-color .25s var(--op-ease-std),
+            color .25s var(--op-ease-std),
+            box-shadow .3s var(--op-ease-out);
         }
         .op-qa:hover:not(:disabled) .op-qa__btn {
           border-color: var(--op-accent);
           color: var(--op-accent);
           background: var(--op-accent-soft);
-          transform: translateY(-2px);
+          transform: translateY(-3px);
+          box-shadow: 0 8px 18px var(--op-accent-soft);
+        }
+        .op-qa:active:not(:disabled) .op-qa__btn {
+          transform: scale(.92);
+          transition-duration: .1s;
         }
         .op-qa--primary .op-qa__btn {
           background: var(--op-accent);
@@ -728,17 +878,20 @@ export const OperatorDashboard = ({
           border: 1px dashed var(--op-border);
           border-radius: 10px;
           background: var(--op-surface-2);
+          transition:
+            background-color var(--op-theme-dur) var(--op-ease-std),
+            border-color var(--op-theme-dur) var(--op-ease-std);
         }
 
         /* empty */
         .op-empty {
           padding: 24px 8px; text-align: center;
           font-size: 13px; color: var(--op-muted);
+          animation: op-fade-up .5s var(--op-ease-out) both;
         }
 
         /* ============ RESPONSIVE ============ */
         @media (max-width: 1080px) {
-          .op-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .op-main-grid { grid-template-columns: minmax(0, 1fr); }
         }
 
@@ -748,17 +901,66 @@ export const OperatorDashboard = ({
           .op-brand small { display: none; }
           .op-brand { font-size: 13px; }
           .op-wrap { padding: 12px; gap: 12px; }
-          .op-card { padding: 14px; border-radius: 14px; }
-          .op-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-          .op-stat__value { font-size: 20px; }
+          .op-card { padding: 12px; border-radius: 14px; }
           .op-device-grid { grid-template-columns: minmax(0, 1fr); }
           .op-seg button { padding: 6px 9px; font-size: 11px; }
           .op-qa__btn { width: 48px; height: 48px; }
           .op-info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+          /* === STAT CARDS: 4 KOLOM DI MOBILE === */
+          .op-stats {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 6px;
+          }
+          .op-stats > .op-card {
+            padding: 10px 8px;
+            border-radius: 12px;
+          }
+          .op-stat__label {
+            font-size: 8.5px;
+            letter-spacing: .04em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .op-stat__label-long { display: none; }
+          .op-stat__label-short { display: inline; }
+          .op-stat__row {
+            margin-top: 6px;
+            gap: 4px;
+          }
+          .op-stat__value { font-size: 17px; }
+          .op-stat__delta {
+            font-size: 8.5px;
+            padding: 2px 5px;
+            letter-spacing: 0;
+          }
+          .op-spark {
+            margin-top: 6px;
+            height: 16px;
+          }
+          .op-spark polyline { stroke-width: 2.4; }
         }
 
-        @media (max-width: 400px) {
-          .op-stats { grid-template-columns: minmax(0, 1fr); }
+        @media (max-width: 380px) {
+          .op-stat__value { font-size: 15px; }
+          .op-stat__delta { display: none; }
+          .op-stat__label { font-size: 8px; }
+        }
+
+        /* ============ REDUCED MOTION ============ */
+        @media (prefers-reduced-motion: reduce) {
+          .operator-dashboard *,
+          .operator-dashboard *::before,
+          .operator-dashboard *::after {
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .01ms !important;
+          }
+          .op-spark polyline {
+            stroke-dashoffset: 0 !important;
+            animation: none !important;
+          }
         }
       `}</style>
 
@@ -834,6 +1036,7 @@ export const OperatorDashboard = ({
           <section className="op-stats">
             <StatCard
               label="Sesi Hari Ini"
+              shortLabel="SESI"
               value={String(aggregatedStats.totalSessions)}
               delta={aggregatedStats.totalSessions > 0 ? `+${aggregatedStats.totalSessions}` : '±0'}
               deltaTone="up"
@@ -841,6 +1044,7 @@ export const OperatorDashboard = ({
             />
             <StatCard
               label="Foto Hari Ini"
+              shortLabel="FOTO"
               value={String(aggregatedStats.totalPhotos)}
               delta={aggregatedStats.totalPhotos > 0 ? `+${aggregatedStats.totalPhotos}` : '±0'}
               deltaTone="up"
@@ -848,6 +1052,7 @@ export const OperatorDashboard = ({
             />
             <StatCard
               label="Uploaded"
+              shortLabel="UPLOAD"
               value={String(aggregatedStats.totalUploaded)}
               delta={aggregatedStats.totalPending > 0 ? `${aggregatedStats.totalPending} pending` : 'Clean'}
               deltaTone={aggregatedStats.totalPending > 0 ? 'flat' : 'up'}
@@ -856,6 +1061,7 @@ export const OperatorDashboard = ({
             />
             <StatCard
               label="Failed"
+              shortLabel="FAIL"
               value={String(aggregatedStats.totalFailed)}
               delta={aggregatedStats.totalFailed === 0 ? 'Clean' : 'Perlu cek'}
               deltaTone={aggregatedStats.totalFailed === 0 ? 'up' : 'down'}
@@ -1073,7 +1279,7 @@ export const OperatorDashboard = ({
                               : 'Tidak ada device terdeteksi'}
                       </div>
                     ) : (
-                      <div className="op-device-grid">
+                      <div className="op-device-grid" key={deviceFilter}>
                         {filteredTablets.map((t) => {
                           const lastActivityAgo = Math.floor((Date.now() - t.lastActivity) / 1000);
                           const isStale = lastActivityAgo > 60;
@@ -1085,7 +1291,7 @@ export const OperatorDashboard = ({
                             <div
                               key={t.deviceId}
                               onClick={() => setSelectedDeviceId(t.deviceId)}
-                              className={`op-device ${isOnline ? 'is-online' : ''}`}
+                              className={`op-device op-anim-in ${isOnline ? 'is-online' : ''}`}
                             >
                               <div className="op-device__head">
                                 <span className={`op-device__dot ${isOnline ? 'op-device__dot--on' : 'op-device__dot--off'}`} />
@@ -1326,9 +1532,10 @@ const InfoCard = ({
 );
 
 const StatCard = ({
-  label, value, delta, deltaTone, spark, tone,
+  label, shortLabel, value, delta, deltaTone, spark, tone,
 }: {
   label: string;
+  shortLabel: string;
   value: string;
   delta: string;
   deltaTone: 'up' | 'down' | 'flat';
@@ -1337,8 +1544,11 @@ const StatCard = ({
 }) => {
   const toneClass = tone ? `op-spark--${tone}` : '';
   return (
-    <div className="op-card">
-      <div className="op-stat__label">{label}</div>
+    <div className="op-card op-anim-in">
+      <div className="op-stat__label">
+        <span className="op-stat__label-long">{label}</span>
+        <span className="op-stat__label-short">{shortLabel}</span>
+      </div>
       <div className="op-stat__row">
         <span className="op-stat__value">{value}</span>
         <span className={`op-stat__delta op-delta--${deltaTone}`}>{delta}</span>
