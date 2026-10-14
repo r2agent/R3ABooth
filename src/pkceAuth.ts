@@ -1,7 +1,7 @@
 /* ============================================================
    PKCE AUTH — support Web + Android APK
    Web: popup OAuth
-   APK: Capacitor Browser + custom URL scheme
+   APK: Capacitor Browser + custom URL scheme (via backend redirect)
    ============================================================ */
 
 import { Browser } from '@capacitor/browser';
@@ -17,7 +17,7 @@ const ACCOUNT_STORAGE_KEY = 'r3a.pkce.account';
 const ACCESS_STORAGE_KEY = 'r3a.pkce.accessToken';
 const EXPIRY_STORAGE_KEY = 'r3a.pkce.expiry';
 
-// Custom URL scheme — SAMA dengan yang di AndroidManifest.xml
+// Custom URL scheme yang di-intercept Android — SAMA dengan yang di AndroidManifest.xml
 const APK_REDIRECT_URI = 'com.r3abooth.app://oauth/callback';
 
 // --- Detect native platform ------------------------------------------------
@@ -107,13 +107,18 @@ async function exchangeCodeForToken(
 }
 
 // ============================================================
-// APK LOGIN — pakai Capacitor Browser
+// APK LOGIN — Capacitor Browser + custom URL scheme
 // ============================================================
 
 async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; error?: string }> {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
-  const redirectUri = APK_REDIRECT_URI;
+
+  // ⚠️ Redirect URI = HTTPS (sama dengan Web) — backend akan redirect ke custom scheme
+  const redirectUri = `${window.location.origin}${BACKEND_URL}/oauthCallback`;
+
+  // ⚠️ State dengan prefix "apk:" — biar backend tahu harus redirect ke custom scheme
+  const statePrefix = `apk:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -124,6 +129,7 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
     code_challenge_method: 'S256',
     access_type: 'offline',
     prompt: 'consent',
+    state: statePrefix,
   });
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
@@ -131,7 +137,6 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
   return new Promise((resolve) => {
     let resolved = false;
 
-    // Listener untuk app URL open (callback dari Google)
     const listenerPromise = App.addListener('appUrlOpen', async (data) => {
       if (resolved) return;
       console.log('[PKCE/APK] appUrlOpen:', data.url);
@@ -190,7 +195,7 @@ async function pkceLoginAPK(): Promise<{ success: boolean; account?: string; err
 }
 
 // ============================================================
-// WEB LOGIN — pakai popup (existing)
+// WEB LOGIN — popup (existing)
 // ============================================================
 
 async function pkceLoginWeb(): Promise<{ success: boolean; account?: string; error?: string }> {
