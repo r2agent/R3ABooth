@@ -97,15 +97,6 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/**
- * Generate slideshow video dari beberapa foto.
- * ⚡ FIX v2:
- *  - FPS 30 (dari 10) — video smooth
- *  - Bitrate 16 Mbps (dari 8) — tidak burik
- *  - clearRect + fill hitam sebelum draw — hilangkan ghost/fade antar slide
- *  - Settle time 500ms di awal — encoder stabil
- *  - Tahan frame terakhir 400ms — tidak cut mendadak
- */
 async function generateSlideshowVideo(
   photos: { dataUrl: string }[],
   durationPerPhotoMs: number,
@@ -132,7 +123,6 @@ async function generateSlideshowVideo(
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
-  // ⚡ FPS 30 untuk smooth playback
   const stream = canvas.captureStream(30);
 
   return new Promise<string | null>((resolve) => {
@@ -141,7 +131,6 @@ async function generateSlideshowVideo(
     try {
       recorder = new MediaRecorder(stream, {
         mimeType,
-        // ⚡ Bitrate 16 Mbps untuk kualitas tinggi
         videoBitsPerSecond: 16_000_000,
       });
     } catch {
@@ -159,18 +148,15 @@ async function generateSlideshowVideo(
       reader.readAsDataURL(blob);
     };
 
-    // Frame pertama
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
     ctx.drawImage(images[0], 0, 0, width, height);
     recorder.start();
 
-    // ⚡ Settle time 500ms untuk encoder
     setTimeout(() => {
       let i = 1;
       const drawNext = () => {
         if (i < images.length) {
-          // ⚡ Clear + fill hitam — hilangkan ghost/fade antar slide
           ctx.clearRect(0, 0, width, height);
           ctx.fillStyle = '#000';
           ctx.fillRect(0, 0, width, height);
@@ -178,7 +164,6 @@ async function generateSlideshowVideo(
           i++;
           setTimeout(drawNext, durationPerPhotoMs);
         } else {
-          // ⚡ Tahan frame terakhir biar encoder selesai
           setTimeout(() => recorder.stop(), 400);
         }
       };
@@ -387,9 +372,8 @@ export const PhotoboothSession = ({
   const [showIGGate, setShowIGGate] = useState(false);
   const [pendingFrameIndex, setPendingFrameIndex] = useState<number | null>(null);
 
-  /* AUTO-RESTART KAMERA */
   useEffect(() => {
-    if (phase !== 'ready') return;
+    if (phase !== 'ready' && phase !== 'live') return;
     if (status === 'connected' || status === 'connecting') return;
     const t = setTimeout(() => { void forceRestart(); }, 200);
     return () => clearTimeout(t);
@@ -403,7 +387,6 @@ export const PhotoboothSession = ({
     return () => window.removeEventListener(RESTART_CAMERA_EVENT, handler);
   }, [forceRestart]);
 
-  /* REMOTE COMMAND OVERLAYS */
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!pendingFullscreen) return;
@@ -500,7 +483,6 @@ export const PhotoboothSession = ({
     eventOpenedAtRef.current = Date.now();
   }, [event?.id, event?.slug]);
 
-  /* STATUS SYNC */
   useEffect(() => {
     let cancelled = false;
 
@@ -671,31 +653,7 @@ export const PhotoboothSession = ({
     imageCacheRef.current.clear();
   }, []);
 
-  const handleSelectFrame = useCallback((index: number) => {
-    const version = loadAppVersion();
-    const gateEnabled = allSettings.system.igGateEnabled !== false;
-
-    if (version === 'v1.0.0' && gateEnabled) {
-      setPendingFrameIndex(index);
-      setShowIGGate(true);
-      return;
-    }
-
-    setSelectedFrameIndex(index);
-    resetSession();
-    setPhase('ready');
-  }, [resetSession, allSettings.system.igGateEnabled]);
-
-  const handleIGGateDismiss = useCallback(() => {
-    if (pendingFrameIndex !== null) {
-      setSelectedFrameIndex(pendingFrameIndex);
-      setPendingFrameIndex(null);
-    }
-    resetSession();
-    setShowIGGate(false);
-    setPhase('ready');
-  }, [pendingFrameIndex, resetSession]);
-
+  /* ⚡ handleStartCapture — deklarasi di ATAS handleIGGateDismiss */
   const handleStartCapture = useCallback(async () => {
     resetSession();
     setGuestError(null);
@@ -715,6 +673,31 @@ export const PhotoboothSession = ({
 
     setPhase('live');
   }, [resetSession, allSettings.googleDrive, event.id]);
+
+  const handleSelectFrame = useCallback((index: number) => {
+    const version = loadAppVersion();
+    const gateEnabled = allSettings.system.igGateEnabled !== false;
+
+    if (version === 'v1.0.0' && gateEnabled) {
+      setPendingFrameIndex(index);
+      setShowIGGate(true);
+      return;
+    }
+
+    setSelectedFrameIndex(index);
+    resetSession();
+    setPhase('ready');
+  }, [resetSession, allSettings.system.igGateEnabled]);
+
+  /* ⚡ v1.0.0: setelah IG Gate → LANGSUNG LIVE, skip 'ready' (file 3) */
+  const handleIGGateDismiss = useCallback(() => {
+    if (pendingFrameIndex !== null) {
+      setSelectedFrameIndex(pendingFrameIndex);
+      setPendingFrameIndex(null);
+    }
+    setShowIGGate(false);
+    void handleStartCapture();
+  }, [pendingFrameIndex, handleStartCapture]);
 
   const isVideoReady = useCallback((video: HTMLVideoElement | null): boolean => {
     return !!(video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0);
@@ -855,7 +838,6 @@ export const PhotoboothSession = ({
         }
         if (rawSlotPhotos.length > 0) {
           try {
-            // ⚡ FIX: durasi 700ms (dari 300) — encoder tidak "kaget"
             const DURATION_PER_SLIDE_MS = 700;
             const LOOP_COUNT = 3;
             const loopedPhotos: { dataUrl: string }[] = [];
