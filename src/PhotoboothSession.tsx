@@ -97,6 +97,23 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Generate nama file dengan format: YYYY-MM-DD_HH-MM-SS_RAND.ext
+ * Contoh: 2025-10-15_21-30-45_k7m2.jpg
+ */
+function generateFileName(extension: string): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let rand = '';
+  for (let i = 0; i < 4; i++) {
+    rand += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `${date}_${time}_${rand}.${extension}`;
+}
+
 async function generateSlideshowVideo(
   photos: { dataUrl: string }[],
   durationPerPhotoMs: number,
@@ -653,7 +670,6 @@ export const PhotoboothSession = ({
     imageCacheRef.current.clear();
   }, []);
 
-  /* ⚡ handleStartCapture — deklarasi di ATAS handleIGGateDismiss */
   const handleStartCapture = useCallback(async () => {
     resetSession();
     setGuestError(null);
@@ -689,7 +705,7 @@ export const PhotoboothSession = ({
     setPhase('ready');
   }, [resetSession, allSettings.system.igGateEnabled]);
 
-  /* ⚡ v1.0.0: setelah IG Gate → LANGSUNG LIVE, skip 'ready' (file 3) */
+  /* ⚡ v1.0.0: setelah IG Gate → LANGSUNG LIVE, skip 'ready' */
   const handleIGGateDismiss = useCallback(() => {
     if (pendingFrameIndex !== null) {
       setSelectedFrameIndex(pendingFrameIndex);
@@ -851,12 +867,12 @@ export const PhotoboothSession = ({
 
       if (allSettings.storage.autoDownloadResult) {
         for (const sp of slotPhotos) {
-          void saveFileFromDataUrl(sp.dataUrl, `slot-${String(sp.index).padStart(2, '0')}.jpg`);
+          void saveFileFromDataUrl(sp.dataUrl, generateFileName('jpg'));
         }
         if (slideshowVideo) {
-          void saveFileFromDataUrl(slideshowVideo, `video.${guessVideoExtension(slideshowVideo)}`);
+          void saveFileFromDataUrl(slideshowVideo, generateFileName(guessVideoExtension(slideshowVideo)));
         }
-        void saveFileFromDataUrl(compositeUrl, 'final-result.jpg');
+        void saveFileFromDataUrl(compositeUrl, generateFileName('jpg'));
       }
 
       const gd = allSettings.googleDrive;
@@ -865,9 +881,9 @@ export const PhotoboothSession = ({
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
-          { fileName: 'final.jpg', dataUrl: compositeUrl },
-          ...slotPhotos.map((sp) => ({ fileName: `slot-${String(sp.index).padStart(2, '0')}.jpg`, dataUrl: sp.dataUrl })),
-          ...(slideshowVideo ? [{ fileName: `video.${guessVideoExtension(slideshowVideo)}`, dataUrl: slideshowVideo }] : []),
+          { fileName: generateFileName('jpg'), dataUrl: compositeUrl },
+          ...slotPhotos.map((sp) => ({ fileName: generateFileName('jpg'), dataUrl: sp.dataUrl })),
+          ...(slideshowVideo ? [{ fileName: generateFileName(guessVideoExtension(slideshowVideo)), dataUrl: slideshowVideo }] : []),
         ];
         void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
         uploadSuccessCount = uploadFiles.length;
