@@ -97,6 +97,15 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Generate slideshow video dari beberapa foto.
+ * ⚡ FIX v2:
+ *  - FPS 30 (dari 10) — video smooth
+ *  - Bitrate 16 Mbps (dari 8) — tidak burik
+ *  - clearRect + fill hitam sebelum draw — hilangkan ghost/fade antar slide
+ *  - Settle time 500ms di awal — encoder stabil
+ *  - Tahan frame terakhir 400ms — tidak cut mendadak
+ */
 async function generateSlideshowVideo(
   photos: { dataUrl: string }[],
   durationPerPhotoMs: number,
@@ -123,13 +132,18 @@ async function generateSlideshowVideo(
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
-  const stream = canvas.captureStream(10);
+  // ⚡ FPS 30 untuk smooth playback
+  const stream = canvas.captureStream(30);
 
   return new Promise<string | null>((resolve) => {
     const chunks: Blob[] = [];
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+      recorder = new MediaRecorder(stream, {
+        mimeType,
+        // ⚡ Bitrate 16 Mbps untuk kualitas tinggi
+        videoBitsPerSecond: 16_000_000,
+      });
     } catch {
       resolve(null);
       return;
@@ -145,20 +159,31 @@ async function generateSlideshowVideo(
       reader.readAsDataURL(blob);
     };
 
+    // Frame pertama
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
     ctx.drawImage(images[0], 0, 0, width, height);
     recorder.start();
 
-    let i = 1;
-    const drawNext = () => {
-      if (i < images.length) {
-        ctx.drawImage(images[i], 0, 0, width, height);
-        i++;
-        setTimeout(drawNext, durationPerPhotoMs);
-      } else {
-        setTimeout(() => recorder.stop(), durationPerPhotoMs);
-      }
-    };
-    setTimeout(drawNext, durationPerPhotoMs);
+    // ⚡ Settle time 500ms untuk encoder
+    setTimeout(() => {
+      let i = 1;
+      const drawNext = () => {
+        if (i < images.length) {
+          // ⚡ Clear + fill hitam — hilangkan ghost/fade antar slide
+          ctx.clearRect(0, 0, width, height);
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(images[i], 0, 0, width, height);
+          i++;
+          setTimeout(drawNext, durationPerPhotoMs);
+        } else {
+          // ⚡ Tahan frame terakhir biar encoder selesai
+          setTimeout(() => recorder.stop(), 400);
+        }
+      };
+      drawNext();
+    }, 500);
   });
 }
 
@@ -830,7 +855,8 @@ export const PhotoboothSession = ({
         }
         if (rawSlotPhotos.length > 0) {
           try {
-            const DURATION_PER_SLIDE_MS = 300;
+            // ⚡ FIX: durasi 700ms (dari 300) — encoder tidak "kaget"
+            const DURATION_PER_SLIDE_MS = 700;
             const LOOP_COUNT = 3;
             const loopedPhotos: { dataUrl: string }[] = [];
             for (let loop = 0; loop < LOOP_COUNT; loop++) {
@@ -842,7 +868,6 @@ export const PhotoboothSession = ({
       }
 
       if (allSettings.storage.autoDownloadResult) {
-        // ⚠️ Pakai fileSaver — Web: download, APK: simpan ke Documents/R3ABooth/
         for (const sp of slotPhotos) {
           void saveFileFromDataUrl(sp.dataUrl, `slot-${String(sp.index).padStart(2, '0')}.jpg`);
         }
