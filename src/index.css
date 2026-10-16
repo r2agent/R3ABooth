@@ -335,10 +335,6 @@ button { font: inherit; cursor: pointer; }
   grid-template-columns: unset !important;
   box-sizing: border-box !important;
 }
-.frame-select-grid::-webkit-scrollbar { height: 8px; }
-.frame-select-grid::-webkit-scrollbar-track { background: rgba(255,255,255,.05); border-radius: 50px; }
-.frame-select-grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,.25); border-radius: 50px; }
-.frame-select-grid::-webkit-scrollbar-thumb:hover { background: rgba(239,63,37,.6); }
 
 /* CARD — FIXED uniform size */
 .frame-select-card {
@@ -581,4 +577,27 @@ button { font: inherit; cursor: pointer; }
   .photobooth-filter-section { grid-template-columns: 1fr; }
   .filter-options,
   .filter-actions { position: relative; width: auto; right: auto; top: auto; transform: none; }
+}
+
+/* Frame select — drag scroll (no scrollbar) */
+.frame-select-grid {
+  cursor: grab !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  /* HIDE SCROLLBAR */
+  scrollbar-width: none !important;          /* Firefox */
+  -ms-overflow-style: none !important;       /* IE/Edge */
+}
+.frame-select-grid::-webkit-scrollbar {
+  display: none !important;                  /* Chrome/Safari */
+  width: 0 !important;
+  height: 0 !important;
+}
+.frame-select-grid:active {
+  cursor: grabbing !important;
+}
+.frame-select-grid img {
+  -webkit-user-drag: none !important;
+  user-select: none !important;
+  pointer-events: none !important;
 }

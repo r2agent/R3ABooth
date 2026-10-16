@@ -343,6 +343,7 @@ export const PhotoboothSession = ({
 }) => {
   const { stream, status, error, forceRestart } = useCamera(cameraSettings, true);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const frameGridRef = useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const previewFrameRef = useRef<HTMLDivElement>(null);
@@ -440,6 +441,64 @@ export const PhotoboothSession = ({
       host.remove();
     };
   }, [pendingFullscreen]);
+  
+  /* ⚡ Frame select — wheel scroll + drag scroll */
+useEffect(() => {
+  if (phase !== 'frame-select') return;
+  const el = frameGridRef.current;
+  if (!el) return;
+
+  // Wheel → horizontal
+  const handleWheel = (e: WheelEvent) => {
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    }
+  };
+
+  // Drag
+  let isDown = false;
+  let startX = 0;
+  let scrollStart = 0;
+
+  const handleMouseDown = (e: MouseEvent) => {
+    isDown = true;
+    el.style.cursor = 'grabbing';
+    startX = e.pageX - el.offsetLeft;
+    scrollStart = el.scrollLeft;
+  };
+  const handleMouseUp = () => {
+    isDown = false;
+    el.style.cursor = 'grab';
+  };
+  const handleMouseLeave = () => {
+    isDown = false;
+    el.style.cursor = 'grab';
+  };
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDown) return;
+    e.preventDefault();
+    const x = e.pageX - el.offsetLeft;
+    const walk = (x - startX) * 1.2;
+    el.scrollLeft = scrollStart - walk;
+  };
+
+  el.style.cursor = 'grab';
+  el.addEventListener('wheel', handleWheel, { passive: false });
+  el.addEventListener('mousedown', handleMouseDown);
+  el.addEventListener('mouseup', handleMouseUp);
+  el.addEventListener('mouseleave', handleMouseLeave);
+  el.addEventListener('mousemove', handleMouseMove);
+
+  return () => {
+    el.style.cursor = '';
+    el.removeEventListener('wheel', handleWheel);
+    el.removeEventListener('mousedown', handleMouseDown);
+    el.removeEventListener('mouseup', handleMouseUp);
+    el.removeEventListener('mouseleave', handleMouseLeave);
+    el.removeEventListener('mousemove', handleMouseMove);
+  };
+}, [phase]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
