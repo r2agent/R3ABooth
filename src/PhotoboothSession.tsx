@@ -97,10 +97,6 @@ function loadImageEl(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/**
- * Generate nama file dengan format: YYYY-MM-DD_HH-MM-SS_RAND.ext
- * Contoh: 2025-10-15_21-30-45_k7m2.jpg
- */
 function generateFileName(extension: string): string {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -947,7 +943,6 @@ export const PhotoboothSession = ({
     setPhase('frame-select');
   }, [resetSession]);
 
-  /* ⚡ Auto-Reset Idle */
   useEffect(() => {
     const idlePhases: SessionPhase[] = ['frame-select', 'live', 'filter', 'result', 'qr', 'drive-qr'];
     const isIdlePhase = idlePhases.includes(phase);
