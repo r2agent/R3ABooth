@@ -475,56 +475,20 @@ button { font: inherit; cursor: pointer; }
   pointer-events: none !important;
 }
 
-/* ============================================================
-   PATCH — FRAME SELECT (Horizontal Scroll + No Crop)
-   ============================================================ */
-
-/* Wrapper scroll horizontal */
-.frame-select-grid {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: flex-start !important;
-  gap: 20px;
-  width: 100%;
-  max-width: 100%;
-  padding: 8px 8px 24px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
-}
-
-.frame-select-grid::-webkit-scrollbar {
-  height: 8px;
-}
-.frame-select-grid::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 50px;
-}
-.frame-select-grid::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.25);
-  border-radius: 50px;
-}
-.frame-select-grid::-webkit-scrollbar-thumb:hover {
-  background: rgba(239, 63, 37, 0.6);
-}
-
-/* Card — fixed width, height auto ikut aspect image */
+/* Card — FIXED size, uniform */
 .frame-select-card {
   flex: 0 0 auto !important;
-  width: 280px;
-  height: auto;
+  width: 300px;
+  height: 400px;
   break-inside: auto !important;
   -webkit-column-break-inside: auto !important;
   page-break-inside: auto !important;
   margin: 0 !important;
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
   padding: 0 !important;
   border: 2px solid rgba(255, 255, 255, 0.1) !important;
-  background: #2a2522 !important;
+  background: #1a1614 !important;
   border-radius: 12px !important;
   overflow: hidden !important;
   cursor: pointer;
@@ -542,91 +506,35 @@ button { font: inherit; cursor: pointer; }
   filter: brightness(1.1);
 }
 
-/* Thumbnail — full width, height auto */
+/* Thumbnail — fill card, contain image */
 .frame-select-thumb {
   position: relative !important;
   width: 100% !important;
-  height: auto !important;
-  background: #2a2522 !important;
+  height: 100% !important;
+  flex: 1 !important;
+  background: #1a1614 !important;
   overflow: hidden !important;
-  display: block !important;
-  aspect-ratio: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 8px !important;
+  box-sizing: border-box !important;
 }
 .frame-select-thumb img {
   display: block !important;
-  width: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  width: auto !important;
   height: auto !important;
   object-fit: contain !important;
-  object-position: center top !important;
-  max-height: none !important;
+  object-position: center center !important;
 }
 .frame-select-thumb-empty {
   width: 100%;
-  aspect-ratio: 3 / 4;
+  height: 100%;
   display: grid;
   place-items: center;
   color: rgba(255, 255, 255, 0.25);
-}
-
-/* Top gradient overlay — tetap di atas */
-.frame-select-thumb-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 84px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.78) 0%, transparent 100%);
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* Info overlay (nama + count) */
-.frame-select-thumb-top {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-  z-index: 2;
-}
-.frame-select-name {
-  font-family: 'DM Sans', sans-serif;
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  text-align: left;
-  line-height: 1.25;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-  word-break: break-word;
-  flex: 1;
-  min-width: 0;
-}
-.frame-select-count {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  border-radius: 50px;
-  background: #fff;
-  color: #1a1614;
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  line-height: 1;
-}
-
-/* Hide old bottom info bar */
-.frame-select-info {
-  display: none !important;
-}
-
-/* Responsive */
-@media (max-width: 800px) {
-  .frame-select-card {
-    width: 220px;
-  }
 }
 
 /* ============================================================
