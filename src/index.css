@@ -477,45 +477,65 @@ button { font: inherit; cursor: pointer; }
 
 /* ============================================================
    PATCH — FRAME SELECT NEW (Overlay Info, Rounded, Badge)
+   + HORIZONTAL SCROLL
    ============================================================ */
 
-/* Grid — CSS columns (masonry-style) */
+/* Wrapper scroll horizontal */
 .frame-select-grid {
-  column-count: 4;
-  column-gap: 20px;
-  max-width: 1400px;
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 20px;
   width: 100%;
-  padding: 0 8px;
-  display: block !important;
-}
-@media (max-width: 1200px) {
-  .frame-select-grid { column-count: 3; }
-}
-@media (max-width: 800px) {
-  .frame-select-grid { column-count: 2; }
+  max-width: 100%;
+  padding: 8px 8px 24px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
 
-/* Card */
+/* Scrollbar styling (Chrome/Safari) */
+.frame-select-grid::-webkit-scrollbar {
+  height: 8px;
+}
+.frame-select-grid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 50px;
+}
+.frame-select-grid::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 50px;
+}
+.frame-select-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(239, 63, 37, 0.6);
+}
+
+/* Card — fixed width + snap */
 .frame-select-card {
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-  page-break-inside: avoid;
-  margin: 0 0 20px 0 !important;
-  display: block !important;
-  width: 100% !important;
+  flex: 0 0 auto !important;
+  width: 320px;
+  height: 480px;
+  break-inside: auto !important;
+  -webkit-column-break-inside: auto !important;
+  page-break-inside: auto !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
   padding: 0 !important;
-  border: 0 !important;
+  border: 2px solid rgba(255, 255, 255, 0.1) !important;
   background: #2a2522 !important;
   border-radius: 12px !important;
   overflow: hidden !important;
   cursor: pointer;
   position: relative;
-  transition: transform 0.25s ease, box-shadow 0.25s ease, filter 0.18s ease;
-  flex-direction: unset !important;
-  gap: 0 !important;
+  scroll-snap-align: start;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, filter 0.18s ease;
 }
 .frame-select-card:hover {
-  border-color: transparent !important;
+  border-color: #ef3f25 !important;
   background: #2a2522 !important;
   transform: translateY(-6px);
   box-shadow: 0 16px 40px rgba(239, 63, 37, 0.3);
@@ -525,10 +545,11 @@ button { font: inherit; cursor: pointer; }
   filter: brightness(1.1);
 }
 
-/* Thumbnail */
+/* Thumbnail — fill full card */
 .frame-select-thumb {
   position: relative !important;
   width: 100% !important;
+  height: 100% !important;
   background: #2a2522 !important;
   overflow: hidden !important;
   display: block !important;
@@ -537,12 +558,13 @@ button { font: inherit; cursor: pointer; }
 .frame-select-thumb img {
   display: block !important;
   width: 100% !important;
-  height: auto !important;
-  object-fit: contain !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  object-position: center center !important;
 }
 .frame-select-thumb-empty {
   width: 100%;
-  aspect-ratio: 3 / 4;
+  height: 100%;
   display: grid;
   place-items: center;
   color: rgba(255, 255, 255, 0.25);
@@ -600,6 +622,14 @@ button { font: inherit; cursor: pointer; }
 /* Hide old bottom info bar (jika masih ada) */
 .frame-select-info {
   display: none !important;
+}
+
+/* Responsive — card size */
+@media (max-width: 800px) {
+  .frame-select-card {
+    width: 260px;
+    height: 390px;
+  }
 }
 
 /* ============================================================
