@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
-import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check } from 'lucide-react';
+import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check, Eye, EyeOff } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
 import { loadCameraSettings, getAspectRatioValue } from './cameraStore';
 import type { Frame, Slot } from './eventStore';
@@ -176,9 +176,55 @@ export const FrameEditor = ({
     accentColor: '#ffd94e',
   };
 
+  const showPhotoCount = frame.showPhotoCount !== false;
+
   return (
     <div className="frame-editor">
-      <div className="frame-editor-toolbar" style={{ flexWrap: 'wrap' }}>
+      <div className="frame-editor-toolbar" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Nama Frame */}
+        <input
+          type="text"
+          placeholder="Nama frame (opsional)"
+          value={frame.name || ''}
+          onChange={(e) => onFrameChange({ name: e.target.value })}
+          maxLength={40}
+          style={{
+            height: 42,
+            padding: '0 14px',
+            minWidth: 200,
+            border: '1px solid rgba(255,255,255,.25)',
+            background: 'rgba(255,255,255,.06)',
+            color: '#fff',
+            fontSize: 13,
+            fontWeight: 600,
+            outline: 'none',
+          }}
+        />
+
+        {/* Toggle Photo Count */}
+        <button
+          type="button"
+          onClick={() => onFrameChange({ showPhotoCount: !showPhotoCount })}
+          title="Tampilkan badge jumlah foto di frame select"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            height: 42,
+            padding: '0 14px',
+            border: showPhotoCount ? '1px solid rgba(255,217,78,.5)' : '1px solid rgba(255,255,255,.25)',
+            color: showPhotoCount ? '#ffd94e' : 'rgba(255,255,255,.5)',
+            background: showPhotoCount ? 'rgba(255,217,78,.1)' : 'rgba(255,255,255,.06)',
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '.06em',
+            cursor: 'pointer',
+          }}
+        >
+          {showPhotoCount ? <Eye size={14} /> : <EyeOff size={14} />}
+          COUNT
+        </button>
+
         <button type="button" onClick={handleAddSlot}><Plus size={16} /> ADD SLOT</button>
         {selectedSlotId ? <button type="button" onClick={() => { const s = frame.slots.find((sl) => sl.id === selectedSlotId); if (s) onDuplicateSlot(s); }}><Copy size={16} /> DUPLICATE</button> : null}
         {selectedSlotId ? <button type="button" onClick={() => { onDeleteSlot(selectedSlotId); setSelectedSlotId(null); }}><Trash2 size={16} /> DELETE</button> : null}
@@ -191,7 +237,6 @@ export const FrameEditor = ({
           <input type="file" accept="image/png,image/jpeg" onChange={handleSlotFrameUpload} hidden />
         </label>
 
-        {/* ⚠️ Tombol transform — selalu kelihatan di toolbar */}
         <button
           type="button"
           onClick={resetPhotoTransform}
@@ -241,7 +286,6 @@ export const FrameEditor = ({
           </div>
         </div>
 
-        {/* SIDEBAR SCROLLABLE */}
         <div
           style={{
             display: 'flex',
@@ -256,7 +300,6 @@ export const FrameEditor = ({
             scrollbarWidth: 'thin',
           }}
         >
-          {/* SLOT INSPECTOR */}
           {selectedSlot ? (
             <div className="frame-slot-inspector" style={{ padding: 10 }}>
               <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingBottom: 6 }}>
@@ -288,11 +331,9 @@ export const FrameEditor = ({
             </div>
           )}
 
-          {/* PHOTO TRANSFORM + PREVIEW */}
           <div className="frame-slot-inspector" style={{ padding: 10 }}>
             <div className="inspector-header" style={{ paddingBottom: 6 }}>PHOTO TRANSFORM</div>
 
-            {/* PREVIEW GABUNGAN */}
             <div
               style={{
                 width: '100%',
@@ -338,7 +379,6 @@ export const FrameEditor = ({
               ) : null}
             </div>
 
-            {/* Hapus watermark */}
             {frame.slotFrameImage ? (
               <button
                 type="button"
@@ -356,7 +396,6 @@ export const FrameEditor = ({
               </button>
             ) : null}
 
-            {/* Slider */}
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(255,255,255,.6)', marginBottom: 2 }}>

@@ -67,7 +67,7 @@ export type SecuritySettingsShape = {
 
 export type SystemSettingsShape = {
   appVersion: string;
-  igGateEnabled: boolean;   // ⚠️ NEW: toggle gate follow IG
+  igGateEnabled: boolean;
 };
 
 export type AllSettings = {
@@ -133,7 +133,7 @@ const DEFAULT_SETTINGS: AllSettings = {
     showPrintButton: true,
     showQrButton: true,
     showDriveQrButton: true,
-    idleTimeoutMin: 3,
+    idleTimeoutMin: 5,
     slideDurationSec: 5,
   },
   security: {

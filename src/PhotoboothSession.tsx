@@ -388,6 +388,7 @@ export const PhotoboothSession = ({
   const [framesReady, setFramesReady] = useState(false);
   const [showIGGate, setShowIGGate] = useState(false);
   const [pendingFrameIndex, setPendingFrameIndex] = useState<number | null>(null);
+  const [idleWarning, setIdleWarning] = useState(0);
 
   useEffect(() => {
     if (phase !== 'ready' && phase !== 'live') return;
@@ -705,7 +706,6 @@ export const PhotoboothSession = ({
     setPhase('ready');
   }, [resetSession, allSettings.system.igGateEnabled]);
 
-  /* ⚡ v1.0.0: setelah IG Gate → LANGSUNG LIVE, skip 'ready' */
   const handleIGGateDismiss = useCallback(() => {
     if (pendingFrameIndex !== null) {
       setSelectedFrameIndex(pendingFrameIndex);
@@ -947,6 +947,69 @@ export const PhotoboothSession = ({
     setPhase('frame-select');
   }, [resetSession]);
 
+  /* ⚡ Auto-Reset Idle */
+  useEffect(() => {
+    const idlePhases: SessionPhase[] = ['frame-select', 'live', 'filter', 'result', 'qr', 'drive-qr'];
+    const isIdlePhase = idlePhases.includes(phase);
+    const isPaused = saving || printing || guestAssigning || phase === 'countdown' || phase === 'compositing';
+    const timeoutMin = allSettings.display.idleTimeoutMin ?? 5;
+    const timeoutMs = timeoutMin * 60 * 1000;
+
+    if (!isIdlePhase || isPaused || timeoutMs <= 0) {
+      setIdleWarning(0);
+      return;
+    }
+
+    let warningTimer: number | null = null;
+    let resetTimer: number | null = null;
+
+    const doReset = () => {
+      resetSession();
+      setCurrentGuest(null);
+      setGuestError(null);
+      setPhase('frame-select');
+      setIdleWarning(0);
+    };
+
+    const bump = () => {
+      if (warningTimer !== null) {
+        window.clearInterval(warningTimer);
+        warningTimer = null;
+      }
+      if (resetTimer !== null) {
+        window.clearTimeout(resetTimer);
+        resetTimer = null;
+      }
+      setIdleWarning(0);
+
+      resetTimer = window.setTimeout(() => {
+        let left = 10;
+        setIdleWarning(left);
+        warningTimer = window.setInterval(() => {
+          left -= 1;
+          if (left <= 0) {
+            if (warningTimer !== null) window.clearInterval(warningTimer);
+            warningTimer = null;
+            doReset();
+          } else {
+            setIdleWarning(left);
+          }
+        }, 1000);
+      }, Math.max(1000, timeoutMs - 10000));
+    };
+
+    const events = ['mousemove', 'click', 'touchstart', 'keydown', 'scroll'] as const;
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+
+    bump();
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, bump));
+      if (warningTimer !== null) window.clearInterval(warningTimer);
+      if (resetTimer !== null) window.clearTimeout(resetTimer);
+    };
+  }, [phase, saving, printing, guestAssigning, allSettings.display.idleTimeoutMin, resetSession]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1121,17 +1184,35 @@ export const PhotoboothSession = ({
             </div>
           ) : (
             <div className="frame-select-grid">
-              {frames.map((frame, i) => (
-                <button key={frame.id} className="frame-select-card" onClick={() => handleSelectFrame(i)} type="button">
-                  <div className="frame-select-thumb" style={frame.image ? { background: `url(${frame.image}) center/contain no-repeat #2a2522` } : undefined}>
-                    {!frame.image ? <ImageIcon size={32} strokeWidth={1} /> : null}
-                  </div>
-                  <div className="frame-select-info">
-                    <strong>{frame.name}</strong>
-                    <span>{frame.slots.length} SLOTS</span>
-                  </div>
-                </button>
-              ))}
+              {frames.map((frame, i) => {
+                const showCount = frame.showPhotoCount !== false && frame.slots.length > 0;
+                const displayName = frame.name?.trim() || `Frame ${i + 1}`;
+                return (
+                  <button
+                    key={frame.id}
+                    className="frame-select-card"
+                    onClick={() => handleSelectFrame(i)}
+                    type="button"
+                  >
+                    <div className="frame-select-thumb">
+                      {frame.image ? (
+                        <img src={frame.image} alt={displayName} />
+                      ) : (
+                        <div className="frame-select-thumb-empty">
+                          <ImageIcon size={32} strokeWidth={1} />
+                        </div>
+                      )}
+                      <div className="frame-select-thumb-overlay" />
+                      <div className="frame-select-thumb-top">
+                        <span className="frame-select-name">{displayName}</span>
+                        {showCount ? (
+                          <span className="frame-select-count">{frame.slots.length}×</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>
@@ -1364,7 +1445,6 @@ export const PhotoboothSession = ({
           <div className="result-header"><h2>YOUR PHOTO IS READY</h2></div>
           <div className="result-preview"><img src={compositeUrl} alt="Final result" /></div>
           <div className="result-actions">
-            <button className="result-retake" onClick={() => { resetSession(); setPhase('live'); }} disabled={saving} type="button"><RotateCcw size={18} /> RETAKE</button>
             <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
               {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
             </button>
@@ -1380,7 +1460,14 @@ export const PhotoboothSession = ({
               <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button"><QrCode size={18} /> DRIVE QR</button>
             ) : null}
           </div>
-          <button className="result-new-session" onClick={handleBackToFrameSelect} disabled={saving} type="button"><RefreshCw size={18} /> NEW SESSION</button>
+          <button
+            className={`result-done ${saved ? 'is-saved' : ''}`}
+            onClick={handleBackToFrameSelect}
+            disabled={!saved || saving}
+            type="button"
+          >
+            <RefreshCw size={18} /> DONE
+          </button>
         </section>
       ) : null}
 
@@ -1422,6 +1509,16 @@ export const PhotoboothSession = ({
               <button onClick={() => setShowAdminExit(false)} type="button">CANCEL</button>
               <button className="admin-exit-confirm" onClick={() => { setShowAdminExit(false); onExit(); }} type="button">EXIT EVENT</button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {idleWarning > 0 ? (
+        <div className="idle-warning-overlay" onClick={() => setIdleWarning(0)}>
+          <div className="idle-warning-box">
+            <p className="idle-warning-title">Sesi akan berakhir dalam</p>
+            <div className="idle-warning-number">{idleWarning}</div>
+            <p className="idle-warning-hint">Tap di mana saja untuk lanjut</p>
           </div>
         </div>
       ) : null}
