@@ -1,7 +1,7 @@
 // Guest folder persistence — IndexedDB store for per-event guest records.
 // Each event has its own guest counter. Guest folders are created in Google Drive
-// inside the admin-selected MAIN folder. Duplicate prevention: we check for
-// existing guest records before creating new ones.
+// inside the admin-selected MAIN folder.
+// ⚡ FIX: Folder name unik pakai timestamp + random biar tiap sesi dapat folder baru.
 
 import { getValidToken, shareFolderWithAnyone } from './gdriveService';
 
@@ -101,9 +101,8 @@ async function findFolderByName(parentId: string, name: string, token: string): 
 }
 
 async function createFolder(parentId: string, name: string, token: string): Promise<string> {
-  const existing = await findFolderByName(parentId, name, token);
-  if (existing) return existing;
-
+  // ⚡ FIX: Tidak cek folder existing, langsung create
+  // Karena nama sudah unik (timestamp + random), jadi tidak mungkin tabrakan
   const res = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: {
@@ -153,14 +152,18 @@ export async function getOrCreateNextGuestFolder(
     const token = await getValidToken(clientId);
     const existingGuests = await getGuestsForEvent(eventId);
     const nextNumber = existingGuests.length + 1;
-    const guestName = `Guest ${nextNumber}`;
 
+    // ⚡ FIX: Nama folder unik — Guest_<number>_<YYYYMMDD>_<HHMMSS>_<rand>
+    // Contoh: Guest_1_20251016_213045_a7k2
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    const rand = Math.random().toString(36).slice(2, 6);
+    const guestName = `Guest_${nextNumber}_${date}_${time}_${rand}`;
+
+    // ⚡ Selalu buat folder baru — tidak akan tabrakan karena nama unik
     const folderId = await createFolder(mainFolderId, guestName, token);
-
-    const existingRecord = await findGuestByFolderId(folderId);
-    if (existingRecord) {
-      return { success: true, guest: existingRecord };
-    }
 
     void shareFolderWithAnyone(folderId, clientId);
 
