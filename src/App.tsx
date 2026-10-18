@@ -52,11 +52,24 @@ function statusToAccent(status: string): string {
 function parseFolderId(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return '';
+  
+  // 1. Cek jika yang di-paste cuma ID murni (tanpa link)
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(trimmed)) return trimmed;
+  
+  // 2. Cek link format /folders/xxxxx
   const m1 = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
   if (m1) return m1[1];
+
+  // 3. Cek link format ?id=xxxxx
   const m2 = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (m2) return m2[1];
-  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+
+  // 4. Fallback: cari teks panjang alfanumerik (kemungkinan besar itu ID-nya)
+  const matches = trimmed.match(/[a-zA-Z0-9_-]{15,}/g);
+  if (matches && matches.length > 0) {
+    return matches[matches.length - 1]; 
+  }
+  
   return '';
 }
 
