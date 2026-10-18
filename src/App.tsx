@@ -1,3 +1,4 @@
+import { FolderPicker } from './components/FolderPicker';
 import { Camera } from '@capacitor/camera';
 import { App as CapApp } from '@capacitor/app';
 import { KeepAwake } from '@capacitor-community/keep-awake';
@@ -223,6 +224,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
   const [gdriveTestState, setGdriveTestState] = useState<TestState>({ status: 'idle', message: '' });
   const [gdriveUploadTestState, setGdriveUploadTestState] = useState<TestState>({ status: 'idle', message: '' });
   const [gdrivePicking, setGdrivePicking] = useState(false);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [diagResults, setDiagResults] = useState<{ label: string; status: string; healthy: boolean }[]>([]);
   const [diagRunning, setDiagRunning] = useState(false);
 

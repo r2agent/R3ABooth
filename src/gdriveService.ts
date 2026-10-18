@@ -212,3 +212,17 @@ export async function runDiagnostics(): Promise<{ label: string; status: string;
 
   return results;
 }
+
+export async function listDriveFolders(clientId: string): Promise<DriveFolder[]> {
+  const token = await getValidToken(clientId);
+  const query = `mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=50`;
+  
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  
+  if (!res.ok) throw new Error('Gagal mengambil daftar folder dari Google Drive.');
+  const data = await res.json();
+  return data.files || [];
+}
