@@ -29,7 +29,12 @@ export function FolderPicker({ clientId, onSelect, onClose }: FolderPickerProps)
         setLoading(true);
         // Ambil token dari localStorage atau gapi (sesuaikan dengan auth kamu)
         // Asumsi: kamu sudah punya token yang valid di localStorage atau context
-        const token = localStorage.getItem('gdrive_access_token'); 
+        
+        // 🔧 IMPORT FUNGSI TOKEN DI BAGIAN ATAS FILE:
+        // import { getAccessToken } from '../pkceAuth'; (atau sesuaikan path-nya)
+        
+        const token = getAccessToken(); // Atau fungsi yang kamu gunakan untuk get token
+        
         if (!token) throw new Error('Token Google Drive tidak ditemukan. Silakan connect ulang.');
 
         // Ambil folder dari Google Drive API
