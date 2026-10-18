@@ -41,6 +41,7 @@ export type TabletStatus = {
   failedCount: number;
   todaySessionCount: number;
   todayPhotoCount: number;
+  qrHistory?: { id: string; url: string; type: string; time: number }[]; // ⚡ BARU
 };
 
 /* ---------- COMMAND TYPE ---------- */
@@ -59,7 +60,7 @@ export type CommandType =
 export type DeviceCommand = {
   type: CommandType;
   issuedAt: number;
-  payload?: string;   // ⚠️ NEW: untuk rename device
+  payload?: string;
 };
 
 /* ---------- DEVICE ID ---------- */
@@ -138,6 +139,7 @@ export async function writeStatus(partial: Partial<TabletStatus>): Promise<void>
       failedCount: partial.failedCount ?? 0,
       todaySessionCount: partial.todaySessionCount ?? 0,
       todayPhotoCount: partial.todayPhotoCount ?? 0,
+      qrHistory: partial.qrHistory ?? [],
     };
 
     await set(ref(db, statusPath(deviceId)), status);
@@ -178,6 +180,7 @@ export function markOfflineOnDisconnect(): void {
       failedCount: 0,
       todaySessionCount: 0,
       todayPhotoCount: 0,
+      qrHistory: [], // Biarkan kosong saat offline
     });
   } catch { /* silent fail */ }
 }
@@ -194,8 +197,6 @@ export function subscribeAllTablets(
       return;
     }
     const data = snapshot.val() as Record<string, TabletStatus>;
-    // ⚠️ FIX: sort by deviceId (STABIL) — biar list tidak geser tiap detik.
-    // Sebelumnya pakai lastActivity → device yang baru update naik ke atas.
     const tablets = Object.values(data).sort((a, b) =>
       (a.deviceId || '').localeCompare(b.deviceId || ''),
     );
@@ -211,6 +212,19 @@ export async function clearStatus(): Promise<void> {
     const deviceId = getDeviceId();
     await set(ref(db, statusPath(deviceId)), null);
   } catch { /* silent fail */ }
+}
+
+/* ---------- DELETE DEVICE (Khusus Operator) ---------- */
+export async function deleteDevice(deviceId: string): Promise<boolean> {
+  if (!isFirebaseConfigured()) return false;
+  try {
+    const db = getFirebaseDb();
+    await remove(ref(db, statusPath(deviceId)));
+    await remove(ref(db, commandPath(deviceId)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* ---------- SEND COMMAND ---------- */
@@ -291,7 +305,6 @@ export async function getDriveQuota(): Promise<{ usage: number; limit: number }>
   }
 }
 
-/* Helper — ambil token dari gdriveService */
 async function getValidTokenCached(): Promise<string | null> {
   try {
     const { getValidToken } = await import('./gdriveService');
@@ -304,7 +317,6 @@ async function getValidTokenCached(): Promise<string | null> {
   }
 }
 
-/* ---------- SERVER TIMESTAMP ---------- */
 export function getServerTimestamp() {
   if (!isFirebaseConfigured()) return null;
   try {

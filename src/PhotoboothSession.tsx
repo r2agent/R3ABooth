@@ -385,6 +385,7 @@ export const PhotoboothSession = ({
   const [frameAspect, setFrameAspect] = useState(3 / 2);
   const [framesReady, setFramesReady] = useState(false);
   const [showIGGate, setShowIGGate] = useState(false);
+  const [qrHistory, setQrHistory] = useState<{ id: string; url: string; type: string; time: number }[]>([]);
   const [pendingFrameIndex, setPendingFrameIndex] = useState<number | null>(null);
   const [idleWarning, setIdleWarning] = useState(0);
   const [showQRISGate, setShowQRISGate] = useState(false);
@@ -590,6 +591,7 @@ useEffect(() => {
           failedCount: stats.failed,
           todaySessionCount: todayStats.sessionCount,
           todayPhotoCount: todayStats.photoCount,
+          qrHistory: qrHistory,
         });
       } finally {
         isPushingRef.current = false;
@@ -645,6 +647,10 @@ useEffect(() => {
           case 'download-logs':
             downloadLogs();
             break;
+          case 'force-fullscreen': {
+            setPendingFullscreen(true);
+            break;
+          }
           case 'reconnect-drive':
           case 'refresh-token': {
             if (!VITE_CLIENT_ID) break;
@@ -986,15 +992,26 @@ useEffect(() => {
       setSaving(false);
     }
   }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
-
+  
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
     setQrError(false); setQrDataUrl(null); setPhase('qr');
     const payload = buildDriveResultPayload(currentGuest.guestFolderId, event.name);
     try {
       const qr = await generateQrCode(payload);
-      if (qr.qrDataUrl) setQrDataUrl(qr.qrDataUrl);
-      else setQrError(true);
+      if (qr.qrDataUrl) {
+        setQrDataUrl(qr.qrDataUrl);
+        
+        // ⚡ Simpan ke riwayat
+        const newQr = {
+          id: `qr-${Date.now()}`,
+          url: payload,
+          type: 'result-qr',
+          time: Date.now()
+        };
+        setQrHistory(prev => [...prev, newQr].slice(-5)); // Simpan max 5 terakhir
+        
+      } else setQrError(true);
     } catch { setQrError(true); }
   }, [currentGuest, event.name]);
 
@@ -1004,8 +1021,19 @@ useEffect(() => {
     try {
       const url = buildDriveFolderUrl(currentGuest.guestFolderId);
       const qr = await generateQrCode(url);
-      if (qr.qrDataUrl) setDriveQrDataUrl(qr.qrDataUrl);
-      else setDriveQrError(true);
+      if (qr.qrDataUrl) {
+        setDriveQrDataUrl(qr.qrDataUrl);
+        
+        // ⚡ Simpan ke riwayat
+        const newQr = {
+          id: `qr-${Date.now()}`,
+          url: url,
+          type: 'drive-qr',
+          time: Date.now()
+        };
+        setQrHistory(prev => [...prev, newQr].slice(-5)); // Simpan max 5 terakhir
+
+      } else setDriveQrError(true);
     } catch { setDriveQrError(true); }
   }, [currentGuest]);
 

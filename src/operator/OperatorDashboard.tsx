@@ -22,11 +22,15 @@ import {
   Sun,
   Moon,
   ArrowLeft,
+  QrCode,
+  ExternalLink,
+  ShieldAlert,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
   subscribeAllTablets,
   sendCommand,
+  deleteDevice,
   type TabletStatus,
   type CommandType,
 } from '../statusSync';
@@ -221,6 +225,17 @@ export const OperatorDashboard = ({
       setActionMessage('❌ Gagal kirim perintah rename.');
     }
   }, [selectedDevice, renameInput]);
+
+  const handleDeleteDevice = useCallback(async (deviceId: string) => {
+    if (!window.confirm('Hapus device ini dari daftar? Device akan muncul lagi jika dia online.')) return;
+    const ok = await deleteDevice(deviceId);
+    if (ok) {
+      setActionMessage('✅ Device berhasil dihapus dari daftar.');
+      setSelectedDeviceId(null);
+    } else {
+      setActionMessage('❌ Gagal menghapus device.');
+    }
+  }, []);
 
   const drivePercent = aggregatedStats.driveLimit > 0
     ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
@@ -1228,6 +1243,64 @@ export const OperatorDashboard = ({
                           </div>
                         </div>
                       ) : null}
+
+                      {/* ⚡ SECTION QR HISTORY ⚡ */}
+                      <div>
+                        <h4 className="op-section-title">
+                          <QrCode size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
+                          Riwayat QR (Terakhir)
+                        </h4>
+                        {selectedDevice.qrHistory && selectedDevice.qrHistory.length > 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {selectedDevice.qrHistory.slice().reverse().map((qr, idx) => (
+                              <div key={idx} className="op-info-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10 }}>
+                                <div>
+                                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
+                                    {qr.type === 'drive-qr' ? 'Drive QR' : 'Result QR'}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--op-muted)' }}>
+                                    {new Date(qr.time).toLocaleTimeString()} • {qr.id.slice(0, 6)}...
+                                  </div>
+                                </div>
+                                <a 
+                                  href={qr.url} 
+                                  target="_blank" 
+                                  rel="noreferrer"
+                                  className="op-btn op-btn--ghost"
+                                  style={{ padding: '6px 10px', fontSize: 11, textDecoration: 'none' }}
+                                >
+                                  Buka <ExternalLink size={12} />
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: 'var(--op-muted)', textAlign: 'center', padding: '10px 0' }}>
+                            Belum ada QR yang di-generate.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ⚡ TOMBOL HAPUS DEVICE ⚡ */}
+                      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--op-border)' }}>
+                        <button
+                          type="button"
+                          className="op-btn"
+                          style={{
+                            width: '100%',
+                            background: 'rgba(239,63,37,.1)',
+                            color: 'var(--op-accent)',
+                            border: '1px solid rgba(239,63,37,.3)',
+                            justifyContent: 'center'
+                          }}
+                          onClick={() => handleDeleteDevice(selectedDevice.deviceId)}
+                        >
+                          <ShieldAlert size={16} /> Hapus Device dari Daftar
+                        </button>
+                        <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--op-muted)', textAlign: 'center' }}>
+                          *Device akan muncul kembali secara otomatis jika masih terhubung ke internet.
+                        </p>
+                      </div>
                     </div>
                   </>
                 ) : (
