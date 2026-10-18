@@ -1,8 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { X, Folder, Search, ArrowUpDown, Loader2 } from 'lucide-react';
-// 🔧 TAMBAHKAN BARIS IMPORT INI (Sesuaikan path-nya jika perlu)
-// Jika getAccessToken ada di gdriveService, ganti jadi: import { getAccessToken } from '../gdriveService';
-import { getAccessToken } from '../pkceAuth'; 
+// Pastikan getToken memang diexport dari pkceAuth.ts
+import { getToken } from '../pkceAuth'; 
 
 type DriveFolder = {
   id: string;
@@ -30,8 +29,8 @@ export function FolderPicker({ clientId, onSelect, onClose }: FolderPickerProps)
       try {
         setLoading(true);
         
-        // Ambil token menggunakan fungsi asli dari aplikasi kamu
-        const token = getAccessToken(); 
+        // 🔧 FIX: Memanggil fungsi getToken() yang sudah di-import
+        const token = getToken(); 
         
         if (!token) throw new Error('Token Google Drive tidak ditemukan. Silakan connect ulang.');
 
