@@ -49,39 +49,6 @@ function statusToAccent(status: string): string {
   return '#f56a2d';
 }
 
-function parseFolderId(input: string): string {
-  // 1. Bersihkan input dari spasi, enter, atau karakter aneh dari keyboard HP
-  const clean = input.trim().replace(/\s+/g, '');
-  if (!clean) return '';
-
-  // 2. Cek link format /folders/xxxxx (Format standar Google Drive)
-  const m1 = clean.match(/\/folders\/([a-zA-Z0-9_-]+)/);
-  if (m1) return m1[1];
-
-  // 3. Cek link format ?id=xxxxx
-  const m2 = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (m2) return m2[1];
-
-  // 4. Kalau user cuma paste ID murni (tanpa link)
-  // ID Google Drive biasanya panjangnya 25-50 karakter
-  if (clean.length >= 20 && /^[a-zA-Z0-9_-]+$/.test(clean)) {
-    return clean;
-  }
-
-  // 5. Fallback: Ambil potongan teks terpanjang yang mirip ID (jaga-jaga)
-  const parts = clean.split(/[\/?&=]/);
-  const possibleIds = parts.filter((p) => 
-    p.length > 20 && 
-    p !== 'https:' && 
-    p !== 'drive.google.com' && 
-    p !== 'drive' &&
-    p !== 'u'
-  );
-  if (possibleIds.length > 0) return possibleIds[0];
-
-  return '';
-}
-
 function getSlugFromUrl(): string {
   if (typeof window === 'undefined') return '';
   const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
@@ -365,8 +332,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
 
   const handleApplyManualFolder = async () => {
     const raw = settings.googleDrive.manualFolderInput || '';
-    
-    // ⚡ BERSIHKAN: Hapus semua spasi, enter, atau karakter aneh
     const clean = raw.trim().replace(/\s+/g, '');
 
     if (!clean) {
@@ -374,7 +339,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
       return;
     }
 
-    // ⚡ EKSTRAK: Ambil teks panjang (lebih dari 20 karakter)
     const match = clean.match(/[a-zA-Z0-9_-]{20,}/);
     const folderId = match ? match[0] : '';
 
@@ -383,7 +347,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
       return;
     }
 
-    // ⚡ BYPASS MODE: Langsung simpan tanpa cek API
     const next = { 
       ...settings, 
       googleDrive: { 
