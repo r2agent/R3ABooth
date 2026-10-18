@@ -29,20 +29,25 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
     return () => clearInterval(id);
   }, [photos.length, slideDurationSec]);
 
-  const handleDismiss = () => onDismiss();
+  // ⚡ FIX: Mencegah tap-through ke frame-select di bawahnya
+  const handleDismiss = (e: React.PointerEvent | React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDismiss();
+  };
 
   if (photos.length === 0) {
     return (
       <div
         className="screensaver-overlay"
-        onClick={handleDismiss}
-        onTouchStart={handleDismiss}
+        onPointerDown={handleDismiss}
         style={{
           position: 'fixed',
           inset: 0,
           zIndex: 999999,
           background: '#000',
           cursor: 'pointer',
+          touchAction: 'none', // ⚡ Mencegah gesture bawaan browser
         }}
       />
     );
@@ -51,8 +56,7 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
   return (
     <div
       className="screensaver-overlay"
-      onClick={handleDismiss}
-      onTouchStart={handleDismiss}
+      onPointerDown={handleDismiss}
       style={{
         position: 'fixed',
         inset: 0,
@@ -60,6 +64,7 @@ export const ScreensaverSlideshow = ({ slideDurationSec, onDismiss }: Props) => 
         background: '#000',
         cursor: 'pointer',
         overflow: 'hidden',
+        touchAction: 'none', // ⚡ Mencegah gesture bawaan browser
       }}
     >
       {photos.map((url, i) => (

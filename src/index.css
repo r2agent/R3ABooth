@@ -828,3 +828,45 @@ button { font: inherit; cursor: pointer; }
     gap: 16px;
   }
 }
+
+/* ============================================================
+   SCREENSAVER OVERLAY (FIX TAP-THROUGH)
+   ============================================================ */
+.screensaver-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999; /* Pastikan paling atas */
+  background: #1a1614; /* Warna gelap */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  
+  /* Mencegah tap-through & gesture browser */
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.screensaver-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.screensaver-hint {
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  animation: screensaverPulse 2s ease-in-out infinite;
+}
+
+@keyframes screensaverPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
