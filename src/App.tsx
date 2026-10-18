@@ -3,7 +3,7 @@ import { Camera } from '@capacitor/camera';
 import { App as CapApp } from '@capacitor/app';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { ChevronLeft, ChevronRight, Maximize2, X, Image as ImageIcon, Plus, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Maximize2, Check, AlertCircle, Cloud, CloudOff, FolderOpen, RefreshCw } from 'lucide-react';
 import { EventFile } from './EventFile';
 import { EventLoader } from './EventLoader';
 import { createEmptyEvent, deleteEvent, getAllEvents, saveEvent as saveEventLocal, type R3aEvent } from './eventStore';
@@ -24,7 +24,6 @@ import {
   testGoogleDriveConnection,
   testGoogleDriveUpload,
   pickDriveFolder,
-  getValidToken,
   getTokenStatus,
   getPrinters,
   testPrinter,
@@ -43,6 +42,34 @@ const RESERVED_PATHS = new Set([
   'home',
   'project',
 ]);
+
+// 🔧 FIX: dedicated key untuk persist device mode (anti shallow-merge bug di settingsStore)
+const DEVICE_MODE_KEY = 'r3a_devicemode_override';
+
+function readStoredDeviceMode(): string {
+  if (typeof window === 'undefined') return 'auto';
+  try {
+    const v = window.localStorage.getItem(DEVICE_MODE_KEY);
+    if (v) return v;
+  } catch { /* ignore */ }
+  return 'auto';
+}
+
+function writeStoredDeviceMode(mode: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(DEVICE_MODE_KEY, mode);
+  } catch { /* ignore */ }
+}
+
+// Gabungkan device mode dari key dedicated ke dalam AllSettings (prioritas key dedicated)
+function withDeviceModeOverride(loaded: AllSettings): AllSettings {
+  const stored = readStoredDeviceMode();
+  if (stored && stored !== 'auto') {
+    return { ...loaded, application: { ...loaded.application, deviceTypeOverride: stored } };
+  }
+  return loaded;
+}
 
 function statusToAccent(status: string): string {
   if (status === 'Active') return '#44a96f';
@@ -213,12 +240,12 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
   onHome: () => void; appVersion: AppVersion; onVersionChange: (v: AppVersion) => void;
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('camera');
-  const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
+  // 🔧 FIX: merge device mode dari key dedicated ke settings
+  const [settings, setSettings] = useState<AllSettings>(() => withDeviceModeOverride(loadAllSettings()));
   const [cameras, setCameras] = useState<CameraDevice[]>([]);
   const [printers, setPrinters] = useState<string[]>([]);
   const [showTest, setShowTest] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
-  const [testCamera, setTestCamera] = useState<TestState>({ status: 'idle', message: '' });
   const [testPrinterState, setTestPrinterState] = useState<TestState>({ status: 'idle', message: '' });
   const [gdriveConnecting, setGdriveConnecting] = useState(false);
   const [gdriveTestState, setGdriveTestState] = useState<TestState>({ status: 'idle', message: '' });
@@ -317,6 +344,21 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
       setGdriveTestState({ status: 'error', message: 'Google Client ID not configured. Contact admin.' });
       return;
     }
+
+    // 🔧 FIX: baca device mode dari key dedicated (paling andal), fallback ke settings
+    const storedMode = readStoredDeviceMode();
+    const settingsMode = settings.application.deviceTypeOverride || 'auto';
+    const deviceMode = storedMode !== 'auto' ? storedMode : settingsMode;
+    const isNative = isNativePlatform();
+    const isTablet = isNative || deviceMode === 'tablet';
+
+    console.log('[ChangeFolder] storedMode =', storedMode, '| settingsMode =', settingsMode, '| deviceMode =', deviceMode, '| isTablet =', isTablet, '| isNative =', isNative);
+
+    if (isTablet) {
+      setShowCustomPicker(true);
+      return;
+    }
+
     setGdrivePicking(true);
     setGdriveTestState({ status: 'idle', message: '' });
     try {
@@ -349,15 +391,15 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
       return;
     }
 
-    const next = { 
-      ...settings, 
-      googleDrive: { 
-        ...settings.googleDrive, 
-        mainFolderId: folderId, 
-        mainFolderName: 'Folder Custom (Saved)' 
-      } 
+    const next = {
+      ...settings,
+      googleDrive: {
+        ...settings.googleDrive,
+        mainFolderId: folderId,
+        mainFolderName: 'Folder Custom (Saved)'
+      }
     };
-    
+
     setSettings(next);
     saveAllSettings(next);
     setGdriveTestState({ status: 'success', message: `✅ Berhasil tersimpan. ID: ${folderId}` });
@@ -385,6 +427,12 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
   useEffect(() => {
     document.documentElement.style.setProperty('--r3a-brightness', `${settings.display.brightness}%`);
   }, [settings.display.brightness]);
+
+  // 🔧 FIX: baca device mode aktif (dari dedicated key dulu, fallback ke state settings)
+  const activeDeviceMode = (() => {
+    const stored = readStoredDeviceMode();
+    return stored !== 'auto' ? stored : (settings.application.deviceTypeOverride || 'auto');
+  })();
 
   return (
     <main className="settings-screen">
@@ -591,7 +639,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                     <em style={{ fontSize: 11, opacity: 0.6 }}>Buka folder di Google Drive → copy URL → paste di sini.</em>
                   </div>
                   <div className="setting-control">
-                    <span>OPTION B — PICK FROM DRIVE</span>
+                    <span>OPTION B — PICK FROM DRIVE ({activeDeviceMode.toUpperCase()})</span>
                     <div className="gdrive-folder-row">
                       <button type="button" className="gdrive-change-folder" onClick={handleChangeFolder} disabled={gdrivePicking}>
                         {gdrivePicking ? 'OPENING...' : 'OPEN PICKER'}
@@ -795,16 +843,41 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
               </div>
               <div className="setting-control">
                 <span>DEVICE MODE</span>
-                <select 
-                  value={settings.application.deviceTypeOverride || 'auto'} 
-                  onChange={(e) => update('application', { deviceTypeOverride: e.target.value })}
+                <select
+                  value={activeDeviceMode}
+                  onChange={(e) => {
+                    const nextMode = e.target.value;
+                    if (confirm(`Ganti mode ke ${nextMode.toUpperCase()}?\n\nAplikasi akan reload untuk menyesuaikan tampilan dan fitur.`)) {
+                      // 🔧 FIX: tulis key dedicated DULU (synchronous), baru saveAllSettings
+                      writeStoredDeviceMode(nextMode);
+                      console.log('[DeviceMode] committed to dedicated key:', readStoredDeviceMode());
+
+                      const next = {
+                        ...settings,
+                        application: { ...settings.application, deviceTypeOverride: nextMode }
+                      };
+                      setSettings(next);
+                      try {
+                        saveAllSettings(next);
+                        console.log('[DeviceMode] saveAllSettings OK. settings.application =', next.application);
+                      } catch (err) {
+                        console.error('[DeviceMode] saveAllSettings FAILED:', err);
+                      }
+
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 500);
+                    }
+                  }}
                 >
                   <option value="auto">AUTO DETECT</option>
                   <option value="web">WEB BROWSER</option>
                   <option value="tablet">TABLET / IPAD</option>
                   <option value="windows">WINDOWS MODE</option>
                 </select>
-                <em style={{ fontSize: 11, opacity: 0.6 }}>Ubah tipe device di Operator</em>
+                <em style={{ fontSize: 11, opacity: 0.6 }}>
+                  Aktif: <strong style={{ color: '#ffd94e' }}>{activeDeviceMode.toUpperCase()}</strong> — cek Console kalau ragu
+                </em>
               </div>
               <div className="setting-control">
                 <span>SYSTEM STATUS</span>
@@ -882,6 +955,20 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
         </button>
       </footer>
       {showTest ? <CameraTestModal settings={settings.camera} onClose={() => setShowTest(false)} /> : null}
+
+      {showCustomPicker ? (
+        <FolderPicker
+          clientId={VITE_CLIENT_ID}
+          onSelect={(folder) => {
+            const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: folder.id, mainFolderName: folder.name } };
+            setSettings(next);
+            saveAllSettings(next);
+            setShowCustomPicker(false);
+          }}
+          onClose={() => setShowCustomPicker(false)}
+        />
+      ) : null}
+
     </main>
   );
 };
@@ -955,7 +1042,8 @@ function App() {
   const [events, setEvents] = useState<R3aEvent[]>([]);
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
-  const [settings, setSettings] = useState<AllSettings>(() => loadAllSettings());
+  // 🔧 FIX: merge device mode dari dedicated key
+  const [settings, setSettings] = useState<AllSettings>(() => withDeviceModeOverride(loadAllSettings()));
   const [appVersion, setAppVersion] = useState<AppVersion>(() => loadAppVersion());
   const [hash, setHash] = useState(() =>
     typeof window !== 'undefined' ? window.location.hash : ''
@@ -1289,7 +1377,7 @@ function App() {
     return (
       <WithReminder {...reminderProps}>
         <Settings
-          onHome={() => { setSettings(loadAllSettings()); setScreen('home'); }}
+          onHome={() => { setSettings(withDeviceModeOverride(loadAllSettings())); setScreen('home'); }}
           appVersion={appVersion}
           onVersionChange={(v) => { saveAppVersion(v); setAppVersion(v); }}
         />
