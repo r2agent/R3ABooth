@@ -1,10 +1,13 @@
 import { useEffect, useState, useMemo } from 'react';
 import { X, Folder, Search, ArrowUpDown, Loader2 } from 'lucide-react';
+// 🔧 TAMBAHKAN BARIS IMPORT INI (Sesuaikan path-nya jika perlu)
+// Jika getAccessToken ada di gdriveService, ganti jadi: import { getAccessToken } from '../gdriveService';
+import { getAccessToken } from '../pkceAuth'; 
 
 type DriveFolder = {
   id: string;
   name: string;
-  createdTime?: string; // Google Drive API biasanya mengembalikan ini
+  createdTime?: string;
   modifiedTime?: string;
 };
 
@@ -19,7 +22,6 @@ export function FolderPicker({ clientId, onSelect, onClose }: FolderPickerProps)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // 🔧 State untuk Search & Sort
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'az'>('newest');
 
@@ -27,13 +29,9 @@ export function FolderPicker({ clientId, onSelect, onClose }: FolderPickerProps)
     async function fetchFolders() {
       try {
         setLoading(true);
-        // Ambil token dari localStorage atau gapi (sesuaikan dengan auth kamu)
-        // Asumsi: kamu sudah punya token yang valid di localStorage atau context
         
-        // 🔧 IMPORT FUNGSI TOKEN DI BAGIAN ATAS FILE:
-        // import { getAccessToken } from '../pkceAuth'; (atau sesuaikan path-nya)
-        
-        const token = getAccessToken(); // Atau fungsi yang kamu gunakan untuk get token
+        // Ambil token menggunakan fungsi asli dari aplikasi kamu
+        const token = getAccessToken(); 
         
         if (!token) throw new Error('Token Google Drive tidak ditemukan. Silakan connect ulang.');
 
@@ -61,17 +59,15 @@ export function FolderPicker({ clientId, onSelect, onClose }: FolderPickerProps)
     void fetchFolders();
   }, [clientId]);
 
-  // 🔧 LOGIKA FILTER & SORTIR
+  // LOGIKA FILTER & SORTIR
   const filteredAndSortedFolders = useMemo(() => {
     let result = [...folders];
 
-    // 1. Filter berdasarkan Search Query
     if (searchQuery.trim()) {
       const lowerQuery = searchQuery.toLowerCase();
       result = result.filter((f) => f.name.toLowerCase().includes(lowerQuery));
     }
 
-    // 2. Sortir
     result.sort((a, b) => {
       if (sortBy === 'az') {
         return a.name.localeCompare(b.name);
@@ -81,9 +77,9 @@ export function FolderPicker({ clientId, onSelect, onClose }: FolderPickerProps)
       const timeB = new Date(b.createdTime || b.modifiedTime || 0).getTime();
       
       if (sortBy === 'newest') {
-        return timeB - timeA; // Terbaru di atas
+        return timeB - timeA;
       } else {
-        return timeA - timeB; // Terlama di atas
+        return timeA - timeB;
       }
     });
 
