@@ -24,65 +24,61 @@ export function QRISGate({ qrisImageUrl, price, onConfirm, onCancel }: QRISGateP
   return (
     <div className="qris-gate-overlay">
       <div className="qris-gate-box">
-        <div className="qris-gate-header">
-          <div className="qris-gate-icon">
-            <QrCode size={28} strokeWidth={2} />
+        
+        {/* KOLOM KIRI: QR CODE */}
+        <div className="qris-gate-left">
+          <div className="qris-gate-qr">
+            {qrisImageUrl ? (
+              <img src={qrisImageUrl} alt="QRIS DANA" />
+            ) : (
+              <div className="qris-gate-qr-placeholder">
+                <QrCode size={64} strokeWidth={1} />
+                <span>QRIS belum di-set</span>
+              </div>
+            )}
           </div>
-          <h2>SCAN & PAY WITH DANA</h2>
-          <p>Scan QRIS di bawah pakai DANA, OVO, GoPay, ShopeePay, atau bank apapun</p>
         </div>
 
-        <div className="qris-gate-qr">
-          {qrisImageUrl ? (
-            <img src={qrisImageUrl} alt="QRIS DANA" />
-          ) : (
-            <div className="qris-gate-qr-placeholder">
-              <QrCode size={96} strokeWidth={1} />
-              <span>QRIS belum di-set</span>
-              <small>Upload di Settings → Payment</small>
+        {/* KOLOM KANAN: INFO & ACTION */}
+        <div className="qris-gate-right">
+          <div className="qris-gate-header">
+            <div className="qris-gate-icon">
+              <QrCode size={24} strokeWidth={2} />
             </div>
-          )}
+            <div>
+              <h2>SCAN & PAY</h2>
+              <p>Gunakan DANA, OVO, GoPay, ShopeePay, atau m-banking.</p>
+            </div>
+          </div>
+
+          <div className="qris-gate-price">
+            <span className="qris-gate-price-label">Total Pembayaran</span>
+            <span className="qris-gate-price-value">
+              <span className="qris-gate-price-currency">Rp</span>
+              {formattedPrice}
+            </span>
+          </div>
+
+          <div className="qris-gate-instruction">
+            <span className="qris-gate-instruction-title">Cara Bayar:</span>
+            <ol>
+              <li>Buka app e-wallet / m-banking</li>
+              <li>Pilih menu "Scan QRIS"</li>
+              <li>Scan QR di samping</li>
+              <li>Masukkan nominal <strong>Rp {formattedPrice}</strong></li>
+            </ol>
+          </div>
+
+          <div className="qris-gate-actions">
+            <button type="button" className="qris-gate-cancel" onClick={onCancel}>
+              <X size={16} /> BATAL
+            </button>
+            <button type="button" className="qris-gate-confirm" onClick={onConfirm}>
+              <Check size={16} /> SUDAH BAYAR
+            </button>
+          </div>
         </div>
 
-        <div className="qris-gate-price">
-          <span className="qris-gate-price-label">Total Pembayaran</span>
-          <span className="qris-gate-price-value">
-            <span className="qris-gate-price-currency">Rp</span>
-            {formattedPrice}
-          </span>
-        </div>
-
-        <div className="qris-gate-instruction">
-          <span className="qris-gate-instruction-title">Cara Bayar:</span>
-          <ol>
-            <li>Buka app DANA / e-wallet / m-banking</li>
-            <li>Tap menu "Scan QRIS"</li>
-            <li>Scan QR di atas</li>
-            <li>Masukkan nominal <strong>Rp {formattedPrice}</strong></li>
-            <li>Selesaikan pembayaran</li>
-          </ol>
-        </div>
-
-        <div className="qris-gate-actions">
-          <button
-            type="button"
-            className="qris-gate-cancel"
-            onClick={onCancel}
-          >
-            <X size={18} /> BATAL
-          </button>
-          <button
-            type="button"
-            className="qris-gate-confirm"
-            onClick={onConfirm}
-          >
-            <Check size={18} /> SAYA SUDAH BAYAR
-          </button>
-        </div>
-
-        <p className="qris-gate-note">
-          ⚠️ Pastikan sudah bayar sebelum lanjut. Booth tidak bertanggung jawab jika belum bayar tapi tetap lanjut.
-        </p>
       </div>
     </div>
   );
