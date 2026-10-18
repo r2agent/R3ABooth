@@ -964,6 +964,8 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
             setSettings(next);
             saveAllSettings(next);
             setShowCustomPicker(false);
+            // 🔧 TAMBAHKAN BARIS INI UNTUK NOTIFIKASI SUKSES
+            setGdriveTestState({ status: 'success', message: `✅ Berhasil memilih folder: ${folder.name}` });
           }}
           onClose={() => setShowCustomPicker(false)}
         />
