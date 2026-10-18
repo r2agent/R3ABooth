@@ -365,14 +365,26 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
 
   const handleApplyManualFolder = async () => {
     const raw = settings.googleDrive.manualFolderInput || '';
-    const folderId = parseFolderId(raw);
+    
+    // 1. Bersihkan dari spasi atau enter
+    const clean = raw.trim().replace(/\s+/g, '');
 
-    if (!folderId) {
-      setGdriveTestState({ status: 'error', message: 'ID Folder tidak ditemukan. Pastikan link yang di-paste benar.' });
+    if (!clean) {
+      setGdriveTestState({ status: 'error', message: 'Kolom input kosong. Paste link folder di sini.' });
       return;
     }
 
-    // ⚡ BYPASS MODE: Langsung simpan tanpa cek API Google
+    // 2. Ambil teks apapun yang panjangnya lebih dari 20 karakter
+    const match = clean.match(/[a-zA-Z0-9_-]{20,}/);
+    const folderId = match ? match[0] : '';
+
+    // 3. Cek jika yang di-paste cuma link halaman depan (bukan link folder)
+    if (!folderId || folderId.includes('httpsdrivegooglecom') || folderId.includes('drivegooglecomdrive')) {
+      setGdriveTestState({ status: 'error', message: 'Link tidak valid. Pastikan kamu sudah MASUK ke dalam foldernya, lalu copy URL dari address bar.' });
+      return;
+    }
+
+    // 4. Simpan ID
     const next = { 
       ...settings, 
       googleDrive: { 
@@ -381,6 +393,13 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
         mainFolderName: 'Folder Custom (Saved)' 
       } 
     };
+    
+    setSettings(next);
+    saveAllSettings(next);
+    
+    // Tampilkan ID yang berhasil ditangkap agar kamu bisa cek apakah benar
+    setGdriveTestState({ status: 'success', message: `✅ Berhasil tersimpan. ID: ${folderId}` });
+  };
     
     setSettings(next);
     saveAllSettings(next);
