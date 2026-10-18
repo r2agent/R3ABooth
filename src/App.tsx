@@ -364,40 +364,27 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
   };
 
   const handleApplyManualFolder = async () => {
-    const raw = settings.googleDrive.manualFolderInput;
+    const raw = settings.googleDrive.manualFolderInput || '';
     const folderId = parseFolderId(raw);
+
     if (!folderId) {
-      setGdriveTestState({ status: 'error', message: 'Invalid folder URL or ID. Paste a Google Drive folder link.' });
+      setGdriveTestState({ status: 'error', message: 'ID Folder tidak ditemukan. Pastikan link yang di-paste benar.' });
       return;
     }
-    const clientId = VITE_CLIENT_ID;
-    if (!clientId) {
-      setGdriveTestState({ status: 'error', message: 'Connect Google Drive first.' });
-      return;
-    }
-    setGdrivePicking(true);
-    setGdriveTestState({ status: 'running', message: 'Checking folder...' });
-    try {
-      const token = await getValidToken(clientId);
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=id,name,mimeType`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `Folder not found (HTTP ${res.status})`);
-      }
-      const data = await res.json() as { id: string; name: string; mimeType: string };
-      if (data.mimeType !== 'application/vnd.google-apps.folder') {
-        throw new Error('That ID is not a folder.');
-      }
-      const next = { ...settings, googleDrive: { ...settings.googleDrive, mainFolderId: data.id, mainFolderName: data.name } };
-      setSettings(next);
-      saveAllSettings(next);
-      setGdriveTestState({ status: 'success', message: `Folder set: ${data.name}` });
-    } catch (err) {
-      setGdriveTestState({ status: 'error', message: err instanceof Error ? err.message : 'Failed to set folder' });
-    }
-    setGdrivePicking(false);
+
+    // ⚡ BYPASS MODE: Langsung simpan tanpa cek API Google
+    const next = { 
+      ...settings, 
+      googleDrive: { 
+        ...settings.googleDrive, 
+        mainFolderId: folderId, 
+        mainFolderName: 'Folder Custom (Saved)' 
+      } 
+    };
+    
+    setSettings(next);
+    saveAllSettings(next);
+    setGdriveTestState({ status: 'success', message: `✅ Folder ID berhasil disimpan ke sistem.` });
   };
 
   const handleTestGdrive = async () => {
