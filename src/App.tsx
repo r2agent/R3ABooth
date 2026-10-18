@@ -50,26 +50,35 @@ function statusToAccent(status: string): string {
 }
 
 function parseFolderId(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return '';
-  
-  // 1. Cek jika yang di-paste cuma ID murni (tanpa link)
-  if (/^[a-zA-Z0-9_-]{15,}$/.test(trimmed)) return trimmed;
-  
-  // 2. Cek link format /folders/xxxxx
-  const m1 = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  // 1. Bersihkan input dari spasi, enter, atau karakter aneh dari keyboard HP
+  const clean = input.trim().replace(/\s+/g, '');
+  if (!clean) return '';
+
+  // 2. Cek link format /folders/xxxxx (Format standar Google Drive)
+  const m1 = clean.match(/\/folders\/([a-zA-Z0-9_-]+)/);
   if (m1) return m1[1];
 
   // 3. Cek link format ?id=xxxxx
-  const m2 = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  const m2 = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (m2) return m2[1];
 
-  // 4. Fallback: cari teks panjang alfanumerik (kemungkinan besar itu ID-nya)
-  const matches = trimmed.match(/[a-zA-Z0-9_-]{15,}/g);
-  if (matches && matches.length > 0) {
-    return matches[matches.length - 1]; 
+  // 4. Kalau user cuma paste ID murni (tanpa link)
+  // ID Google Drive biasanya panjangnya 25-50 karakter
+  if (clean.length >= 20 && /^[a-zA-Z0-9_-]+$/.test(clean)) {
+    return clean;
   }
-  
+
+  // 5. Fallback: Ambil potongan teks terpanjang yang mirip ID (jaga-jaga)
+  const parts = clean.split(/[\/?&=]/);
+  const possibleIds = parts.filter((p) => 
+    p.length > 20 && 
+    p !== 'https:' && 
+    p !== 'drive.google.com' && 
+    p !== 'drive' &&
+    p !== 'u'
+  );
+  if (possibleIds.length > 0) return possibleIds[0];
+
   return '';
 }
 
