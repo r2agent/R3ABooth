@@ -831,8 +831,17 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <em style={{ fontSize: 11, opacity: 0.6 }}>Popup follow IG saat pilih frame (v1.0.0)</em>
               </div>
               <div className="setting-control">
-                <span>ELECTRON STATUS</span>
-                <button type="button">BROWSER MODE<b>▼</b></button>
+                <span>DEVICE MODE</span>
+                <select 
+                  value={settings.application.deviceTypeOverride || 'auto'} 
+                  onChange={(e) => update('application', { deviceTypeOverride: e.target.value })}
+                >
+                  <option value="auto">AUTO DETECT</option>
+                  <option value="web">WEB BROWSER</option>
+                  <option value="tablet">TABLET / IPAD</option>
+                  <option value="windows">WINDOWS MODE</option>
+                </select>
+                <em style={{ fontSize: 11, opacity: 0.6 }}>Ubah tipe device di Operator</em>
               </div>
               <div className="setting-control">
                 <span>SYSTEM STATUS</span>

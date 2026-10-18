@@ -1,9 +1,10 @@
 /* ============================================================
    DEVICE INFO — deteksi tipe device, browser, OS, screen
    ============================================================ */
+import { loadAllSettings } from './settingsStore';
 
 export type DeviceInfo = {
-  deviceType: 'mobile' | 'tablet' | 'desktop';
+  deviceType: 'mobile' | 'tablet' | 'desktop' | 'web' | 'windows';
   browser: string;
   os: string;
   screenSize: string;
@@ -51,6 +52,23 @@ export function getDeviceInfo(): DeviceInfo {
   else if (/Firefox\//i.test(ua)) browser = 'Firefox';
   else if (/Safari\//i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
 
+  /* ⚡ DEVICE MODE OVERRIDE ⚡ */
+  try {
+    const settings = loadAllSettings();
+    const override = settings.application?.deviceTypeOverride || 'auto';
+
+    if (override === 'web') {
+      deviceType = 'web';
+      os = 'Web Mode';
+    } else if (override === 'tablet') {
+      deviceType = 'tablet';
+      os = 'Tablet / iPad';
+    } else if (override === 'windows') {
+      deviceType = 'windows';
+      os = 'Windows Mode';
+    }
+  } catch { /* silent fail */ }
+
   return {
     deviceType,
     browser,
@@ -61,7 +79,8 @@ export function getDeviceInfo(): DeviceInfo {
 
 export function formatDeviceType(t: string): string {
   if (t === 'mobile') return 'HP';
-  if (t === 'tablet') return 'Tablet';
-  if (t === 'desktop') return 'PC/Laptop';
-  return 'Unknown';
+  if (t === 'tablet') return 'Tablet / iPad';
+  if (t === 'web') return 'Web Browser';
+  if (t === 'windows') return 'Windows Mode';
+  return 'PC / Laptop';
 }
