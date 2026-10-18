@@ -1,3 +1,4 @@
+import { QRISGate } from './QRISGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key } from 'lucide-react';
 import { useCamera } from './useCamera';
@@ -386,6 +387,7 @@ export const PhotoboothSession = ({
   const [showIGGate, setShowIGGate] = useState(false);
   const [pendingFrameIndex, setPendingFrameIndex] = useState<number | null>(null);
   const [idleWarning, setIdleWarning] = useState(0);
+  const [showQRISGate, setShowQRISGate] = useState(false);
 
   useEffect(() => {
     if (phase !== 'ready' && phase !== 'live') return;
@@ -748,18 +750,33 @@ useEffect(() => {
 
   const handleSelectFrame = useCallback((index: number) => {
     const version = loadAppVersion();
-    const gateEnabled = allSettings.system.igGateEnabled !== false;
 
-    if (version === 'v1.0.0' && gateEnabled) {
-      setPendingFrameIndex(index);
-      setShowIGGate(true);
-      return;
+    // v1.0.0 → IG Gate
+    if (version === 'v1.0.0') {
+      const gateEnabled = allSettings.system.igGateEnabled !== false;
+      if (gateEnabled) {
+        setPendingFrameIndex(index);
+        setShowIGGate(true);
+        return;
+      }
     }
 
+    // v2.0.0 → QRIS Gate
+    if (version === 'v2.0.0') {
+      const payment = allSettings.payment;
+      const requirePayment = payment?.requirePayment !== false;
+      if (requirePayment) {
+        setPendingFrameIndex(index);
+        setShowQRISGate(true);
+        return;
+      }
+    }
+
+    // Tanpa gate (atau gate disabled)
     setSelectedFrameIndex(index);
     resetSession();
     setPhase('ready');
-  }, [resetSession, allSettings.system.igGateEnabled]);
+  }, [resetSession, allSettings.system.igGateEnabled, allSettings.payment]);
 
   const handleIGGateDismiss = useCallback(() => {
     if (pendingFrameIndex !== null) {
@@ -769,6 +786,21 @@ useEffect(() => {
     setShowIGGate(false);
     void handleStartCapture();
   }, [pendingFrameIndex, handleStartCapture]);
+
+    /* ⚡ v2.0.0: QRIS gate → LIVE */
+  const handleQRISConfirm = useCallback(() => {
+    if (pendingFrameIndex !== null) {
+      setSelectedFrameIndex(pendingFrameIndex);
+      setPendingFrameIndex(null);
+    }
+    setShowQRISGate(false);
+    void handleStartCapture();
+  }, [pendingFrameIndex, handleStartCapture]);
+
+  const handleQRISCancel = useCallback(() => {
+    setPendingFrameIndex(null);
+    setShowQRISGate(false);
+  }, []);
 
   const isVideoReady = useCallback((video: HTMLVideoElement | null): boolean => {
     return !!(video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0);
@@ -1223,6 +1255,14 @@ useEffect(() => {
         {showIGGate ? (
           <IGFollowGate imageSrc={igGateImage} onDismiss={handleIGGateDismiss} />
         ) : null}
+        {showQRISGate ? (
+          <QRISGate
+      qrisImageUrl={allSettings.payment?.qrisImageUrl || ''}
+      price={allSettings.payment?.price || 25000}
+      onConfirm={handleQRISConfirm}
+      onCancel={handleQRISCancel}
+    />
+  ) : null}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project"><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
           <div className="hidden-exit-trigger" onClick={handleLogoClick} />

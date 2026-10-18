@@ -13,8 +13,8 @@ export type VersionInfo = {
 };
 
 export const AVAILABLE_VERSIONS: VersionInfo[] = [
-  { id: 'v1.0.0', label: 'v1.0.0', description: 'Classic — stabil & teruji' },
-  { id: 'v2.0.0', label: 'v2.0.0', description: 'Eksperimental — fitur baru' },
+  { id: 'v1.0.0', label: 'v1.0.0', description: 'IG Gate active' },
+  { id: 'v2.0.0', label: 'v2.0.0', description: 'QRIS Payment Gate' },
 ];
 
 const STORAGE_KEY = 'r3a-app-version';

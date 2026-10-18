@@ -70,6 +70,13 @@ export type SystemSettingsShape = {
   igGateEnabled: boolean;
 };
 
+export type PaymentSettingsShape = {
+  enabled: boolean;
+  qrisImageUrl: string;
+  price: number;
+  requirePayment: boolean;
+};
+
 export type AllSettings = {
   camera: CameraSettingsShape;
   printer: PrinterSettingsShape;
@@ -79,6 +86,7 @@ export type AllSettings = {
   display: DisplaySettingsShape;
   security: SecuritySettingsShape;
   system: SystemSettingsShape;
+  payment: PaymentSettingsShape;
 };
 
 const STORAGE_KEY = 'r3a-booth-settings-v1';
@@ -146,6 +154,12 @@ const DEFAULT_SETTINGS: AllSettings = {
     appVersion: '1.0.0',
     igGateEnabled: true,
   },
+    payment: {
+    enabled: false,
+    qrisImageUrl: '',
+    price: 25000,
+    requirePayment: true,
+  },
 };
 
 export function loadAllSettings(): AllSettings {
@@ -162,6 +176,7 @@ export function loadAllSettings(): AllSettings {
       display: { ...DEFAULT_SETTINGS.display, ...(parsed.display || {}) },
       security: { ...DEFAULT_SETTINGS.security, ...(parsed.security || {}) },
       system: { ...DEFAULT_SETTINGS.system, ...(parsed.system || {}) },
+      payment: { ...DEFAULT_SETTINGS.payment, ...(parsed.payment || {}) },
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

@@ -216,7 +216,7 @@ const ProjectList = ({
   );
 };
 
-type SettingsTab = 'camera' | 'storage' | 'application' | 'display' | 'security' | 'system';
+type SettingsTab = 'camera' | 'storage' | 'application' | 'display' | 'security' | 'system' | 'payment';
 type TestState = { status: 'idle' | 'running' | 'success' | 'error'; message: string };
 
 const Settings = ({ onHome, appVersion, onVersionChange }: {
@@ -244,6 +244,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
     { id: 'display', label: 'DISPLAY & INTERFACE' },
     { id: 'security', label: 'SECURITY & ADMIN' },
     { id: 'system', label: 'SYSTEM & DIAGNOSTICS' },
+    { id: 'payment', label: 'PAYMENT' },
   ];
 
   useEffect(() => { void enumerateCameras().then(setCameras); }, []);
@@ -830,6 +831,53 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 ))}
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {activeTab === 'payment' ? (
+          <div className="settings-simple-panel">
+            <div className="simple-panel-heading"><span>PAYMENT</span><p>QRIS payment gate settings (v2.0.0)</p></div>
+            <div className="simple-panel-grid">
+              <div className="setting-control">
+                <span>ENABLE QRIS GATE</span>
+                <button className={`toggle-row ${settings.payment?.requirePayment ? 'is-on' : ''}`} type="button" onClick={() => update('payment', { requirePayment: !settings.payment?.requirePayment })}>
+                  <i />{settings.payment?.requirePayment ? 'ON' : 'OFF'}
+                </button>
+                <em style={{ fontSize: 11, opacity: 0.6 }}>Aktifkan gate QRIS di v2.0.0</em>
+              </div>
+              <div className="setting-control">
+                <span>PRICE PER SESSION (Rp)</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={String(settings.payment?.price ?? 25000)}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    const num = raw === '' ? 0 : parseInt(raw, 10);
+                    update('payment', { price: num });
+                  }}
+                  onBlur={(e) => {
+                    const raw = e.target.value.replace(/[^0-9]/g, '');
+                    const num = raw === '' ? 25000 : parseInt(raw, 10);
+                    if (!num || num < 1000) update('payment', { price: 25000 });
+                  }}
+                  placeholder="25000"
+                  style={{ padding: 8, fontSize: 14 }}
+                />
+              </div>
+              <div className="setting-control">
+                <span>QRIS IMAGE URL</span>
+                <input
+                  type="text"
+                  value={settings.payment?.qrisImageUrl || ''}
+                  onChange={(e) => update('payment', { qrisImageUrl: e.target.value })}
+                  placeholder="/qris-r3a.png atau https://..."
+                  style={{ padding: 8, fontSize: 14, minWidth: 260 }}
+                />
+                <em style={{ fontSize: 11, opacity: 0.6 }}>Taruh file di /public atau pakai URL</em>
+              </div>
+            </div>
           </div>
         ) : null}
       </section>
