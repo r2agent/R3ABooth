@@ -1683,7 +1683,7 @@ useEffect(() => {
               
               {/* 🔧 LOGIKA PRINT DIPERBAIKI: TANPA SYARAT (UNTUK TES LAYOUT) */}
               <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
-                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK' : 'PRINT')}
+                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK' : 'PRINT')}
               </button>
               
               {allSettings.display.showQrButton ? (
