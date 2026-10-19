@@ -25,6 +25,10 @@ import {
   QrCode,
   ExternalLink,
   ShieldAlert,
+  DollarSign,
+  Printer,
+  Camera,
+  FileSpreadsheet,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -163,11 +167,16 @@ export const OperatorDashboard = ({
         driveLimit += t.driveLimit ?? 0;
       }
     }
+    
+    // Kalkulasi pendapatan (Harga QRIS x Total Sesi Hari Ini)
+    const pricePerSession = allSettings.payment?.price || 25000;
+    const totalRevenue = totalSessions * pricePerSession;
+
     return {
       totalSessions, totalPhotos, totalUploaded, totalPending, totalFailed,
-      driveUsed, driveLimit, driveConnectedCount,
+      driveUsed, driveLimit, driveConnectedCount, totalRevenue
     };
-  }, [eventFiltered]);
+  }, [eventFiltered, allSettings.payment?.price]);
 
   useEffect(() => {
     const originalMinWidth = document.body.style.minWidth;
@@ -237,6 +246,32 @@ export const OperatorDashboard = ({
     }
   }, []);
 
+  // 🔧 Export CSV Function
+  const handleExportCSV = useCallback(() => {
+    const headers = ['Metric', 'Value'];
+    const rows = [
+      ['Total Sesi Hari Ini', aggregatedStats.totalSessions],
+      ['Total Foto Hari Ini', aggregatedStats.totalPhotos],
+      ['Total Pendapatan', aggregatedStats.totalRevenue],
+      ['Uploaded Files', aggregatedStats.totalUploaded],
+      ['Pending Uploads', aggregatedStats.totalPending],
+      ['Failed Uploads', aggregatedStats.totalFailed],
+      ['Drive Used (Bytes)', aggregatedStats.driveUsed],
+      ['Drive Limit (Bytes)', aggregatedStats.driveLimit],
+      ['Time Exported', new Date().toISOString()]
+    ];
+
+    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `r3a_stats_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [aggregatedStats]);
+
   const drivePercent = aggregatedStats.driveLimit > 0
     ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
     : 0;
@@ -291,16 +326,8 @@ export const OperatorDashboard = ({
 
         /* ============ ENTRANCE ANIMATION ============ */
         @keyframes op-fade-up {
-          from {
-            opacity: 0;
-            transform: translateY(14px) scale(.985);
-            filter: blur(4px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-            filter: blur(0);
-          }
+          from { opacity: 0; transform: translateY(14px) scale(.985); filter: blur(4px); }
+          to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
         }
         @keyframes op-nav-in {
           from { opacity: 0; transform: translateY(-10px); }
@@ -1065,14 +1092,15 @@ export const OperatorDashboard = ({
               deltaTone="up"
               spark="0,21 12,23 24,17 36,19 48,12 60,15 72,9 84,11 100,5"
             />
+            {/* 🔧 KARTU PENDAPATAN (REVENUE) */}
             <StatCard
-              label="Uploaded"
-              shortLabel="UPLOAD"
-              value={String(aggregatedStats.totalUploaded)}
-              delta={aggregatedStats.totalPending > 0 ? `${aggregatedStats.totalPending} pending` : 'Clean'}
-              deltaTone={aggregatedStats.totalPending > 0 ? 'flat' : 'up'}
-              spark="0,21 12,23 24,17 36,19 48,12 60,15 72,9 84,11 100,5"
-              tone="ok"
+              label="Pendapatan"
+              shortLabel="OMZET"
+              value={`Rp ${(aggregatedStats.totalRevenue).toLocaleString('id-ID')}`}
+              delta="Est."
+              deltaTone="flat"
+              spark="0,15 12,18 24,12 36,14 48,8 60,12 72,7 84,9 100,3"
+              tone="info"
             />
             <StatCard
               label="Failed"
@@ -1509,6 +1537,34 @@ export const OperatorDashboard = ({
                 </div>
               </div>
 
+              {/* 🔧 HARDWARE STATUS (MOCKUP/PLACEHOLDER) */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="op-card__title">Status Hardware</div>
+                    <div className="op-card__sub">Pemantauan dari device terpilih</div>
+                  </div>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Printer</span>
+                  <span className="op-badge op-badge--ok">Connected</span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Kamera</span>
+                  <span className="op-badge op-badge--ok">Detected</span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Aksi Cepat</span>
+                  <button 
+                    className="op-btn op-btn--ghost" 
+                    style={{ padding: '4px 10px', fontSize: 11 }}
+                    onClick={() => setActionMessage('✅ Perintah Test Print dikirim!')}
+                  >
+                    Test Print
+                  </button>
+                </div>
+              </div>
+
               {/* HEALTH SUMMARY */}
               <div className="op-card">
                 <div className="op-card__head">
@@ -1573,6 +1629,19 @@ export const OperatorDashboard = ({
                       : 'Belum terhubung'}
                   </span>
                 </div>
+              </div>
+
+              {/* 🔧 EXPORT CSV */}
+              <div className="op-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="op-card__head" style={{ marginBottom: 0 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="op-card__title">Export Laporan</div>
+                    <div className="op-card__sub">Unduh data statistik ke CSV</div>
+                  </div>
+                </div>
+                <button className="op-btn op-btn--accent" onClick={handleExportCSV} style={{ width: '100%', justifyContent: 'center' }}>
+                  <FileSpreadsheet size={16} /> DOWNLOAD DATA
+                </button>
               </div>
 
             </div>
