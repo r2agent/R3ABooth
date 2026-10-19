@@ -1359,7 +1359,6 @@ useEffect(() => {
                     type="button"
                   >
                     <div className="frame-select-thumb">
-                      {/* 🔧 HANYA TAMPILKAN GAMBAR DUMMY (JIKA ADA) ATAU FRAME UTAMA DI SINI */}
                       {(frame.showDummyPreview && frame.dummyPreviewImage) ? (
                         <img src={frame.dummyPreviewImage} alt={displayName} />
                       ) : frame.image ? (
@@ -1404,7 +1403,6 @@ useEffect(() => {
               if (cap) return null;
               return (
                 <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {/* 🔧 DUMMY DIHAPUS DARI SINI */}
                   <span>{slot.captureId}</span>
                 </div>
               );
@@ -1561,8 +1559,6 @@ useEffect(() => {
                   );
                 }
 
-                // 🔧 DUMMY PREVIEW DIHAPUS DARI SINI AGAR SLOT KOSONG SAAT SESI FOTO
-
                 return null;
               })}
               
@@ -1636,64 +1632,82 @@ useEffect(() => {
         <section className="photobooth-compositing"><div className="compositing-spinner" /><span>COMPOSITING...</span></section>
       ) : null}
 
+      {/* 🔧 RESULT SCREEN LAYOUT (SAMPING KIRI KANAN) */}
       {phase === 'result' && (compositeUrl || compositeColorUrl) ? (
-        <section className="photobooth-result-section">
-          <div className="result-header"><h2>YOUR PHOTO IS READY</h2></div>
+        <section className="photobooth-result-section" style={{ padding: '20px' }}>
+          <div className="result-header" style={{ textAlign: 'center', marginBottom: '20px' }}>
+            <h2>YOUR PHOTO IS READY</h2>
+          </div>
           
-          <div className="result-preview">
-            <img 
-              src={isReceiptMode && !showPrintPreview && compositeColorUrl ? compositeColorUrl : compositeUrl} 
-              alt="Final result" 
-            />
-          </div>
+          <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: '40px', flexWrap: 'wrap', maxWidth: '1200px', margin: '0 auto' }}>
+            
+            {/* KIRI: GAMBAR HASIL FOTO */}
+            <div className="result-preview" style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+              <img 
+                src={isReceiptMode && !showPrintPreview && compositeColorUrl ? compositeColorUrl : compositeUrl} 
+                alt="Final result" 
+                style={{ maxHeight: '65vh', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}
+              />
 
-          {isReceiptMode && compositeColorUrl && (
-            <button 
-              className="result-toggle-preview" 
-              onClick={() => setShowPrintPreview(!showPrintPreview)}
-              style={{
-                margin: '0 auto 20px',
-                padding: '10px 20px',
-                background: 'rgba(255,255,255,.1)',
-                color: '#fff',
-                border: '1px solid rgba(255,255,255,.3)',
-                borderRadius: '30px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              <Eye size={18} /> 
-              {showPrintPreview ? 'LIHAT HASIL WARNA' : 'LIHAT HASIL CETAK'}
-            </button>
-          )}
+              {isReceiptMode && compositeColorUrl && (
+                <button 
+                  className="result-toggle-preview" 
+                  onClick={() => setShowPrintPreview(!showPrintPreview)}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'rgba(255,255,255,.1)',
+                    color: '#fff',
+                    border: '1px solid rgba(255,255,255,.3)',
+                    borderRadius: '30px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  <Eye size={18} /> 
+                  {showPrintPreview ? 'LIHAT HASIL WARNA' : 'LIHAT HASIL CETAK'}
+                </button>
+              )}
+            </div>
 
-          <div className="result-actions">
-            <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
-              {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
-            </button>
-            {(event.printerSettings.enabled && allSettings.display.showPrintButton) ? (
-              <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
-                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (loadAppVersion() === 'v2.1.0' ? 'CETAK STRUK' : 'PRINT')}
+            {/* KANAN: TOMBOL AKSI */}
+            <div className="result-actions" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '220px' }}>
+              <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
+                {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
               </button>
-            ) : null}
-            {allSettings.display.showQrButton ? (
-              <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button"><QrCode size={18} /> QR CODE</button>
-            ) : null}
-            {currentGuest && allSettings.display.showDriveQrButton ? (
-              <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button"><QrCode size={18} /> DRIVE QR</button>
-            ) : null}
+              
+              {(event.printerSettings.enabled && allSettings.display.showPrintButton) ? (
+                <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
+                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (loadAppVersion() === 'v2.1.0' ? 'CETAK STRUK' : 'PRINT')}
+                </button>
+              ) : null}
+              
+              {allSettings.display.showQrButton ? (
+                <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
+                  <QrCode size={18} /> QR CODE
+                </button>
+              ) : null}
+              
+              {currentGuest && allSettings.display.showDriveQrButton ? (
+                <button className="result-qr" onClick={handleShowDriveQr} disabled={!saved || saving} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
+                  <QrCode size={18} /> DRIVE QR
+                </button>
+              ) : null}
+              
+              <button
+                className={`result-done ${saved ? 'is-saved' : ''}`}
+                onClick={handleBackToFrameSelect}
+                disabled={!saved || saving}
+                type="button"
+                style={{ padding: '15px 20px', width: '100%', fontSize: '14px', marginTop: '20px' }}
+              >
+                <RefreshCw size={18} /> DONE
+              </button>
+            </div>
+
           </div>
-          <button
-            className={`result-done ${saved ? 'is-saved' : ''}`}
-            onClick={handleBackToFrameSelect}
-            disabled={!saved || saving}
-            type="button"
-          >
-            <RefreshCw size={18} /> DONE
-          </button>
         </section>
       ) : null}
 
