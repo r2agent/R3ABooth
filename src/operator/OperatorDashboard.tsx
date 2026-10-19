@@ -25,9 +25,6 @@ import {
   QrCode,
   ExternalLink,
   ShieldAlert,
-  DollarSign,
-  Printer,
-  Camera,
   FileSpreadsheet,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
@@ -78,6 +75,35 @@ function deviceTypeIcon(type: string, size = 16) {
   if (type === 'mobile') return <Smartphone size={size} />;
   if (type === 'tablet') return <Tablet size={size} />;
   return <Monitor size={size} />;
+}
+
+function generateSparklinePoints(data: number[], width = 100, height = 28): string {
+  if (data.length === 0) return '';
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  
+  return data.map((val, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - ((val - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+}
+
+function getGraphData(value: number): string {
+  const length = 12;
+  if (value === 0) return generateSparklinePoints(Array(length).fill(0));
+  
+  const data = [0];
+  let current = 0;
+  for (let i = 1; i < length - 1; i++) {
+    const step = Math.max(1, Math.round(value / (length / 2)));
+    current += Math.random() > 0.3 ? step : 0; 
+    if (current > value) current = value;
+    data.push(current);
+  }
+  data.push(value);
+  return generateSparklinePoints(data);
 }
 
 const THEME_KEY = 'r3a-op-theme';
@@ -167,8 +193,6 @@ export const OperatorDashboard = ({
         driveLimit += t.driveLimit ?? 0;
       }
     }
-    
-    // Kalkulasi pendapatan (Harga QRIS x Total Sesi Hari Ini)
     const pricePerSession = allSettings.payment?.price || 25000;
     const totalRevenue = totalSessions * pricePerSession;
 
@@ -177,6 +201,19 @@ export const OperatorDashboard = ({
       driveUsed, driveLimit, driveConnectedCount, totalRevenue
     };
   }, [eventFiltered, allSettings.payment?.price]);
+
+  const displayStats = useMemo(() => {
+    if (selectedDevice) {
+      const price = allSettings.payment?.price || 25000;
+      return {
+        totalSessions: selectedDevice.todaySessionCount ?? 0,
+        totalPhotos: selectedDevice.todayPhotoCount ?? 0,
+        totalRevenue: (selectedDevice.todaySessionCount ?? 0) * price,
+        totalFailed: selectedDevice.failedCount ?? 0,
+      };
+    }
+    return aggregatedStats;
+  }, [selectedDevice, aggregatedStats, allSettings.payment?.price]);
 
   useEffect(() => {
     const originalMinWidth = document.body.style.minWidth;
@@ -246,18 +283,13 @@ export const OperatorDashboard = ({
     }
   }, []);
 
-  // 🔧 Export CSV Function
   const handleExportCSV = useCallback(() => {
     const headers = ['Metric', 'Value'];
     const rows = [
-      ['Total Sesi Hari Ini', aggregatedStats.totalSessions],
-      ['Total Foto Hari Ini', aggregatedStats.totalPhotos],
-      ['Total Pendapatan', aggregatedStats.totalRevenue],
-      ['Uploaded Files', aggregatedStats.totalUploaded],
-      ['Pending Uploads', aggregatedStats.totalPending],
-      ['Failed Uploads', aggregatedStats.totalFailed],
-      ['Drive Used (Bytes)', aggregatedStats.driveUsed],
-      ['Drive Limit (Bytes)', aggregatedStats.driveLimit],
+      ['Total Sesi Hari Ini', displayStats.totalSessions],
+      ['Total Foto Hari Ini', displayStats.totalPhotos],
+      ['Total Pendapatan', displayStats.totalRevenue],
+      ['Failed Uploads', displayStats.totalFailed],
       ['Time Exported', new Date().toISOString()]
     ];
 
@@ -270,11 +302,19 @@ export const OperatorDashboard = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [aggregatedStats]);
+  }, [displayStats]);
 
   const drivePercent = aggregatedStats.driveLimit > 0
     ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
     : 0;
+
+  const latestQr = selectedDevice?.qrHistory && selectedDevice.qrHistory.length > 0 
+    ? selectedDevice.qrHistory[selectedDevice.qrHistory.length - 1] 
+    : null;
+    
+  const previousQrs = selectedDevice?.qrHistory && selectedDevice.qrHistory.length > 1
+    ? selectedDevice.qrHistory.slice(0, -1).reverse()
+    : [];
 
   return (
     <>
@@ -1077,39 +1117,42 @@ export const OperatorDashboard = ({
           {/* STAT CARDS */}
           <section className="op-stats">
             <StatCard
-              label="Sesi Hari Ini"
+              label="Sesi"
               shortLabel="SESI"
-              value={String(aggregatedStats.totalSessions)}
-              delta={aggregatedStats.totalSessions > 0 ? `+${aggregatedStats.totalSessions}` : '±0'}
+              value={String(displayStats.totalSessions)}
+              numericValue={displayStats.totalSessions}
+              delta={displayStats.totalSessions > 0 ? `+${displayStats.totalSessions}` : '±0'}
               deltaTone="up"
-              spark="0,25 12,21 24,23 36,14 48,18 60,10 72,13 84,6 100,9"
+              subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
             />
             <StatCard
-              label="Foto Hari Ini"
+              label="Foto"
               shortLabel="FOTO"
-              value={String(aggregatedStats.totalPhotos)}
-              delta={aggregatedStats.totalPhotos > 0 ? `+${aggregatedStats.totalPhotos}` : '±0'}
+              value={String(displayStats.totalPhotos)}
+              numericValue={displayStats.totalPhotos}
+              delta={displayStats.totalPhotos > 0 ? `+${displayStats.totalPhotos}` : '±0'}
               deltaTone="up"
-              spark="0,21 12,23 24,17 36,19 48,12 60,15 72,9 84,11 100,5"
+              subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
             />
-            {/* 🔧 KARTU PENDAPATAN (REVENUE) */}
             <StatCard
               label="Pendapatan"
               shortLabel="OMZET"
-              value={`Rp ${(aggregatedStats.totalRevenue).toLocaleString('id-ID')}`}
+              value={`Rp ${(displayStats.totalRevenue).toLocaleString('id-ID')}`}
+              numericValue={displayStats.totalRevenue}
               delta="Est."
               deltaTone="flat"
-              spark="0,15 12,18 24,12 36,14 48,8 60,12 72,7 84,9 100,3"
               tone="info"
+              subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
             />
             <StatCard
               label="Failed"
               shortLabel="FAIL"
-              value={String(aggregatedStats.totalFailed)}
-              delta={aggregatedStats.totalFailed === 0 ? 'Clean' : 'Perlu cek'}
-              deltaTone={aggregatedStats.totalFailed === 0 ? 'up' : 'down'}
-              spark="0,20 12,22 24,18 36,21 48,20 60,22 72,21 84,23 100,22"
-              tone={aggregatedStats.totalFailed > 0 ? 'warn' : 'ok'}
+              value={String(displayStats.totalFailed)}
+              numericValue={displayStats.totalFailed}
+              delta={displayStats.totalFailed === 0 ? 'Clean' : 'Perlu cek'}
+              deltaTone={displayStats.totalFailed === 0 ? 'up' : 'down'}
+              tone={displayStats.totalFailed > 0 ? 'warn' : 'ok'}
+              subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
             />
           </section>
 
@@ -1272,40 +1315,80 @@ export const OperatorDashboard = ({
                         </div>
                       ) : null}
 
-                      {/* ⚡ SECTION QR HISTORY ⚡ */}
+                      {/* ⚡ SECTION QR HISTORY (DIPERBARUI) ⚡ */}
                       <div>
                         <h4 className="op-section-title">
                           <QrCode size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
-                          Riwayat QR (Terakhir)
+                          Link Publik Terakhir
                         </h4>
-                        {selectedDevice.qrHistory && selectedDevice.qrHistory.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {selectedDevice.qrHistory.slice().reverse().map((qr, idx) => (
-                              <div key={idx} className="op-info-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10 }}>
-                                <div>
-                                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
-                                    {qr.type === 'drive-qr' ? 'Drive QR' : 'Result QR'}
-                                  </div>
-                                  <div style={{ fontSize: 11, color: 'var(--op-muted)' }}>
-                                    {new Date(qr.time).toLocaleTimeString()} • {qr.id.slice(0, 6)}...
-                                  </div>
+                        
+                        {latestQr ? (
+                          <div style={{ marginBottom: 16 }}>
+                            <a 
+                              href={latestQr.url} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="op-info-card" 
+                              style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center', 
+                                border: '2px solid var(--op-accent)', 
+                                background: 'var(--op-accent-soft)', 
+                                padding: 16, 
+                                textDecoration: 'none',
+                                cursor: 'pointer',
+                                transition: 'transform 0.2s',
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                            >
+                              <div>
+                                <div style={{ fontWeight: 800, fontSize: 15, color: '#fff' }}>
+                                  {latestQr.type === 'drive-qr' ? 'Google Drive (Foto Terakhir)' : 'Result Page (Foto Terakhir)'}
                                 </div>
-                                <a 
-                                  href={qr.url} 
-                                  target="_blank" 
-                                  rel="noreferrer"
-                                  className="op-btn op-btn--ghost"
-                                  style={{ padding: '6px 10px', fontSize: 11, textDecoration: 'none' }}
-                                >
-                                  Buka <ExternalLink size={12} />
-                                </a>
+                                <div style={{ fontSize: 11, color: 'var(--op-muted)', marginTop: 4 }}>
+                                  Diambil pada: {new Date(latestQr.time).toLocaleTimeString()}
+                                </div>
                               </div>
-                            ))}
+                              <div className="op-btn op-btn--accent" style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <ExternalLink size={16} /> BUKA LINK
+                              </div>
+                            </a>
                           </div>
                         ) : (
                           <div style={{ fontSize: 12, color: 'var(--op-muted)', textAlign: 'center', padding: '10px 0' }}>
-                            Belum ada QR yang di-generate.
+                            Belum ada link publik yang di-generate.
                           </div>
+                        )}
+
+                        {previousQrs.length > 0 && (
+                          <>
+                            <h4 className="op-section-title" style={{ marginTop: 20 }}>Riwayat Sebelumnya</h4>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {previousQrs.map((qr, idx) => (
+                                <div key={idx} className="op-info-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10 }}>
+                                  <div>
+                                    <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 2 }}>
+                                      {qr.type === 'drive-qr' ? 'Drive QR' : 'Result QR'}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--op-muted)' }}>
+                                      {new Date(qr.time).toLocaleTimeString()} • {qr.id.slice(0, 6)}...
+                                    </div>
+                                  </div>
+                                  <a 
+                                    href={qr.url} 
+                                    target="_blank" 
+                                    rel="noreferrer"
+                                    className="op-btn op-btn--ghost"
+                                    style={{ padding: '6px 10px', fontSize: 11, textDecoration: 'none' }}
+                                  >
+                                    Buka <ExternalLink size={12} />
+                                  </a>
+                                </div>
+                              ))}
+                            </div>
+                          </>
                         )}
                       </div>
 
@@ -1537,7 +1620,7 @@ export const OperatorDashboard = ({
                 </div>
               </div>
 
-              {/* 🔧 HARDWARE STATUS (MOCKUP/PLACEHOLDER) */}
+              {/* HARDWARE STATUS (MOCKUP) */}
               <div className="op-card">
                 <div className="op-card__head">
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1565,7 +1648,7 @@ export const OperatorDashboard = ({
                 </div>
               </div>
 
-              {/* HEALTH SUMMARY */}
+              {/* HEALTH SUMMARY (AGREGAT) */}
               <div className="op-card">
                 <div className="op-card__head">
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1600,7 +1683,7 @@ export const OperatorDashboard = ({
                 </div>
               </div>
 
-              {/* STORAGE SUMMARY */}
+              {/* STORAGE SUMMARY (AGREGAT) */}
               <div className="op-card">
                 <div className="op-card__head">
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1631,7 +1714,7 @@ export const OperatorDashboard = ({
                 </div>
               </div>
 
-              {/* 🔧 EXPORT CSV */}
+              {/* EXPORT CSV */}
               <div className="op-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div className="op-card__head" style={{ marginBottom: 0 }}>
                   <div style={{ flex: 1 }}>
@@ -1674,29 +1757,37 @@ const InfoCard = ({
 );
 
 const StatCard = ({
-  label, shortLabel, value, delta, deltaTone, spark, tone,
+  label, shortLabel, value, numericValue, delta, deltaTone, tone, subtitle
 }: {
   label: string;
   shortLabel: string;
   value: string;
+  numericValue: number;
   delta: string;
   deltaTone: 'up' | 'down' | 'flat';
-  spark: string;
-  tone?: 'ok' | 'warn' | 'info';
+  tone?: 'ok' | 'warn' | 'info' | 'default';
+  subtitle?: string;
 }) => {
   const toneClass = tone ? `op-spark--${tone}` : '';
+  const sparkPoints = useMemo(() => getGraphData(numericValue), [numericValue]);
+
   return (
     <div className="op-card op-anim-in">
       <div className="op-stat__label">
         <span className="op-stat__label-long">{label}</span>
         <span className="op-stat__label-short">{shortLabel}</span>
+        {subtitle && (
+          <div style={{ fontSize: 9, color: 'var(--op-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {subtitle}
+          </div>
+        )}
       </div>
       <div className="op-stat__row">
         <span className="op-stat__value">{value}</span>
         <span className={`op-stat__delta op-delta--${deltaTone}`}>{delta}</span>
       </div>
-      <svg className={`op-spark ${toneClass}`} viewBox="0 0 100 32" preserveAspectRatio="none">
-        <polyline points={spark} />
+      <svg className={`op-spark ${toneClass}`} viewBox="0 0 100 28" preserveAspectRatio="none">
+        <polyline points={sparkPoints} />
       </svg>
     </div>
   );
