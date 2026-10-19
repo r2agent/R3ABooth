@@ -15,8 +15,8 @@ export type CameraSettingsShape = {
 export type PrinterSettingsShape = {
   printerOn: boolean;
   printer: string;
-  printerIp: string;          // 🔧 TAMBAHAN
-  printerBluetooth: string;   // 🔧 TAMBAHAN
+  printerIp: string;
+  printerBluetooth: string;
   paperSize: string;
 };
 
@@ -46,6 +46,7 @@ export type ApplicationSettingsShape = {
   language: string;
   checkUpdates: boolean;
   analytics: boolean;
+  deviceTypeOverride?: string;
 };
 
 export type DisplaySettingsShape = {

@@ -359,7 +359,8 @@ export const PhotoboothSession = ({
   const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
   const [captureFilters, setCaptureFilters] = useState<Map<string, string>>(new Map());
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
-  const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
+  const [compositeUrl, setCompositeUrl] = useState<string | null>(null); // B&W untuk v2.1.0, Normal untuk v1/v2
+  const [compositeColorUrl, setCompositeColorUrl] = useState<string | null>(null); // Berwarna untuk v2.1.0
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -451,7 +452,6 @@ useEffect(() => {
   const el = frameGridRef.current;
   if (!el) return;
 
-  // Wheel → horizontal
   const handleWheel = (e: WheelEvent) => {
     if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
       e.preventDefault();
@@ -459,7 +459,6 @@ useEffect(() => {
     }
   };
 
-  // Drag
   let isDown = false;
   let startX = 0;
   let scrollStart = 0;
@@ -719,6 +718,7 @@ useEffect(() => {
     setCaptureFilters(new Map());
     setSelectedCaptureId(null);
     setCompositeUrl(null);
+    setCompositeColorUrl(null); // 🔧 Reset Warna
     setSaved(false);
     setSaving(false);
     setQrDataUrl(null);
@@ -767,8 +767,8 @@ useEffect(() => {
       }
     }
 
-    // v2.0.0 → QRIS Gate
-    if (version === 'v2.0.0') {
+    // v2.0.0 & v2.1.0 → QRIS Gate
+    if (version === 'v2.0.0' || version === 'v2.1.0') {
       const payment = allSettings.payment;
       const requirePayment = payment?.requirePayment !== false;
       if (requirePayment) {
@@ -898,9 +898,29 @@ useEffect(() => {
     setPhase('compositing');
     const captureMap = new Map<string, string>();
     for (const c of captures) captureMap.set(c.captureId, c.dataUrl);
+    
     try {
-      const result = await compositeFrame(activeFrame, captureMap, captureFilters);
-      setCompositeUrl(result);
+      const version = loadAppVersion();
+      const isReceiptMode = version === 'v2.1.0';
+
+      if (isReceiptMode) {
+        // 🔧 RENDER 1: B&W (Untuk Print / Preview)
+        const bwFilters = new Map<string, string>();
+        for (const c of captures) bwFilters.set(c.captureId, 'grayscale'); 
+        
+        const resultBW = await compositeFrame(activeFrame, captureMap, bwFilters);
+        setCompositeUrl(resultBW);
+
+        // 🔧 RENDER 2: Warna (Untuk Soft File)
+        const resultColor = await compositeFrame(activeFrame, captureMap, captureFilters);
+        setCompositeColorUrl(resultColor);
+      } else {
+        // Mode Normal
+        const result = await compositeFrame(activeFrame, captureMap, captureFilters);
+        setCompositeUrl(result);
+        setCompositeColorUrl(null);
+      }
+      
       setPhase('result');
     } catch {
       setPhase('filter');
@@ -958,14 +978,24 @@ useEffect(() => {
         }
       }
 
+      const version = loadAppVersion();
+      const isReceiptMode = version === 'v2.1.0';
+
       if (allSettings.storage.autoDownloadResult) {
+        // Simpan B&W
+        void saveFileFromDataUrl(compositeUrl, generateFileName('jpg'));
+        
+        // Simpan Warna (Jika Receipt Mode)
+        if (isReceiptMode && compositeColorUrl) {
+          void saveFileFromDataUrl(compositeColorUrl, generateFileName('jpg'));
+        }
+
         for (const sp of slotPhotos) {
           void saveFileFromDataUrl(sp.dataUrl, generateFileName('jpg'));
         }
         if (slideshowVideo) {
           void saveFileFromDataUrl(slideshowVideo, generateFileName(guessVideoExtension(slideshowVideo)));
         }
-        void saveFileFromDataUrl(compositeUrl, generateFileName('jpg'));
       }
 
       const gd = allSettings.googleDrive;
@@ -974,7 +1004,10 @@ useEffect(() => {
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
+          // Upload B&W
           { fileName: generateFileName('jpg'), dataUrl: compositeUrl },
+          // Upload Warna
+          ...(isReceiptMode && compositeColorUrl ? [{ fileName: generateFileName('jpg'), dataUrl: compositeColorUrl }] : []),
           ...slotPhotos.map((sp) => ({ fileName: generateFileName('jpg'), dataUrl: sp.dataUrl })),
           ...(slideshowVideo ? [{ fileName: generateFileName(guessVideoExtension(slideshowVideo)), dataUrl: slideshowVideo }] : []),
         ];
@@ -991,7 +1024,7 @@ useEffect(() => {
     } catch { /* ignore */ } finally {
       setSaving(false);
     }
-  }, [compositeUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
+  }, [compositeUrl, compositeColorUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
   
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
@@ -1002,14 +1035,13 @@ useEffect(() => {
       if (qr.qrDataUrl) {
         setQrDataUrl(qr.qrDataUrl);
         
-        // ⚡ Simpan ke riwayat
         const newQr = {
           id: `qr-${Date.now()}`,
           url: payload,
           type: 'result-qr',
           time: Date.now()
         };
-        setQrHistory(prev => [...prev, newQr].slice(-5)); // Simpan max 5 terakhir
+        setQrHistory(prev => [...prev, newQr].slice(-5));
         
       } else setQrError(true);
     } catch { setQrError(true); }
@@ -1024,14 +1056,13 @@ useEffect(() => {
       if (qr.qrDataUrl) {
         setDriveQrDataUrl(qr.qrDataUrl);
         
-        // ⚡ Simpan ke riwayat
         const newQr = {
           id: `qr-${Date.now()}`,
           url: url,
           type: 'drive-qr',
           time: Date.now()
         };
-        setQrHistory(prev => [...prev, newQr].slice(-5)); // Simpan max 5 terakhir
+        setQrHistory(prev => [...prev, newQr].slice(-5));
 
       } else setDriveQrError(true);
     } catch { setDriveQrError(true); }
@@ -1045,15 +1076,15 @@ useEffect(() => {
       const copies = Math.max(1, Math.min(5, ps.copies || 1));
       await printResult({
         copies,
-        paperSize: ps.paperSize || '4 × 6 in',
+        paperSize: allSettings.printer.paperSize || '4 × 6 in', // Ambil dari global setting
         layout: ps.layout || 'POTRAIT',
-        dataUrl: compositeUrl,
-        printerName: ps.printer || allSettings.printer.printer,
+        dataUrl: compositeUrl, // Selalu print yang B&W
+        printerName: allSettings.printer.printer || ps.printer,
       });
       setPrinted(true);
     } catch { /* ignore */ }
     setPrinting(false);
-  }, [compositeUrl, printing, event.printerSettings, allSettings.printer.printer]);
+  }, [compositeUrl, printing, event.printerSettings, allSettings.printer]);
 
   const handleBackToFrameSelect = useCallback(() => {
     resetSession();
@@ -1285,12 +1316,12 @@ useEffect(() => {
         ) : null}
         {showQRISGate ? (
           <QRISGate
-      qrisImageUrl={allSettings.payment?.qrisImageUrl || ''}
-      price={allSettings.payment?.price || 25000}
-      onConfirm={handleQRISConfirm}
-      onCancel={handleQRISCancel}
-    />
-  ) : null}
+            qrisImageUrl={allSettings.payment?.qrisImageUrl || ''}
+            price={allSettings.payment?.price || 25000}
+            onConfirm={handleQRISConfirm}
+            onCancel={handleQRISCancel}
+          />
+        ) : null}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project"><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
           <div className="hidden-exit-trigger" onClick={handleLogoClick} />
@@ -1572,7 +1603,7 @@ useEffect(() => {
             </button>
             {(event.printerSettings.enabled && allSettings.display.showPrintButton) ? (
               <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button">
-                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : 'PRINT'}
+                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (loadAppVersion() === 'v2.1.0' ? 'CETAK STRUK' : 'PRINT')}
               </button>
             ) : null}
             {allSettings.display.showQrButton ? (

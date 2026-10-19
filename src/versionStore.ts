@@ -1,10 +1,8 @@
 /* ============================================================
-   VERSION STORE — manage app version (v1.0.0 / v2.0.0)
-   User bisa switch kapan saja, tersimpan di localStorage.
-   Safe: handle semua edge case (SSR, localStorage error, data corrupt).
+   VERSION STORE — manage app version (v1.0.0 / v2.0.0 / v2.1.0)
    ============================================================ */
 
-export type AppVersion = 'v1.0.0' | 'v2.0.0';
+export type AppVersion = 'v1.0.0' | 'v2.0.0' | 'v2.1.0';
 
 export type VersionInfo = {
   id: AppVersion;
@@ -15,6 +13,7 @@ export type VersionInfo = {
 export const AVAILABLE_VERSIONS: VersionInfo[] = [
   { id: 'v1.0.0', label: 'v1.0.0', description: 'IG Gate active' },
   { id: 'v2.0.0', label: 'v2.0.0', description: 'QRIS Payment Gate' },
+  { id: 'v2.1.0', label: 'v2.1.0', description: 'Receipt Mode (Thermal Print, Dual Save)' },
 ];
 
 const STORAGE_KEY = 'r3a-app-version';

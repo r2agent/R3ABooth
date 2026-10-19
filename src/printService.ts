@@ -16,9 +16,6 @@ export type PrintProvider = {
   print: (opts: PrintOptions) => Promise<boolean>;
 };
 
-/* ============================================================
-   REGISTRY
-   ============================================================ */
 const providers: PrintProvider[] = [];
 
 export function registerProvider(p: PrintProvider): void {
@@ -26,9 +23,6 @@ export function registerProvider(p: PrintProvider): void {
   providers.push(p);
 }
 
-/* ============================================================
-   PROVIDER 1: SILENT PRINT NETWORK / LAN (Port 9100)
-   ============================================================ */
 const NETWORK_PROVIDER: PrintProvider = {
   name: 'network',
   isAvailable: async (opts) => {
@@ -61,9 +55,6 @@ const NETWORK_PROVIDER: PrintProvider = {
   }
 };
 
-/* ============================================================
-   PROVIDER 2: SILENT PRINT BLUETOOTH (Via RawBT Intent)
-   ============================================================ */
 const RAWBT_PROVIDER: PrintProvider = {
   name: 'rawbt',
   isAvailable: async (opts) => {
@@ -75,10 +66,8 @@ const RAWBT_PROVIDER: PrintProvider = {
       console.log(`[Print] Mengirim ke RawBT (Bluetooth)...`);
       const base64Data = opts.dataUrl.replace(/^data:[^;]+;base64,/, '');
       
-      // Panggil intent RawBT
       window.location.href = `rawbt:base64,${base64Data}`;
       
-      // Jeda agar OS bisa melempar intent ke aplikasi RawBT
       await new Promise((resolve) => setTimeout(resolve, 2000));
       return true;
     } catch (err) {
@@ -88,12 +77,9 @@ const RAWBT_PROVIDER: PrintProvider = {
   }
 };
 
-/* ============================================================
-   PROVIDER 3: FALLBACK BROWSER / OS PRINT
-   ============================================================ */
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
-  isAvailable: async () => true, // Selalu tersedia sebagai fallback
+  isAvailable: async () => true,
   print: async (opts): Promise<boolean> => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
@@ -136,20 +122,13 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
   },
 };
 
-/* ============================================================
-   REGISTER ALL PROVIDERS
-   ============================================================ */
 registerProvider(NETWORK_PROVIDER);
 registerProvider(RAWBT_PROVIDER);
 registerProvider(BROWSER_PRINT_PROVIDER);
 
-/* ============================================================
-   PUBLIC API
-   ============================================================ */
 export async function printResult(opts: PrintOptions): Promise<boolean> {
   let selectedProvider: PrintProvider | null = null;
 
-  // Cari provider yang cocok dengan target printer
   for (const p of providers) {
     if (await p.isAvailable(opts)) {
       selectedProvider = p;
@@ -164,7 +143,6 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
 
   console.log(`[Print] Menggunakan provider: ${selectedProvider.name} (Target: ${opts.printerName})`);
 
-  // Lakukan perulangan cetak sesuai jumlah copies
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
@@ -173,7 +151,6 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
     const ok = await selectedProvider.print(opts);
     if (!ok) success = false;
     
-    // Jeda antar copy
     if (i < copies - 1) {
       await new Promise((r) => setTimeout(r, 1500));
     }
