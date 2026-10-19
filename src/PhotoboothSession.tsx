@@ -359,8 +359,8 @@ export const PhotoboothSession = ({
   const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
   const [captureFilters, setCaptureFilters] = useState<Map<string, string>>(new Map());
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
-  const [compositeUrl, setCompositeUrl] = useState<string | null>(null); // B&W untuk v2.1.0, Normal untuk v1/v2
-  const [compositeColorUrl, setCompositeColorUrl] = useState<string | null>(null); // Berwarna untuk v2.1.0
+  const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
+  const [compositeColorUrl, setCompositeColorUrl] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -718,7 +718,7 @@ useEffect(() => {
     setCaptureFilters(new Map());
     setSelectedCaptureId(null);
     setCompositeUrl(null);
-    setCompositeColorUrl(null); // 🔧 Reset Warna
+    setCompositeColorUrl(null);
     setSaved(false);
     setSaving(false);
     setQrDataUrl(null);
@@ -757,7 +757,6 @@ useEffect(() => {
   const handleSelectFrame = useCallback((index: number) => {
     const version = loadAppVersion();
 
-    // v1.0.0 → IG Gate
     if (version === 'v1.0.0') {
       const gateEnabled = allSettings.system.igGateEnabled !== false;
       if (gateEnabled) {
@@ -767,7 +766,6 @@ useEffect(() => {
       }
     }
 
-    // v2.0.0 & v2.1.0 → QRIS Gate
     if (version === 'v2.0.0' || version === 'v2.1.0') {
       const payment = allSettings.payment;
       const requirePayment = payment?.requirePayment !== false;
@@ -778,7 +776,6 @@ useEffect(() => {
       }
     }
 
-    // Tanpa gate (atau gate disabled)
     setSelectedFrameIndex(index);
     resetSession();
     setPhase('ready');
@@ -793,7 +790,6 @@ useEffect(() => {
     void handleStartCapture();
   }, [pendingFrameIndex, handleStartCapture]);
 
-    /* ⚡ v2.0.0: QRIS gate → LIVE */
   const handleQRISConfirm = useCallback(() => {
     if (pendingFrameIndex !== null) {
       setSelectedFrameIndex(pendingFrameIndex);
@@ -904,18 +900,15 @@ useEffect(() => {
       const isReceiptMode = version === 'v2.1.0';
 
       if (isReceiptMode) {
-        // 🔧 RENDER 1: B&W (Untuk Print / Preview)
         const bwFilters = new Map<string, string>();
         for (const c of captures) bwFilters.set(c.captureId, 'grayscale'); 
         
         const resultBW = await compositeFrame(activeFrame, captureMap, bwFilters);
         setCompositeUrl(resultBW);
 
-        // 🔧 RENDER 2: Warna (Untuk Soft File)
         const resultColor = await compositeFrame(activeFrame, captureMap, captureFilters);
         setCompositeColorUrl(resultColor);
       } else {
-        // Mode Normal
         const result = await compositeFrame(activeFrame, captureMap, captureFilters);
         setCompositeUrl(result);
         setCompositeColorUrl(null);
@@ -982,10 +975,8 @@ useEffect(() => {
       const isReceiptMode = version === 'v2.1.0';
 
       if (allSettings.storage.autoDownloadResult) {
-        // Simpan B&W
         void saveFileFromDataUrl(compositeUrl, generateFileName('jpg'));
         
-        // Simpan Warna (Jika Receipt Mode)
         if (isReceiptMode && compositeColorUrl) {
           void saveFileFromDataUrl(compositeColorUrl, generateFileName('jpg'));
         }
@@ -1004,9 +995,7 @@ useEffect(() => {
 
       if (gd.connected && VITE_CLIENT_ID && currentGuest) {
         const uploadFiles: UploadFileEntry[] = [
-          // Upload B&W
           { fileName: generateFileName('jpg'), dataUrl: compositeUrl },
-          // Upload Warna
           ...(isReceiptMode && compositeColorUrl ? [{ fileName: generateFileName('jpg'), dataUrl: compositeColorUrl }] : []),
           ...slotPhotos.map((sp) => ({ fileName: generateFileName('jpg'), dataUrl: sp.dataUrl })),
           ...(slideshowVideo ? [{ fileName: generateFileName(guessVideoExtension(slideshowVideo)), dataUrl: slideshowVideo }] : []),
@@ -1076,9 +1065,10 @@ useEffect(() => {
       const copies = Math.max(1, Math.min(5, ps.copies || 1));
       await printResult({
         copies,
-        paperSize: allSettings.printer.paperSize || '4 × 6 in', // Ambil dari global setting
+        // 🔧 GANTI DARI allSettings.printer.paperSize KE ps.paperSize
+        paperSize: ps.paperSize || '4 × 6 in',
         layout: ps.layout || 'POTRAIT',
-        dataUrl: compositeUrl, // Selalu print yang B&W
+        dataUrl: compositeUrl, 
         printerName: allSettings.printer.printer || ps.printer,
       });
       setPrinted(true);

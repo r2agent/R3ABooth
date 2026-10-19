@@ -205,7 +205,6 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
           </div>
         ) : null}
 
-        {/* ⚠️ TAB FRAME — INI YANG HILANG SEBELUMNYA */}
         {activeTab === 'frame' ? (
           <div className="new-project-panel">
             <div className="frame-tab-layout">
@@ -318,6 +317,9 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                     <option value="5 × 7 in">5 × 7 in</option>
                     <option value="A4">A4</option>
                     <option value="Letter">Letter</option>
+                    {/* 🔧 TAMBAHAN UNTUK RECEIPT MODE */}
+                    <option value="58mm Thermal">58mm Thermal</option>
+                    <option value="80mm Thermal">80mm Thermal</option>
                   </select>
                 </label>
 
