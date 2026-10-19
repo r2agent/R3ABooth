@@ -1360,8 +1360,8 @@ useEffect(() => {
                   >
                     <div className="frame-select-thumb">
                       {/* 🔧 HANYA TAMPILKAN GAMBAR DUMMY (JIKA ADA) ATAU FRAME UTAMA DI SINI */}
-                      {(event.showDummyPreview && event.dummyPreviewImage) ? (
-                        <img src={event.dummyPreviewImage} alt={displayName} />
+                      {(frame.showDummyPreview && frame.dummyPreviewImage) ? (
+                        <img src={frame.dummyPreviewImage} alt={displayName} />
                       ) : frame.image ? (
                         <img src={frame.image} alt={displayName} />
                       ) : (
@@ -1405,8 +1405,8 @@ useEffect(() => {
               return (
                 <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {/* 🔧 TAMPILKAN DUMMY DI SINI SAAT READY */}
-                  {event.showDummyPreview && event.dummyPreviewImage ? (
-                    <img src={event.dummyPreviewImage} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  {activeFrame.showDummyPreview && activeFrame.dummyPreviewImage ? (
+                    <img src={activeFrame.dummyPreviewImage} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   ) : (
                     <span>{slot.captureId}</span>
                   )}
@@ -1566,11 +1566,11 @@ useEffect(() => {
                 }
 
                 // 🔧 TAMPILKAN DUMMY DI LIVE JIKA SLOT KOSONG
-                if (event.showDummyPreview && event.dummyPreviewImage) {
+                if (activeFrame.showDummyPreview && activeFrame.dummyPreviewImage) {
                   return (
                     <img
                       key={slot.id}
-                      src={event.dummyPreviewImage}
+                      src={activeFrame.dummyPreviewImage}
                       alt="Dummy"
                       style={{
                         position: 'absolute',

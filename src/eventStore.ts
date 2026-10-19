@@ -91,7 +91,7 @@ function normalizeFrame(frame: Partial<Frame> | null | undefined, index: number)
     id: typeof frame?.id === 'string' && frame.id ? frame.id : `frm-legacy-${index}`,
     name: typeof frame?.name === 'string' && frame.name ? frame.name : `Frame ${index + 1}`,
     showPhotoCount: frame?.showPhotoCount !== false,
-    showDummyPreview: frame?.showDummyPreview !== false, // 🔧 Default ON jika undefined
+    showDummyPreview: frame?.showDummyPreview !== false, // Default ON
     dummyPreviewImage: typeof frame?.dummyPreviewImage === 'string' ? frame.dummyPreviewImage : '',
     image: typeof frame?.image === 'string' ? frame.image : '',
     slotFrameImage: typeof frame?.slotFrameImage === 'string' ? frame.slotFrameImage : '',
@@ -244,7 +244,7 @@ export function createFrame(name: string, image: string): Frame {
     id: `frm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
     showPhotoCount: true,
-    showDummyPreview: true, // 🔧 Default ON untuk frame baru
+    showDummyPreview: true,
     dummyPreviewImage: '',
     image,
     slotFrameImage: '',

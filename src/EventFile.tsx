@@ -106,10 +106,10 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     reader.readAsDataURL(file);
   };
 
-  // 🔧 FUNGSI UPLOAD DUMMY PREVIEW
-  const uploadDummyImage = (file: File) => {
+  // 🔧 FUNGSI UPLOAD DUMMY PER FRAME
+  const uploadDummyImage = (frameIndex: number, file: File) => {
     const reader = new FileReader();
-    reader.onload = () => setDraft({ ...draft, dummyPreviewImage: reader.result as string });
+    reader.onload = () => updateFrame(frameIndex, { dummyPreviewImage: reader.result as string });
     reader.readAsDataURL(file);
   };
 
@@ -199,47 +199,10 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
       <div className="new-project-decoration new-project-decoration-bottom" aria-hidden="true"><i /><i /><i /><i /></div>
       <header className="new-project-header"><p>R3A BOOTH</p><h1>{draft.eventName ? draft.eventName.toUpperCase() : 'NEW EVENT'}</h1><span /></header>
       <nav className="new-project-tabs" aria-label="Event file sections">{tabs.map((tab) => <button className={activeTab === tab.id ? 'new-project-tab is-active' : 'new-project-tab'} key={tab.id} onClick={() => setActiveTab(tab.id)} type="button">{tab.label}</button>)}</nav>
-
       <section className="new-project-content">
         
         {activeTab === 'event' ? (
-          <div className="new-project-panel event-panel" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            
-            {/* 🔧 SETTINGAN DUMMY PREVIEW DITARUH DI SINI (PALING ATAS) */}
-            <div style={{ padding: '20px', background: 'rgba(0,0,0,.2)', border: '2px dashed #ffd94e', borderRadius: 8 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Eye size={24} color="#ffd94e" />
-                  <div>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', display: 'block' }}>DUMMY PREVIEW FOTO</span>
-                    <p style={{ fontSize: 12, color: 'rgba(255,255,255,.7)', margin: 0 }}>Tampilkan contoh foto pada slot frame saat pemilihan.</p>
-                  </div>
-                </div>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 16px', background: 'rgba(255,255,255,.15)', border: '1px solid rgba(255,255,255,.3)', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
-                    <Upload size={16} /> UPLOAD GAMBAR DUMMY
-                    <input type="file" accept="image/jpeg,image/png" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadDummyImage(f); }} />
-                  </label>
-                  
-                  {draft.dummyPreviewImage && (
-                    <div style={{ height: 50, width: 50, borderRadius: 6, overflow: 'hidden', border: '2px solid rgba(255,255,255,.3)' }}>
-                      <img src={draft.dummyPreviewImage} alt="Dummy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    </div>
-                  )}
-
-                  <button 
-                    className={`toggle-row ${draft.showDummyPreview ? 'is-on' : ''}`} 
-                    type="button" 
-                    onClick={() => setDraft({ ...draft, showDummyPreview: !draft.showDummyPreview })}
-                    style={{ minWidth: 100 }}
-                  >
-                    <i />{draft.showDummyPreview ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
+          <div className="new-project-panel event-panel">
             <div className="new-project-fields">
               <label><span>EVENT NAME</span><input value={draft.eventName} onChange={(e) => setField('eventName', e.target.value)} placeholder="Enter event name" /></label>
               <label><span>CLIENT NAME</span><input value={draft.clientName} onChange={(e) => setField('clientName', e.target.value)} placeholder="Enter client name" /></label>
@@ -276,18 +239,53 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
               </div>
               <div className="frame-editor-area">
                 {activeFrame ? (
-                  <FrameEditor
-                    frame={activeFrame}
-                    onSlotsChange={(slots) => updateFrameSlots(activeFrameIndex, slots)}
-                    onAddSlot={(captureId, w, h) => addSlotToFrame(activeFrameIndex, captureId, w, h)}
-                    onDuplicateSlot={(slot) => duplicateSlotInFrame(activeFrameIndex, slot)}
-                    onDeleteSlot={(slotId) => deleteSlotFromFrame(activeFrameIndex, slotId)}
-                    onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}
-                    onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
-                    onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
-                    onFrameChange={(updates) => updateFrame(activeFrameIndex, updates)}
-                    onApplyTransformToAll={applyTransformToAllFrames}
-                  />
+                  <>
+                    {/* 🔧 SETTINGAN DUMMY PER FRAME DITARUH DI SINI */}
+                    <div style={{ padding: '16px 20px', background: 'rgba(255,255,255,.05)', borderBottom: '1px solid rgba(255,255,255,.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Eye size={20} color="#ffd94e" />
+                        <div>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: '#fff', display: 'block' }}>PREVIEW FOTO (FRAME {activeFrameIndex + 1})</span>
+                          <p style={{ fontSize: 11, color: 'rgba(255,255,255,.5)', margin: 0 }}>Tampilkan contoh foto pada slot frame ini saat di layar pemilihan.</p>
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 4, cursor: 'pointer', fontSize: 12, color: '#fff' }}>
+                          <Upload size={16} /> UPLOAD GAMBAR DUMMY
+                          <input type="file" accept="image/jpeg,image/png" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadDummyImage(activeFrameIndex, f); }} />
+                        </label>
+                        
+                        {activeFrame.dummyPreviewImage && (
+                          <div style={{ height: 40, width: 40, borderRadius: 4, overflow: 'hidden', border: '1px solid #555' }}>
+                            <img src={activeFrame.dummyPreviewImage} alt="Dummy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        )}
+
+                        <button 
+                          className={`toggle-row ${activeFrame.showDummyPreview ? 'is-on' : ''}`} 
+                          type="button" 
+                          onClick={() => updateFrame(activeFrameIndex, { showDummyPreview: !activeFrame.showDummyPreview })}
+                          style={{ minWidth: 100 }}
+                        >
+                          <i />{activeFrame.showDummyPreview ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <FrameEditor
+                      frame={activeFrame}
+                      onSlotsChange={(slots) => updateFrameSlots(activeFrameIndex, slots)}
+                      onAddSlot={(captureId, w, h) => addSlotToFrame(activeFrameIndex, captureId, w, h)}
+                      onDuplicateSlot={(slot) => duplicateSlotInFrame(activeFrameIndex, slot)}
+                      onDeleteSlot={(slotId) => deleteSlotFromFrame(activeFrameIndex, slotId)}
+                      onUploadImage={(file) => uploadFrameImage(activeFrameIndex, file)}
+                      onUploadSlotFrame={(file) => uploadSlotFrameImage(activeFrameIndex, file)}
+                      onSlotFrameChange={(dataUrl) => updateFrame(activeFrameIndex, { slotFrameImage: dataUrl })}
+                      onFrameChange={(updates) => updateFrame(activeFrameIndex, updates)}
+                      onApplyTransformToAll={applyTransformToAllFrames}
+                    />
+                  </>
                 ) : (
                   <div className="frame-editor-empty-state">
                     <ImageIcon size={48} strokeWidth={1} />
