@@ -1681,12 +1681,10 @@ useEffect(() => {
                 {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
               </button>
               
-              {/* 🔧 LOGIKA PRINT DIPERBAIKI: HANYA MENGGUNAKAN SETTINGAN GLOBAL */}
-              {allSettings.display.showPrintButton ? (
-                <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
-                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK' : 'PRINT')}
-                </button>
-              ) : null}
+              {/* 🔧 LOGIKA PRINT DIPERBAIKI: TANPA SYARAT (UNTUK TES LAYOUT) */}
+              <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
+                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK' : 'PRINT')}
+              </button>
               
               {allSettings.display.showQrButton ? (
                 <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
