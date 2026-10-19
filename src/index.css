@@ -870,3 +870,27 @@ button { font: inherit; cursor: pointer; }
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
+
+/* =========================================
+   FIX INPUT TEXT SETTINGS (Anti Transparan)
+   ========================================= */
+.settings-screen input[type="text"],
+.settings-screen input[type="password"],
+.settings-screen input[type="number"] {
+  background-color: #fffdf9 !important; /* Latar putih */
+  color: #342f2d !important;            /* Teks gelap */
+  border: 1px solid rgba(0, 0, 0, 0.2) !important; /* Garis tepi */
+  border-radius: 4px;
+  outline: none;
+}
+
+/* Warna teks saat kolom kosong (placeholder) */
+.settings-screen input::placeholder {
+  color: #999 !important;
+}
+
+/* Efek saat kolom diklik */
+.settings-screen input:focus {
+  border-color: #ef3f25 !important; /* Warna aksen R3A */
+  box-shadow: 0 0 0 2px rgba(239, 63, 37, 0.2);
+}
