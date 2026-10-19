@@ -1,6 +1,6 @@
 import { QRISGate } from './QRISGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key } from 'lucide-react';
+import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key, Eye } from 'lucide-react';
 import { useCamera } from './useCamera';
 import { CameraPreview, CameraStatusBadge, errorMessages } from './cameraUi';
 import { getAspectRatioValue } from './cameraStore';
@@ -195,7 +195,7 @@ function drawPhotoCovered(ctx: CanvasRenderingContext2D, photo: HTMLImageElement
   ctx.drawImage(photo, dx, dy, dw, dh);
 }
 
-async function compositeFrame(frame: Frame, captures: Map<string, string>, captureFilters: Map<string, string>): Promise<string> {
+async function compositeFrame(frame: Frame, captures: Map<string, string>, captureFilters: Map<string, string>, isReceiptMode: boolean = false): Promise<string> {
   const frameImg = frame.image ? await loadImage(frame.image) : null;
   const fw = frameImg?.naturalWidth || 1800;
   const fh = frameImg?.naturalHeight || 1200;
@@ -206,6 +206,11 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
 
   ctx.fillStyle = '#2a2522';
   ctx.fillRect(0, 0, fw, fh);
+
+  // 🔧 FIX: Jika Receipt Mode, gambar frame DULU (di bawah)
+  if (isReceiptMode && frameImg) {
+    ctx.drawImage(frameImg, 0, 0, fw, fh);
+  }
 
   const scale = frame.photoScale ?? 1;
   const rotation = ((frame.photoRotation ?? 0) * Math.PI) / 180;
@@ -253,7 +258,8 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
     } catch { /* skip failed slot */ }
   }
 
-  if (frameImg) {
+  // 🔧 FIX: Jika BUKAN Receipt Mode, gambar frame di AKHIR (menimpa foto)
+  if (!isReceiptMode && frameImg) {
     ctx.drawImage(frameImg, 0, 0, fw, fh);
   }
 
@@ -361,6 +367,7 @@ export const PhotoboothSession = ({
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
   const [compositeColorUrl, setCompositeColorUrl] = useState<string | null>(null);
+  const [showPrintPreview, setShowPrintPreview] = useState(false); // 🔧 State baru untuk toggle preview
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -390,6 +397,9 @@ export const PhotoboothSession = ({
   const [pendingFrameIndex, setPendingFrameIndex] = useState<number | null>(null);
   const [idleWarning, setIdleWarning] = useState(0);
   const [showQRISGate, setShowQRISGate] = useState(false);
+
+  const version = loadAppVersion();
+  const isReceiptMode = version === 'v2.1.0';
 
   useEffect(() => {
     if (phase !== 'ready' && phase !== 'live') return;
@@ -719,6 +729,7 @@ useEffect(() => {
     setSelectedCaptureId(null);
     setCompositeUrl(null);
     setCompositeColorUrl(null);
+    setShowPrintPreview(false); // Reset preview
     setSaved(false);
     setSaving(false);
     setQrDataUrl(null);
@@ -755,8 +766,6 @@ useEffect(() => {
   }, [resetSession, allSettings.googleDrive, event.id]);
 
   const handleSelectFrame = useCallback((index: number) => {
-    const version = loadAppVersion();
-
     if (version === 'v1.0.0') {
       const gateEnabled = allSettings.system.igGateEnabled !== false;
       if (gateEnabled) {
@@ -779,7 +788,7 @@ useEffect(() => {
     setSelectedFrameIndex(index);
     resetSession();
     setPhase('ready');
-  }, [resetSession, allSettings.system.igGateEnabled, allSettings.payment]);
+  }, [resetSession, allSettings.system.igGateEnabled, allSettings.payment, version]);
 
   const handleIGGateDismiss = useCallback(() => {
     if (pendingFrameIndex !== null) {
@@ -896,20 +905,17 @@ useEffect(() => {
     for (const c of captures) captureMap.set(c.captureId, c.dataUrl);
     
     try {
-      const version = loadAppVersion();
-      const isReceiptMode = version === 'v2.1.0';
-
       if (isReceiptMode) {
         const bwFilters = new Map<string, string>();
         for (const c of captures) bwFilters.set(c.captureId, 'grayscale'); 
         
-        const resultBW = await compositeFrame(activeFrame, captureMap, bwFilters);
+        const resultBW = await compositeFrame(activeFrame, captureMap, bwFilters, true);
         setCompositeUrl(resultBW);
 
-        const resultColor = await compositeFrame(activeFrame, captureMap, captureFilters);
+        const resultColor = await compositeFrame(activeFrame, captureMap, captureFilters, true);
         setCompositeColorUrl(resultColor);
       } else {
-        const result = await compositeFrame(activeFrame, captureMap, captureFilters);
+        const result = await compositeFrame(activeFrame, captureMap, captureFilters, false);
         setCompositeUrl(result);
         setCompositeColorUrl(null);
       }
@@ -918,7 +924,7 @@ useEffect(() => {
     } catch {
       setPhase('filter');
     }
-  }, [activeFrame, captures, captureFilters]);
+  }, [activeFrame, captures, captureFilters, isReceiptMode]);
 
   const handleSave = useCallback(async () => {
     if (!compositeUrl || !activeFrame) return;
@@ -934,7 +940,9 @@ useEffect(() => {
       setResultId(id);
 
       const captureMap = new Map(captures.map((c) => [c.captureId, c.dataUrl]));
-      const slotPhotos: { index: number; dataUrl: string }[] = [];
+      
+      const slotPhotosBW: { index: number; dataUrl: string }[] = [];
+      const slotPhotosColor: { index: number; dataUrl: string }[] = [];
 
       const seenCaptureIds = new Set<string>();
       let photoIndex = 1;
@@ -945,8 +953,16 @@ useEffect(() => {
         const cap = captureMap.get(slot.captureId);
         if (!cap) continue;
         try {
-          const slotDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
-          slotPhotos.push({ index: photoIndex, dataUrl: slotDataUrl });
+          // 🔧 FIX: Generate B&W dan Warna terpisah
+          if (isReceiptMode) {
+            const bwDataUrl = await generateSlotPhoto(slot, cap, 'grayscale', activeFrame);
+            const colorDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
+            slotPhotosBW.push({ index: photoIndex, dataUrl: bwDataUrl });
+            slotPhotosColor.push({ index: photoIndex, dataUrl: colorDataUrl });
+          } else {
+            const colorDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
+            slotPhotosColor.push({ index: photoIndex, dataUrl: colorDataUrl });
+          }
           photoIndex++;
         } catch { /* skip */ }
       }
@@ -971,9 +987,6 @@ useEffect(() => {
         }
       }
 
-      const version = loadAppVersion();
-      const isReceiptMode = version === 'v2.1.0';
-
       if (allSettings.storage.autoDownloadResult) {
         void saveFileFromDataUrl(compositeUrl, generateFileName('jpg'));
         
@@ -981,9 +994,15 @@ useEffect(() => {
           void saveFileFromDataUrl(compositeColorUrl, generateFileName('jpg'));
         }
 
-        for (const sp of slotPhotos) {
+        // 🔧 Simpan foto B&W
+        for (const sp of slotPhotosBW) {
           void saveFileFromDataUrl(sp.dataUrl, generateFileName('jpg'));
         }
+        // 🔧 Simpan foto Warna
+        for (const sp of slotPhotosColor) {
+          void saveFileFromDataUrl(sp.dataUrl, generateFileName('jpg'));
+        }
+
         if (slideshowVideo) {
           void saveFileFromDataUrl(slideshowVideo, generateFileName(guessVideoExtension(slideshowVideo)));
         }
@@ -997,7 +1016,8 @@ useEffect(() => {
         const uploadFiles: UploadFileEntry[] = [
           { fileName: generateFileName('jpg'), dataUrl: compositeUrl },
           ...(isReceiptMode && compositeColorUrl ? [{ fileName: generateFileName('jpg'), dataUrl: compositeColorUrl }] : []),
-          ...slotPhotos.map((sp) => ({ fileName: generateFileName('jpg'), dataUrl: sp.dataUrl })),
+          ...slotPhotosBW.map((sp) => ({ fileName: generateFileName('jpg'), dataUrl: sp.dataUrl })),
+          ...slotPhotosColor.map((sp) => ({ fileName: generateFileName('jpg'), dataUrl: sp.dataUrl })),
           ...(slideshowVideo ? [{ fileName: generateFileName(guessVideoExtension(slideshowVideo)), dataUrl: slideshowVideo }] : []),
         ];
         void autoUploadToGuestFolder(currentGuest, VITE_CLIENT_ID, uploadFiles);
@@ -1006,14 +1026,14 @@ useEffect(() => {
 
       try {
         const startedAt = sessionStartedAtRef.current ?? (Date.now() - 60000);
-        recordSession({ id, eventId: event.id, startedAt, finishedAt: Date.now(), photoCount: slotPhotos.length, uploadSuccess: uploadSuccessCount, uploadFail: uploadFailCount });
+        recordSession({ id, eventId: event.id, startedAt, finishedAt: Date.now(), photoCount: slotPhotosColor.length, uploadSuccess: uploadSuccessCount, uploadFail: uploadFailCount });
       } catch { /* ignore */ }
 
       setSaved(true);
     } catch { /* ignore */ } finally {
       setSaving(false);
     }
-  }, [compositeUrl, compositeColorUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving]);
+  }, [compositeUrl, compositeColorUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving, isReceiptMode]);
   
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
@@ -1065,7 +1085,6 @@ useEffect(() => {
       const copies = Math.max(1, Math.min(5, ps.copies || 1));
       await printResult({
         copies,
-        // 🔧 GANTI DARI allSettings.printer.paperSize KE ps.paperSize
         paperSize: ps.paperSize || '4 × 6 in',
         layout: ps.layout || 'POTRAIT',
         dataUrl: compositeUrl, 
@@ -1219,6 +1238,13 @@ useEffect(() => {
       ctx.fillRect(0, 0, frameW, frameH);
 
       const cache = imageCacheRef.current;
+
+      // 🔧 FIX: Layer preview untuk mode Receipt (Frame di bawah)
+      if (isReceiptMode && activeFrame.image) {
+        const frameImg = cache.get(activeFrame.image);
+        if (frameImg) ctx.drawImage(frameImg, 0, 0, frameW, frameH);
+      }
+
       for (const slot of allSlots) {
         const cap = captureMap.get(slot.captureId);
         if (!cap) continue;
@@ -1244,7 +1270,8 @@ useEffect(() => {
         ctx.restore();
       }
 
-      if (activeFrame.image) {
+      // 🔧 FIX: Layer preview untuk mode Normal (Frame di atas)
+      if (!isReceiptMode && activeFrame.image) {
         const frameImg = cache.get(activeFrame.image);
         if (frameImg) ctx.drawImage(frameImg, 0, 0, frameW, frameH);
       }
@@ -1268,7 +1295,7 @@ useEffect(() => {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
     };
-  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached]);
+  }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached, isReceiptMode]);
 
   const LoadingOverlay = saving ? (
     <div style={{ position: 'fixed', inset: 0, zIndex: 999999, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, color: '#fff', backdropFilter: 'blur(4px)' }}>
@@ -1490,6 +1517,23 @@ useEffect(() => {
                 border: '1px solid rgba(255,255,255,.15)',
               }}
             >
+              {/* 🔧 FIX: Layer frame di bawah untuk Receipt Mode */}
+              {isReceiptMode && activeFrame?.image ? (
+                <img
+                  src={activeFrame.image}
+                  alt=""
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'fill',
+                    pointerEvents: 'none',
+                    zIndex: 1,
+                  }}
+                />
+              ) : null}
+
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
                 if (!cap) return null;
@@ -1506,14 +1550,16 @@ useEffect(() => {
                       width: `${slot.w}%`,
                       height: `${slot.h}%`,
                       objectFit: 'cover',
-                      zIndex: 1,
+                      zIndex: 2, // Foto di atas frame
                       outline: isNext ? '2px solid #ef3f25' : 'none',
                       outlineOffset: -2,
                     }}
                   />
                 );
               })}
-              {activeFrame?.image ? (
+              
+              {/* 🔧 FIX: Layer frame di atas untuk v1/v2.0.0 */}
+              {!isReceiptMode && activeFrame?.image ? (
                 <img
                   src={activeFrame.image}
                   alt=""
@@ -1524,7 +1570,7 @@ useEffect(() => {
                     height: '100%',
                     objectFit: 'fill',
                     pointerEvents: 'none',
-                    zIndex: 2,
+                    zIndex: 3,
                   }}
                 />
               ) : null}
@@ -1583,10 +1629,42 @@ useEffect(() => {
         <section className="photobooth-compositing"><div className="compositing-spinner" /><span>COMPOSITING...</span></section>
       ) : null}
 
-      {phase === 'result' && compositeUrl ? (
+      {phase === 'result' && (compositeUrl || compositeColorUrl) ? (
         <section className="photobooth-result-section">
           <div className="result-header"><h2>YOUR PHOTO IS READY</h2></div>
-          <div className="result-preview"><img src={compositeUrl} alt="Final result" /></div>
+          
+          {/* 🔧 FIX: Tampilkan gambar berwarna atau hitam putih sesuai toggle */}
+          <div className="result-preview">
+            <img 
+              src={isReceiptMode && !showPrintPreview && compositeColorUrl ? compositeColorUrl : compositeUrl} 
+              alt="Final result" 
+            />
+          </div>
+
+          {/* 🔧 TOMBOL TOGGLE PREVIEW CETAK (Hanya muncul di v2.1.0) */}
+          {isReceiptMode && compositeColorUrl && (
+            <button 
+              className="result-toggle-preview" 
+              onClick={() => setShowPrintPreview(!showPrintPreview)}
+              style={{
+                margin: '0 auto 20px',
+                padding: '10px 20px',
+                background: 'rgba(255,255,255,.1)',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,.3)',
+                borderRadius: '30px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              <Eye size={18} /> 
+              {showPrintPreview ? 'LIHAT HASIL WARNA' : 'LIHAT HASIL CETAK'}
+            </button>
+          )}
+
           <div className="result-actions">
             <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button">
               {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
