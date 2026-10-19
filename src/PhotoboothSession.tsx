@@ -1653,7 +1653,6 @@ useEffect(() => {
             {/* KANAN: TOMBOL AKSI */}
             <div className="result-actions" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '220px' }}>
               
-              {/* 🔧 TOMBOL TOGGLE PREVIEW DIPINDAH KE SINI */}
               {isReceiptMode && compositeColorUrl && (
                 <button 
                   className="result-toggle-preview" 
@@ -1682,9 +1681,10 @@ useEffect(() => {
                 {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
               </button>
               
-              {(event.printerSettings.enabled && allSettings.display.showPrintButton) ? (
+              {/* 🔧 LOGIKA PRINT DIPERBAIKI: HANYA MENGGUNAKAN SETTINGAN GLOBAL */}
+              {allSettings.display.showPrintButton ? (
                 <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
-                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (loadAppVersion() === 'v2.1.0' ? 'CETAK STRUK' : 'PRINT')}
+                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK' : 'PRINT')}
                 </button>
               ) : null}
               
