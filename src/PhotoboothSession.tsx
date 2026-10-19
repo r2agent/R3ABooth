@@ -207,7 +207,6 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
   ctx.fillStyle = '#2a2522';
   ctx.fillRect(0, 0, fw, fh);
 
-  // 🔧 FIX: Jika Receipt Mode, gambar frame DULU (di bawah)
   if (isReceiptMode && frameImg) {
     ctx.drawImage(frameImg, 0, 0, fw, fh);
   }
@@ -258,7 +257,6 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
     } catch { /* skip failed slot */ }
   }
 
-  // 🔧 FIX: Jika BUKAN Receipt Mode, gambar frame di AKHIR (menimpa foto)
   if (!isReceiptMode && frameImg) {
     ctx.drawImage(frameImg, 0, 0, fw, fh);
   }
@@ -266,7 +264,7 @@ async function compositeFrame(frame: Frame, captures: Map<string, string>, captu
   return canvas.toDataURL('image/jpeg', 0.95);
 }
 
-async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame): Promise<string> {
+async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: string, frame: Frame, isReceiptMode: boolean = false): Promise<string> {
   void slot;
   const CANVAS_W = 1920;
   const CANVAS_H = 1080;
@@ -282,8 +280,10 @@ async function generateSlotPhoto(slot: Slot, captureDataUrl: string, filterId: s
   const offsetX = ((frame.photoOffsetX ?? 0) / 100) * CANVAS_W;
   const offsetY = ((frame.photoOffsetY ?? 0) / 100) * CANVAS_H;
 
-  const glow = isGlowFilter(filterId);
-  const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(filterId);
+  const effectiveFilterId = isReceiptMode ? 'grayscale' : filterId;
+
+  const glow = isGlowFilter(effectiveFilterId);
+  const baseCss = glow ? 'brightness(1.08) saturate(1.15)' : getFilterCss(effectiveFilterId);
 
   const photoAspect = photo.naturalWidth / photo.naturalHeight;
   const canvasAspect = CANVAS_W / CANVAS_H;
@@ -367,7 +367,7 @@ export const PhotoboothSession = ({
   const [selectedCaptureId, setSelectedCaptureId] = useState<string | null>(null);
   const [compositeUrl, setCompositeUrl] = useState<string | null>(null);
   const [compositeColorUrl, setCompositeColorUrl] = useState<string | null>(null);
-  const [showPrintPreview, setShowPrintPreview] = useState(false); // 🔧 State baru untuk toggle preview
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [flash, setFlash] = useState(false);
@@ -456,7 +456,6 @@ export const PhotoboothSession = ({
     };
   }, [pendingFullscreen]);
   
-  /* ⚡ Frame select — wheel scroll + drag scroll */
 useEffect(() => {
   if (phase !== 'frame-select') return;
   const el = frameGridRef.current;
@@ -729,7 +728,7 @@ useEffect(() => {
     setSelectedCaptureId(null);
     setCompositeUrl(null);
     setCompositeColorUrl(null);
-    setShowPrintPreview(false); // Reset preview
+    setShowPrintPreview(false);
     setSaved(false);
     setSaving(false);
     setQrDataUrl(null);
@@ -953,7 +952,6 @@ useEffect(() => {
         const cap = captureMap.get(slot.captureId);
         if (!cap) continue;
         try {
-          // 🔧 FIX: Generate B&W dan Warna terpisah
           if (isReceiptMode) {
             const bwDataUrl = await generateSlotPhoto(slot, cap, 'grayscale', activeFrame);
             const colorDataUrl = await generateSlotPhoto(slot, cap, captureFilters.get(slot.captureId) || 'natural', activeFrame);
@@ -994,11 +992,9 @@ useEffect(() => {
           void saveFileFromDataUrl(compositeColorUrl, generateFileName('jpg'));
         }
 
-        // 🔧 Simpan foto B&W
         for (const sp of slotPhotosBW) {
           void saveFileFromDataUrl(sp.dataUrl, generateFileName('jpg'));
         }
-        // 🔧 Simpan foto Warna
         for (const sp of slotPhotosColor) {
           void saveFileFromDataUrl(sp.dataUrl, generateFileName('jpg'));
         }
@@ -1239,7 +1235,6 @@ useEffect(() => {
 
       const cache = imageCacheRef.current;
 
-      // 🔧 FIX: Layer preview untuk mode Receipt (Frame di bawah)
       if (isReceiptMode && activeFrame.image) {
         const frameImg = cache.get(activeFrame.image);
         if (frameImg) ctx.drawImage(frameImg, 0, 0, frameW, frameH);
@@ -1270,7 +1265,6 @@ useEffect(() => {
         ctx.restore();
       }
 
-      // 🔧 FIX: Layer preview untuk mode Normal (Frame di atas)
       if (!isReceiptMode && activeFrame.image) {
         const frameImg = cache.get(activeFrame.image);
         if (frameImg) ctx.drawImage(frameImg, 0, 0, frameW, frameH);
@@ -1366,14 +1360,37 @@ useEffect(() => {
                   >
                     <div className="frame-select-thumb">
                       {frame.image ? (
-                        <img src={frame.image} alt={displayName} />
+                        <img src={frame.image} alt={displayName} style={{ zIndex: frame.showSlotPreview ? 1 : 2 }} />
                       ) : (
                         <div className="frame-select-thumb-empty">
                           <ImageIcon size={32} strokeWidth={1} />
                         </div>
                       )}
-                      <div className="frame-select-thumb-overlay" />
-                      <div className="frame-select-thumb-top">
+                      
+                      {/* 🔧 RENDER DUMMY SLOTS JIKA SHOW SLOT PREVIEW AKTIF */}
+                      {frame.showSlotPreview && frame.slots.map((slot) => (
+                        <div 
+                          key={slot.id} 
+                          style={{ 
+                            position: 'absolute', 
+                            left: `${slot.x}%`, 
+                            top: `${slot.y}%`, 
+                            width: `${slot.w}%`, 
+                            height: `${slot.h}%`, 
+                            background: 'rgba(0,0,0,0.6)', 
+                            border: '1px solid rgba(255,255,255,0.3)', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            zIndex: 2
+                          }}
+                        >
+                          <ImageIcon size={16} color="rgba(255,255,255,0.5)" />
+                        </div>
+                      ))}
+
+                      <div className="frame-select-thumb-overlay" style={{ zIndex: 3 }} />
+                      <div className="frame-select-thumb-top" style={{ zIndex: 4 }}>
                         <span className="frame-select-name">{displayName}</span>
                         {showCount ? (
                           <span className="frame-select-count">{frame.slots.length}×</span>
@@ -1517,7 +1534,6 @@ useEffect(() => {
                 border: '1px solid rgba(255,255,255,.15)',
               }}
             >
-              {/* 🔧 FIX: Layer frame di bawah untuk Receipt Mode */}
               {isReceiptMode && activeFrame?.image ? (
                 <img
                   src={activeFrame.image}
@@ -1550,7 +1566,7 @@ useEffect(() => {
                       width: `${slot.w}%`,
                       height: `${slot.h}%`,
                       objectFit: 'cover',
-                      zIndex: 2, // Foto di atas frame
+                      zIndex: 2,
                       outline: isNext ? '2px solid #ef3f25' : 'none',
                       outlineOffset: -2,
                     }}
@@ -1558,7 +1574,6 @@ useEffect(() => {
                 );
               })}
               
-              {/* 🔧 FIX: Layer frame di atas untuk v1/v2.0.0 */}
               {!isReceiptMode && activeFrame?.image ? (
                 <img
                   src={activeFrame.image}
@@ -1633,7 +1648,6 @@ useEffect(() => {
         <section className="photobooth-result-section">
           <div className="result-header"><h2>YOUR PHOTO IS READY</h2></div>
           
-          {/* 🔧 FIX: Tampilkan gambar berwarna atau hitam putih sesuai toggle */}
           <div className="result-preview">
             <img 
               src={isReceiptMode && !showPrintPreview && compositeColorUrl ? compositeColorUrl : compositeUrl} 
@@ -1641,7 +1655,6 @@ useEffect(() => {
             />
           </div>
 
-          {/* 🔧 TOMBOL TOGGLE PREVIEW CETAK (Hanya muncul di v2.1.0) */}
           {isReceiptMode && compositeColorUrl && (
             <button 
               className="result-toggle-preview" 
