@@ -1404,12 +1404,8 @@ useEffect(() => {
               if (cap) return null;
               return (
                 <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {/* 🔧 TAMPILKAN DUMMY DI SINI SAAT READY */}
-                  {activeFrame.showDummyPreview && activeFrame.dummyPreviewImage ? (
-                    <img src={activeFrame.dummyPreviewImage} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <span>{slot.captureId}</span>
-                  )}
+                  {/* 🔧 DUMMY DIHAPUS DARI SINI */}
+                  <span>{slot.captureId}</span>
                 </div>
               );
             })}
@@ -1565,28 +1561,7 @@ useEffect(() => {
                   );
                 }
 
-                // 🔧 TAMPILKAN DUMMY DI LIVE JIKA SLOT KOSONG
-                if (activeFrame.showDummyPreview && activeFrame.dummyPreviewImage) {
-                  return (
-                    <img
-                      key={slot.id}
-                      src={activeFrame.dummyPreviewImage}
-                      alt="Dummy"
-                      style={{
-                        position: 'absolute',
-                        left: `${slot.x}%`,
-                        top: `${slot.y}%`,
-                        width: `${slot.w}%`,
-                        height: `${slot.h}%`,
-                        objectFit: 'cover',
-                        zIndex: 2,
-                        outline: isNext ? '2px solid #ef3f25' : 'none',
-                        outlineOffset: -2,
-                        opacity: 0.8
-                      }}
-                    />
-                  );
-                }
+                // 🔧 DUMMY PREVIEW DIHAPUS DARI SINI AGAR SLOT KOSONG SAAT SESI FOTO
 
                 return null;
               })}
