@@ -399,7 +399,9 @@ export const PhotoboothSession = ({
   const [showQRISGate, setShowQRISGate] = useState(false);
 
   const version = loadAppVersion();
-  const isReceiptMode = version === 'v2.1.0';
+  
+  // 🔧 UPDATE v1.1.0: v1.1.0 juga termasuk Receipt Mode
+  const isReceiptMode = version === 'v2.1.0' || version === 'v1.1.0';
 
   useEffect(() => {
     if (phase !== 'ready' && phase !== 'live') return;
@@ -765,7 +767,8 @@ useEffect(() => {
   }, [resetSession, allSettings.googleDrive, event.id]);
 
   const handleSelectFrame = useCallback((index: number) => {
-    if (version === 'v1.0.0') {
+    // 🔧 UPDATE v1.1.0: v1.1.0 menggunakan IG Gate
+    if (version === 'v1.0.0' || version === 'v1.1.0') {
       const gateEnabled = allSettings.system.igGateEnabled !== false;
       if (gateEnabled) {
         setPendingFrameIndex(index);
@@ -1681,10 +1684,12 @@ useEffect(() => {
                 {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
               </button>
               
-              {/* 🔧 LOGIKA PRINT DIPERBAIKI: TANPA SYARAT (UNTUK TES LAYOUT) */}
-              <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
-                <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK' : 'PRINT')}
-              </button>
+              {/* 🔧 TOMBOL PRINT BERDASARKAN SETTINGAN GLOBAL SAJA */}
+              {allSettings.display.showPrintButton !== false ? (
+                <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
+                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK' : 'PRINT')}
+                </button>
+              ) : null}
               
               {allSettings.display.showQrButton ? (
                 <button className="result-qr" onClick={handleShowQr} disabled={!saved || saving} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
