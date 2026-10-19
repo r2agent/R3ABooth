@@ -352,8 +352,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
     const isNative = isNativePlatform();
     const isTablet = isNative || deviceMode === 'tablet';
 
-    console.log('[ChangeFolder] storedMode =', storedMode, '| settingsMode =', settingsMode, '| deviceMode =', deviceMode, '| isTablet =', isTablet, '| isNative =', isNative);
-
     if (isTablet) {
       setShowCustomPicker(true);
       return;
@@ -508,21 +506,54 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <button type="button" onClick={() => updateCam({ lowLatency: !settings.camera.lowLatency })}>{settings.camera.lowLatency ? 'ON' : 'OFF'}<b>▼</b></button>
               </div>
             </div>
+            
             <div className="settings-column printer-settings">
               <div className="settings-power">
                 <span>PRINTER</span>
                 <button className={`settings-switch ${settings.printer.printerOn ? 'on' : ''}`} type="button" onClick={() => update('printer', { printerOn: !settings.printer.printerOn })}>{settings.printer.printerOn ? 'ON' : 'OFF'}</button>
               </div>
+
+              {/* DETEKSI OTOMATIS BLUETOOTH */}
               <div className="setting-control">
-                <span>PRINTER</span>
-                <select value={settings.printer.printer} onChange={(e) => update('printer', { printer: e.target.value })} disabled={printers.length === 0}>
-                  {printers.length === 0 ? <option>No printer detected</option> : printers.map((p) => <option key={p} value={p}>{p}</option>)}
+                <span>DETECTED BLUETOOTH</span>
+                <select value={settings.printer.printer} onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.startsWith('BT:')) update('printer', { printer: val, printerBluetooth: val.replace('BT:', '').trim() });
+                  else update('printer', { printer: val });
+                }}>
+                  <option value="">-- Pilih Perangkat BT --</option>
+                  {printers.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
-                <em>{printers.length > 0 ? 'CONNECTED' : 'DISCONNECTED'}</em>
+                <em>{printers.length > 0 ? `${printers.length} DEVICE FOUND` : 'NO DEVICE FOUND'}</em>
               </div>
+
+              {/* INPUT MANUAL IP LAN */}
+              <div className="setting-control">
+                <span>PRINTER IP (LAN / WIFI)</span>
+                <input 
+                  type="text" 
+                  value={settings.printer.printerIp || ''} 
+                  onChange={(e) => update('printer', { printerIp: e.target.value, printer: `LAN: ${e.target.value}` })} 
+                  placeholder="192.168.1.100" 
+                  style={{ padding: 8, fontSize: 14 }}
+                />
+              </div>
+
+              {/* INPUT MANUAL BLUETOOTH */}
+              <div className="setting-control">
+                <span>BLUETOOTH NAME (MANUAL)</span>
+                <input 
+                  type="text" 
+                  value={settings.printer.printerBluetooth || ''} 
+                  onChange={(e) => update('printer', { printerBluetooth: e.target.value, printer: `BT: ${e.target.value}` })} 
+                  placeholder="RPP02N" 
+                  style={{ padding: 8, fontSize: 14 }}
+                />
+              </div>
+
               <div className="setting-control">
                 <span>PRINTER STATUS</span>
-                <button type="button">{settings.printer.printerOn ? (printers.length > 0 ? 'READY' : 'OFFLINE') : 'OFF'}<b>▼</b></button>
+                <button type="button">{settings.printer.printerOn ? (settings.printer.printer ? 'READY' : 'OFFLINE') : 'OFF'}<b>▼</b></button>
               </div>
               <div className="setting-control">
                 <span>PAPER SIZE</span>
@@ -848,7 +879,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                   onChange={(e) => {
                     const nextMode = e.target.value;
                     if (confirm(`Ganti mode ke ${nextMode.toUpperCase()}?\n\nAplikasi akan reload untuk menyesuaikan tampilan dan fitur.`)) {
-                      // 🔧 FIX: tulis key dedicated DULU (synchronous), baru saveAllSettings
                       writeStoredDeviceMode(nextMode);
                       console.log('[DeviceMode] committed to dedicated key:', readStoredDeviceMode());
 
@@ -859,7 +889,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                       setSettings(next);
                       try {
                         saveAllSettings(next);
-                        console.log('[DeviceMode] saveAllSettings OK. settings.application =', next.application);
                       } catch (err) {
                         console.error('[DeviceMode] saveAllSettings FAILED:', err);
                       }
@@ -876,7 +905,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                   <option value="windows">WINDOWS MODE</option>
                 </select>
                 <em style={{ fontSize: 11, opacity: 0.6 }}>
-                  Aktif: <strong style={{ color: '#ffd94e' }}>{activeDeviceMode.toUpperCase()}</strong> — cek Console kalau ragu
+                  Aktif: <strong style={{ color: '#ffd94e' }}>{activeDeviceMode.toUpperCase()}</strong>
                 </em>
               </div>
               <div className="setting-control">
@@ -964,7 +993,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
             setSettings(next);
             saveAllSettings(next);
             setShowCustomPicker(false);
-            // 🔧 TAMBAHKAN BARIS INI UNTUK NOTIFIKASI SUKSES
             setGdriveTestState({ status: 'success', message: `✅ Berhasil memilih folder: ${folder.name}` });
           }}
           onClose={() => setShowCustomPicker(false)}
@@ -1044,7 +1072,6 @@ function App() {
   const [events, setEvents] = useState<R3aEvent[]>([]);
   const [activeEvent, setActiveEvent] = useState<R3aEvent | null>(null);
   const [editingEvent, setEditingEvent] = useState<R3aEvent | null>(null);
-  // 🔧 FIX: merge device mode dari dedicated key
   const [settings, setSettings] = useState<AllSettings>(() => withDeviceModeOverride(loadAllSettings()));
   const [appVersion, setAppVersion] = useState<AppVersion>(() => loadAppVersion());
   const [hash, setHash] = useState(() =>

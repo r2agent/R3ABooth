@@ -15,6 +15,8 @@ export type CameraSettingsShape = {
 export type PrinterSettingsShape = {
   printerOn: boolean;
   printer: string;
+  printerIp: string;          // 🔧 TAMBAHAN
+  printerBluetooth: string;   // 🔧 TAMBAHAN
   paperSize: string;
 };
 
@@ -106,6 +108,8 @@ const DEFAULT_SETTINGS: AllSettings = {
   printer: {
     printerOn: false,
     printer: '',
+    printerIp: '',
+    printerBluetooth: '',
     paperSize: '4 × 6 in',
   },
   storage: {
@@ -154,7 +158,7 @@ const DEFAULT_SETTINGS: AllSettings = {
     appVersion: '1.0.0',
     igGateEnabled: true,
   },
-    payment: {
+  payment: {
     enabled: false,
     qrisImageUrl: '',
     price: 25000,

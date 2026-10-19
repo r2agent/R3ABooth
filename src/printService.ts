@@ -1,16 +1,5 @@
 /* ============================================================
    PRINT SERVICE — Modular Print Provider System
-   
-   Setiap platform punya provider sendiri:
-   - Browser (window.print) — sekarang
-   - Android APK (native) — nanti
-   - Electron EXE (native) — nanti
-   - QZ Tray (web silent) — opsional nanti
-   
-   Fungsi:
-   - Auto-detect provider yang available
-   - Fallback berlapis
-   - Modular: tinggal registerProvider() untuk platform baru
    ============================================================ */
 
 export type PrintOptions = {
@@ -23,70 +12,89 @@ export type PrintOptions = {
 
 export type PrintProvider = {
   name: string;
-  isAvailable: () => Promise<boolean>;
+  isAvailable: (opts: PrintOptions) => Promise<boolean>;
   print: (opts: PrintOptions) => Promise<boolean>;
 };
 
 /* ============================================================
-   REGISTRY — kumpulan provider
+   REGISTRY
    ============================================================ */
 const providers: PrintProvider[] = [];
-let activeProvider: PrintProvider | null = null;
 
 export function registerProvider(p: PrintProvider): void {
-  // Hindari duplikat
   if (providers.find((x) => x.name === p.name)) return;
   providers.push(p);
 }
 
-export function getRegisteredProviders(): string[] {
-  return providers.map((p) => p.name);
-}
+/* ============================================================
+   PROVIDER 1: SILENT PRINT NETWORK / LAN (Port 9100)
+   ============================================================ */
+const NETWORK_PROVIDER: PrintProvider = {
+  name: 'network',
+  isAvailable: async (opts) => {
+    return !!opts.printerName?.startsWith('LAN:');
+  },
+  print: async (opts) => {
+    const ip = opts.printerName?.replace('LAN:', '').trim();
+    if (!ip) return false;
 
-export async function detectProvider(): Promise<PrintProvider | null> {
-  // Prioritas: dari paling atas (yang didaftarkan terakhir)
-  const sorted = [...providers].reverse();
-  for (const p of sorted) {
     try {
-      if (await p.isAvailable()) {
-        activeProvider = p;
-        console.log(`[Print] Provider aktif: ${p.name}`);
-        return p;
+      console.log(`[Print] Mengirim gambar ke IP ${ip} (Port 9100)...`);
+      const res = await fetch(opts.dataUrl);
+      const blob = await res.blob();
+      
+      const response = await fetch(`http://${ip}:9100/print`, {
+        method: 'POST',
+        body: blob,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+
+      if (response.ok) {
+        console.log(`[Print] ✅ Network Print Berhasil`);
+        return true;
       }
-    } catch {
-      // Skip provider yang error
+      throw new Error(`Printer IP HTTP Status: ${response.status}`);
+    } catch (err) {
+      console.error(`[Print] ❌ Gagal Network Print:`, err);
+      return false;
     }
   }
-  activeProvider = null;
-  console.warn('[Print] Tidak ada provider yang available');
-  return null;
-}
-
-/* ============================================================
-   BROWSER PROVIDER — pakai window.print() (dialog OS)
-   ============================================================ */
-const PAPER_SIZES_MM: Record<string, { w: number; h: number }> = {
-  '4 × 6 in': { w: 102, h: 152 },
-  '2 × 6 in': { w: 51, h: 152 },
-  '5 × 7 in': { w: 127, h: 178 },
-  'A4': { w: 210, h: 297 },
-  'Letter': { w: 216, h: 279 },
 };
 
-function getPaperSize(paperSize: string, layout: string): { w: number; h: number } {
-  const base = PAPER_SIZES_MM[paperSize] || PAPER_SIZES_MM['4 × 6 in'];
-  if (layout === 'LANDSCAPE') {
-    return { w: base.h, h: base.w };
+/* ============================================================
+   PROVIDER 2: SILENT PRINT BLUETOOTH (Via RawBT Intent)
+   ============================================================ */
+const RAWBT_PROVIDER: PrintProvider = {
+  name: 'rawbt',
+  isAvailable: async (opts) => {
+    const isNative = (window as any).Capacitor?.isNativePlatform?.();
+    return isNative && !!opts.printerName?.startsWith('BT:');
+  },
+  print: async (opts) => {
+    try {
+      console.log(`[Print] Mengirim ke RawBT (Bluetooth)...`);
+      const base64Data = opts.dataUrl.replace(/^data:[^;]+;base64,/, '');
+      
+      // Panggil intent RawBT
+      window.location.href = `rawbt:base64,${base64Data}`;
+      
+      // Jeda agar OS bisa melempar intent ke aplikasi RawBT
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      return true;
+    } catch (err) {
+      console.error(`[Print] ❌ Gagal RawBT:`, err);
+      return false;
+    }
   }
-  return base;
-}
+};
 
+/* ============================================================
+   PROVIDER 3: FALLBACK BROWSER / OS PRINT
+   ============================================================ */
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
-  isAvailable: async () => {
-    return typeof window !== 'undefined' && typeof document !== 'undefined';
-  },
-  print: async (opts: PrintOptions): Promise<boolean> => {
+  isAvailable: async () => true, // Selalu tersedia sebagai fallback
+  print: async (opts): Promise<boolean> => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
       iframe.style.position = 'fixed';
@@ -95,11 +103,10 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
       iframe.style.width = '0';
       iframe.style.height = '0';
       iframe.style.border = '0';
+      
       iframe.onload = () => {
         const doc = iframe.contentWindow?.document;
         if (!doc) { resolve(false); return; }
-
-        const paper = getPaperSize(opts.paperSize, opts.layout);
 
         doc.open();
         doc.write(`
@@ -107,42 +114,21 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
             <head>
               <title>R3A Booth Print</title>
               <style>
-                @page {
-                  size: ${paper.w}mm ${paper.h}mm;
-                  margin: 0;
-                }
-                body {
-                  margin: 0;
-                  padding: 0;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  width: ${paper.w}mm;
-                  height: ${paper.h}mm;
-                  overflow: hidden;
-                }
-                img {
-                  width: 100%;
-                  height: 100%;
-                  object-fit: contain;
-                  display: block;
-                }
+                @page { size: auto; margin: 0; }
+                body { margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+                img { max-width: 100%; max-height: 100%; object-fit: contain; }
               </style>
             </head>
-            <body>
-              <img src="${opts.dataUrl}" />
-            </body>
+            <body><img src="${opts.dataUrl}" /></body>
           </html>
         `);
         doc.close();
 
         iframe.contentWindow?.focus();
         setTimeout(() => {
-          try {
-            iframe.contentWindow?.print();
-          } catch { /* ignore */ }
-          setTimeout(() => { iframe.remove(); resolve(true); }, 500);
-        }, 300);
+          try { iframe.contentWindow?.print(); } catch { /* ignore */ }
+          setTimeout(() => { iframe.remove(); resolve(true); }, 1000);
+        }, 500);
       };
       iframe.onerror = () => { iframe.remove(); resolve(false); };
       document.body.appendChild(iframe);
@@ -151,44 +137,47 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
 };
 
 /* ============================================================
-   REGISTER DEFAULT PROVIDER
+   REGISTER ALL PROVIDERS
    ============================================================ */
+registerProvider(NETWORK_PROVIDER);
+registerProvider(RAWBT_PROVIDER);
 registerProvider(BROWSER_PRINT_PROVIDER);
 
 /* ============================================================
    PUBLIC API
    ============================================================ */
 export async function printResult(opts: PrintOptions): Promise<boolean> {
-  // Detect provider kalau belum
-  let provider = activeProvider;
-  if (!provider) {
-    provider = await detectProvider();
-  }
-  if (!provider) return false;
+  let selectedProvider: PrintProvider | null = null;
 
+  // Cari provider yang cocok dengan target printer
+  for (const p of providers) {
+    if (await p.isAvailable(opts)) {
+      selectedProvider = p;
+      break;
+    }
+  }
+
+  if (!selectedProvider) {
+    console.warn('[Print] Tidak ada provider yang tersedia untuk printer ini.');
+    return false;
+  }
+
+  console.log(`[Print] Menggunakan provider: ${selectedProvider.name} (Target: ${opts.printerName})`);
+
+  // Lakukan perulangan cetak sesuai jumlah copies
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
   for (let i = 0; i < copies; i++) {
-    const ok = await provider.print(opts);
+    console.log(`[Print] Mencetak copy ke-${i + 1} dari ${copies}...`);
+    const ok = await selectedProvider.print(opts);
     if (!ok) success = false;
+    
+    // Jeda antar copy
     if (i < copies - 1) {
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
+  
   return success;
-}
-
-export function getActiveProviderName(): string | null {
-  return activeProvider?.name ?? null;
-}
-
-export function setPrintProvider(provider: PrintProvider): void {
-  // Keep backward compat — register manual
-  registerProvider(provider);
-  activeProvider = provider;
-}
-
-export function getAvailablePaperSizes(): string[] {
-  return Object.keys(PAPER_SIZES_MM);
 }

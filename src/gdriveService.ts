@@ -7,6 +7,7 @@ import {
   getValidToken as pkceGetValidToken,
   getTokenStatus as pkceGetTokenStatus,
 } from './pkceAuth';
+import { BleClient } from '@capacitor-community/bluetooth-le';
 
 export { startAutoRefresh, stopAutoRefresh, hasRefreshToken } from './pkceAuth';
 
@@ -174,12 +175,52 @@ export function buildDriveFolderUrl(folderId: string): string {
   return `https://drive.google.com/drive/folders/${folderId}`;
 }
 
+// --- Printer Detection -------------------------------------------------------
+
 export async function getPrinters(): Promise<string[]> {
-  return [];
+  const printers: string[] = [];
+  const isNative = (window as any).Capacitor?.isNativePlatform?.();
+
+  // Hanya scan Bluetooth jika aplikasi berjalan di APK (Native)
+  if (isNative) {
+    try {
+      await BleClient.initialize();
+      const devices = await BleClient.getBondedDevices();
+      
+      devices.forEach((device) => {
+        if (device.name) {
+          printers.push(`BT: ${device.name}`);
+        }
+      });
+    } catch (err) {
+      console.warn('[Printer] Gagal scan Bluetooth:', err);
+    }
+  }
+
+  return printers;
 }
 
-export async function testPrinter(_printerName: string): Promise<DriveTestResult> {
-  return { success: false, message: 'Printer test is not available in web mode.' };
+export async function testPrinter(printerName: string): Promise<DriveTestResult> {
+  if (!printerName) {
+    return { success: false, message: 'Pilih printer atau isi IP/BT manual terlebih dahulu.' };
+  }
+  
+  if (printerName.startsWith('BT:')) {
+    return { success: true, message: `Siap mencetak via Bluetooth (${printerName.replace('BT:', '').trim()}). Pastikan RawBT terinstall.` };
+  }
+  
+  if (printerName.startsWith('LAN:') || /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(printerName)) {
+    const ip = printerName.replace('LAN:', '').trim();
+    try {
+      // Ping sederhana ke printer IP
+      await fetch(`http://${ip}:9100`, { method: 'HEAD', mode: 'no-cors' });
+      return { success: true, message: `Printer jaringan di ${ip} merespon.` };
+    } catch {
+      return { success: false, message: `Printer ${ip} tidak merespon. Cek koneksi Wi-Fi.` };
+    }
+  }
+
+  return { success: true, message: 'Printer siap digunakan.' };
 }
 
 export async function runDiagnostics(): Promise<{ label: string; status: string; healthy: boolean }[]> {
