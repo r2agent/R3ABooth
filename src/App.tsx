@@ -345,7 +345,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
       return;
     }
 
-    // 🔧 FIX: baca device mode dari key dedicated (paling andal), fallback ke settings
     const storedMode = readStoredDeviceMode();
     const settingsMode = settings.application.deviceTypeOverride || 'auto';
     const deviceMode = storedMode !== 'auto' ? storedMode : settingsMode;
@@ -426,7 +425,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
     document.documentElement.style.setProperty('--r3a-brightness', `${settings.display.brightness}%`);
   }, [settings.display.brightness]);
 
-  // 🔧 FIX: baca device mode aktif (dari dedicated key dulu, fallback ke state settings)
   const activeDeviceMode = (() => {
     const stored = readStoredDeviceMode();
     return stored !== 'auto' ? stored : (settings.application.deviceTypeOverride || 'auto');
@@ -513,7 +511,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <button className={`settings-switch ${settings.printer.printerOn ? 'on' : ''}`} type="button" onClick={() => update('printer', { printerOn: !settings.printer.printerOn })}>{settings.printer.printerOn ? 'ON' : 'OFF'}</button>
               </div>
 
-              {/* DETEKSI OTOMATIS BLUETOOTH */}
               <div className="setting-control">
                 <span>DETECTED BLUETOOTH</span>
                 <select value={settings.printer.printer} onChange={(e) => {
@@ -527,7 +524,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <em>{printers.length > 0 ? `${printers.length} DEVICE FOUND` : 'NO DEVICE FOUND'}</em>
               </div>
 
-              {/* INPUT MANUAL IP LAN */}
               <div className="setting-control">
                 <span>PRINTER IP (LAN / WIFI)</span>
                 <input 
@@ -535,11 +531,10 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                   value={settings.printer.printerIp || ''} 
                   onChange={(e) => update('printer', { printerIp: e.target.value, printer: `LAN: ${e.target.value}` })} 
                   placeholder="192.168.1.100" 
-                  style={{ padding: 8, fontSize: 14 }}
+                  style={{ padding: 8, fontSize: 14, color: '#342f2d', background: '#fffdf9', border: '1px solid rgba(0,0,0,.1)' }}
                 />
               </div>
 
-              {/* INPUT MANUAL BLUETOOTH */}
               <div className="setting-control">
                 <span>BLUETOOTH NAME (MANUAL)</span>
                 <input 
@@ -547,7 +542,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                   value={settings.printer.printerBluetooth || ''} 
                   onChange={(e) => update('printer', { printerBluetooth: e.target.value, printer: `BT: ${e.target.value}` })} 
                   placeholder="RPP02N" 
-                  style={{ padding: 8, fontSize: 14 }}
+                  style={{ padding: 8, fontSize: 14, color: '#342f2d', background: '#fffdf9', border: '1px solid rgba(0,0,0,.1)' }}
                 />
               </div>
 
@@ -555,15 +550,9 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <span>PRINTER STATUS</span>
                 <button type="button">{settings.printer.printerOn ? (settings.printer.printer ? 'READY' : 'OFFLINE') : 'OFF'}<b>▼</b></button>
               </div>
-              <div className="setting-control">
-                <span>PAPER SIZE</span>
-                <select value={settings.printer.paperSize} onChange={(e) => update('printer', { paperSize: e.target.value })}>
-                  <option>4 × 6 in</option>
-                  <option>5 × 7 in</option>
-                  <option>A4</option>
-                  <option>Letter</option>
-                </select>
-              </div>
+              
+              {/* 🔧 PAPER SIZE DIHAPUS DARI GLOBAL SETTINGS KARENA PINDAH KE EDIT EVENT */}
+              
               <div className="photobooth-camera-status" style={{ marginBottom: 12 }}><CameraStatusBadge status={cameraHook.status} error={cameraHook.error} /></div>
               <div className="test-buttons">
                 <button type="button" onClick={() => setShowTest(true)}>TEST CAMERA</button>
@@ -889,6 +878,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                       setSettings(next);
                       try {
                         saveAllSettings(next);
+                        console.log('[DeviceMode] saveAllSettings OK. settings.application =', next.application);
                       } catch (err) {
                         console.error('[DeviceMode] saveAllSettings FAILED:', err);
                       }
