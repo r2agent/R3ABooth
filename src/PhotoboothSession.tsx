@@ -1359,44 +1359,19 @@ useEffect(() => {
                     type="button"
                   >
                     <div className="frame-select-thumb">
-                      {frame.image ? (
-                        <img src={frame.image} alt={displayName} style={{ zIndex: frame.showDummyPreview !== false ? 1 : 2 }} />
+                      {/* 🔧 HANYA TAMPILKAN GAMBAR DUMMY (JIKA ADA) ATAU FRAME UTAMA DI SINI */}
+                      {(event.showDummyPreview && event.dummyPreviewImage) ? (
+                        <img src={event.dummyPreviewImage} alt={displayName} />
+                      ) : frame.image ? (
+                        <img src={frame.image} alt={displayName} />
                       ) : (
                         <div className="frame-select-thumb-empty">
                           <ImageIcon size={32} strokeWidth={1} />
                         </div>
                       )}
                       
-                      {/* 🔧 RENDER DUMMY SLOTS BERDASARKAN SETTINGAN FRAME */}
-                      {frame.showDummyPreview !== false && frame.slots.map((slot) => (
-                        <div 
-                          key={slot.id} 
-                          style={{ 
-                            position: 'absolute', 
-                            left: `${slot.x}%`, 
-                            top: `${slot.y}%`, 
-                            width: `${slot.w}%`, 
-                            height: `${slot.h}%`, 
-                            overflow: 'hidden',
-                            zIndex: 2
-                          }}
-                        >
-                          {frame.dummyPreviewImage ? (
-                            <img 
-                              src={frame.dummyPreviewImage} 
-                              alt="Dummy" 
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                            />
-                          ) : (
-                            <div style={{ width: '100%', height: '100%', background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <ImageIcon size={16} color="rgba(255,255,255,0.5)" />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-
-                      <div className="frame-select-thumb-overlay" style={{ zIndex: 3 }} />
-                      <div className="frame-select-thumb-top" style={{ zIndex: 4 }}>
+                      <div className="frame-select-thumb-overlay" />
+                      <div className="frame-select-thumb-top">
                         <span className="frame-select-name">{displayName}</span>
                         {showCount ? (
                           <span className="frame-select-count">{frame.slots.length}×</span>
@@ -1424,11 +1399,20 @@ useEffect(() => {
         <section className="ready-section">
           <div className="ready-frame-preview" style={{ aspectRatio: frameAspect }}>
             {activeFrame?.image ? <img src={activeFrame.image} alt={activeFrame.name} /> : <div className="ready-frame-placeholder"><ImageIcon size={48} strokeWidth={1} /></div>}
-            {allSlots.map((slot) => (
-              <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%` }}>
-                <span>{slot.captureId}</span>
-              </div>
-            ))}
+            {allSlots.map((slot) => {
+              const cap = captureMap.get(slot.captureId);
+              if (cap) return null;
+              return (
+                <div key={slot.id} className="ready-slot-outline" style={{ left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slot.h}%`, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {/* 🔧 TAMPILKAN DUMMY DI SINI SAAT READY */}
+                  {event.showDummyPreview && event.dummyPreviewImage ? (
+                    <img src={event.dummyPreviewImage} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <span>{slot.captureId}</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <div className="ready-info">
             <h2>{activeFrame?.name || 'FRAME'}</h2>
@@ -1558,26 +1542,53 @@ useEffect(() => {
 
               {allSlots.map((slot) => {
                 const cap = captureMap.get(slot.captureId);
-                if (!cap) return null;
                 const isNext = uniqueCaptureIds.indexOf(slot.captureId) === currentCaptureIndex;
-                return (
-                  <img
-                    key={slot.id}
-                    src={cap}
-                    alt={slot.captureId}
-                    style={{
-                      position: 'absolute',
-                      left: `${slot.x}%`,
-                      top: `${slot.y}%`,
-                      width: `${slot.w}%`,
-                      height: `${slot.h}%`,
-                      objectFit: 'cover',
-                      zIndex: 2,
-                      outline: isNext ? '2px solid #ef3f25' : 'none',
-                      outlineOffset: -2,
-                    }}
-                  />
-                );
+                
+                if (cap) {
+                  return (
+                    <img
+                      key={slot.id}
+                      src={cap}
+                      alt={slot.captureId}
+                      style={{
+                        position: 'absolute',
+                        left: `${slot.x}%`,
+                        top: `${slot.y}%`,
+                        width: `${slot.w}%`,
+                        height: `${slot.h}%`,
+                        objectFit: 'cover',
+                        zIndex: 2,
+                        outline: isNext ? '2px solid #ef3f25' : 'none',
+                        outlineOffset: -2,
+                      }}
+                    />
+                  );
+                }
+
+                // 🔧 TAMPILKAN DUMMY DI LIVE JIKA SLOT KOSONG
+                if (event.showDummyPreview && event.dummyPreviewImage) {
+                  return (
+                    <img
+                      key={slot.id}
+                      src={event.dummyPreviewImage}
+                      alt="Dummy"
+                      style={{
+                        position: 'absolute',
+                        left: `${slot.x}%`,
+                        top: `${slot.y}%`,
+                        width: `${slot.w}%`,
+                        height: `${slot.h}%`,
+                        objectFit: 'cover',
+                        zIndex: 2,
+                        outline: isNext ? '2px solid #ef3f25' : 'none',
+                        outlineOffset: -2,
+                        opacity: 0.8
+                      }}
+                    />
+                  );
+                }
+
+                return null;
               })}
               
               {!isReceiptMode && activeFrame?.image ? (
