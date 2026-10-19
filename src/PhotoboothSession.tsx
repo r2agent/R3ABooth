@@ -1360,15 +1360,15 @@ useEffect(() => {
                   >
                     <div className="frame-select-thumb">
                       {frame.image ? (
-                        <img src={frame.image} alt={displayName} style={{ zIndex: frame.showSlotPreview ? 1 : 2 }} />
+                        <img src={frame.image} alt={displayName} style={{ zIndex: frame.showDummyPreview !== false ? 1 : 2 }} />
                       ) : (
                         <div className="frame-select-thumb-empty">
                           <ImageIcon size={32} strokeWidth={1} />
                         </div>
                       )}
                       
-                      {/* 🔧 RENDER DUMMY SLOTS JIKA SHOW SLOT PREVIEW AKTIF */}
-                      {frame.showSlotPreview && frame.slots.map((slot) => (
+                      {/* 🔧 RENDER DUMMY SLOTS BERDASARKAN SETTINGAN FRAME */}
+                      {frame.showDummyPreview !== false && frame.slots.map((slot) => (
                         <div 
                           key={slot.id} 
                           style={{ 
@@ -1377,15 +1377,21 @@ useEffect(() => {
                             top: `${slot.y}%`, 
                             width: `${slot.w}%`, 
                             height: `${slot.h}%`, 
-                            background: 'rgba(0,0,0,0.6)', 
-                            border: '1px solid rgba(255,255,255,0.3)', 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            justifyContent: 'center',
+                            overflow: 'hidden',
                             zIndex: 2
                           }}
                         >
-                          <ImageIcon size={16} color="rgba(255,255,255,0.5)" />
+                          {frame.dummyPreviewImage ? (
+                            <img 
+                              src={frame.dummyPreviewImage} 
+                              alt="Dummy" 
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                            />
+                          ) : (
+                            <div style={{ width: '100%', height: '100%', background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <ImageIcon size={16} color="rgba(255,255,255,0.5)" />
+                            </div>
+                          )}
                         </div>
                       ))}
 

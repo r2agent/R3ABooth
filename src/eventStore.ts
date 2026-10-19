@@ -11,7 +11,8 @@ export type Frame = {
   id: string;
   name: string;
   showPhotoCount?: boolean;
-  showSlotPreview?: boolean; // 🔧 TAMBAHAN UNTUK PREVIEW
+  showDummyPreview?: boolean; // 🔧 PINDAH KE SINI
+  dummyPreviewImage?: string; // 🔧 PINDAH KE SINI
   image: string;
   slotFrameImage?: string;
   photoOffsetX?: number;
@@ -90,7 +91,8 @@ function normalizeFrame(frame: Partial<Frame> | null | undefined, index: number)
     id: typeof frame?.id === 'string' && frame.id ? frame.id : `frm-legacy-${index}`,
     name: typeof frame?.name === 'string' && frame.name ? frame.name : `Frame ${index + 1}`,
     showPhotoCount: frame?.showPhotoCount !== false,
-    showSlotPreview: frame?.showSlotPreview === true, // 🔧 TAMBAHAN
+    showDummyPreview: frame?.showDummyPreview !== false, // 🔧 Default ON jika undefined
+    dummyPreviewImage: typeof frame?.dummyPreviewImage === 'string' ? frame.dummyPreviewImage : '',
     image: typeof frame?.image === 'string' ? frame.image : '',
     slotFrameImage: typeof frame?.slotFrameImage === 'string' ? frame.slotFrameImage : '',
     photoOffsetX: normalizeNumber(frame?.photoOffsetX, 0, -50, 50),
@@ -242,7 +244,8 @@ export function createFrame(name: string, image: string): Frame {
     id: `frm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
     showPhotoCount: true,
-    showSlotPreview: false, // Default mati
+    showDummyPreview: true, // 🔧 Default ON untuk frame baru
+    dummyPreviewImage: '',
     image,
     slotFrameImage: '',
     photoOffsetX: 0,
@@ -272,8 +275,3 @@ export function duplicateSlot(slot: Slot): Slot {
     y: Math.min(slot.y + 5, 100 - slot.h),
   };
 }
-
-/* ============================================================
-   ⚠️ CATATAN PENTING
-   Cloud sync functions dipindah ke './cloudEventSync'.
-   ============================================================ */
