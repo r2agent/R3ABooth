@@ -1642,38 +1642,42 @@ useEffect(() => {
           <div style={{ display: 'flex', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: '40px', flexWrap: 'wrap', maxWidth: '1200px', margin: '0 auto' }}>
             
             {/* KIRI: GAMBAR HASIL FOTO */}
-            <div className="result-preview" style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+            <div className="result-preview" style={{ flex: '0 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <img 
                 src={isReceiptMode && !showPrintPreview && compositeColorUrl ? compositeColorUrl : compositeUrl} 
                 alt="Final result" 
-                style={{ maxHeight: '65vh', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}
+                style={{ maxHeight: '60vh', maxWidth: '100%', objectFit: 'contain', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}
               />
+            </div>
 
+            {/* KANAN: TOMBOL AKSI */}
+            <div className="result-actions" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '220px' }}>
+              
+              {/* 🔧 TOMBOL TOGGLE PREVIEW DIPINDAH KE SINI */}
               {isReceiptMode && compositeColorUrl && (
                 <button 
                   className="result-toggle-preview" 
                   onClick={() => setShowPrintPreview(!showPrintPreview)}
                   style={{
-                    padding: '10px 20px',
+                    padding: '15px 20px',
+                    width: '100%',
+                    fontSize: '14px',
                     background: 'rgba(255,255,255,.1)',
                     color: '#fff',
                     border: '1px solid rgba(255,255,255,.3)',
                     borderRadius: '30px',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '8px',
-                    cursor: 'pointer',
-                    fontSize: '14px'
+                    cursor: 'pointer'
                   }}
                 >
                   <Eye size={18} /> 
                   {showPrintPreview ? 'LIHAT HASIL WARNA' : 'LIHAT HASIL CETAK'}
                 </button>
               )}
-            </div>
 
-            {/* KANAN: TOMBOL AKSI */}
-            <div className="result-actions" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '220px' }}>
               <button className="result-save" onClick={handleSave} disabled={saved || saving} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
                 {saving ? <>PROSES...</> : saved ? <><Check size={18} /> SAVED</> : <><Check size={18} /> SAVE</>}
               </button>
