@@ -7,7 +7,7 @@ import { getAspectRatioValue } from './cameraStore';
 import { FILTERS, getFilterCss, isGlowFilter, applyGlowToCanvas } from './filters';
 import { saveCapture, saveResult, type StoredCapture, type StoredResult } from './storage';
 import { generateQrCode, buildResultPayload, buildDriveResultPayload } from './qrService';
-import { printResult } from './printService';
+import { printResult, buildEscPosTestPrint } from './printService';
 import { getOrCreateNextGuestFolder, type GuestRecord } from './guestStore';
 import { autoUploadToGuestFolder, retryFailedUploads, getUploadStats, type UploadFileEntry } from './uploadService';
 import { buildDriveFolderUrl, getTokenStatus, connectGoogleDrive } from './gdriveService';
@@ -433,7 +433,6 @@ export const PhotoboothSession = ({
     setHealthTick((t) => t + 1);
   }, []);
 
-  // 🔧 UPDATE v1.1.0: v1.1.0 juga termasuk Receipt Mode
   const isReceiptMode = version === 'v2.1.0' || version === 'v1.1.0';
 
   useEffect(() => {
@@ -821,42 +820,35 @@ export const PhotoboothSession = ({
             resetSession();
             setPhase('frame-select');
             break;
-          // ⚡ Phase 1: Test Print
+          // ⚡ Phase 1: Test Print (Text)
           case 'test-print': {
-            pushActivity('Test Print', 'Mencetak halaman test');
+            const paperSize = cmd.payload === '58mm' ? '58mm' : '80mm';
+            pushActivity('Test Print', `Mode: ${paperSize} (thermal text)`);
             void (async () => {
               try {
-                const canvas = document.createElement('canvas');
-                canvas.width = 1200;
-                canvas.height = 1800;
-                const ctx = canvas.getContext('2d')!;
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = '#ef3f25';
-                ctx.font = 'bold 100px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText('TEST PRINT', canvas.width / 2, 300);
-                ctx.fillStyle = '#000';
-                ctx.font = '48px sans-serif';
-                ctx.fillText('R3A BOOTH', canvas.width / 2, 500);
-                ctx.font = '36px sans-serif';
-                ctx.fillText(new Date().toLocaleString('id-ID'), canvas.width / 2, 600);
-                ctx.font = '28px monospace';
-                ctx.fillText(`Device: ${getDeviceId().slice(-8)}`, canvas.width / 2, 700);
-                ctx.font = '22px monospace';
-                ctx.fillText('Printer OK — siap beroperasi', canvas.width / 2, 900);
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-                const ps = event.printerSettings;
-                await printResult({
-                  copies: 1,
-                  paperSize: ps.paperSize || '4 × 6 in',
-                  layout: ps.layout || 'POTRAIT',
-                  dataUrl,
-                  printerName: allSettings.printer.printer || ps.printer,
+                const escpos = buildEscPosTestPrint({
+                  deviceId: getDeviceId(),
+                  version,
+                  paperSize,
+                  appName: 'R3A BOOTH',
                 });
-                pushActivity('Test Print OK', 'Cetak test berhasil');
-              } catch {
-                pushActivity('Test Print FAIL', 'Gagal cetak test');
+
+                const ok = await printResult({
+                  copies: 1,
+                  paperSize,
+                  layout: 'POTRAIT',
+                  dataUrl: '',
+                  printerName: allSettings.printer.printer || 'BT:',
+                  mode: 'text',
+                  textPayload: escpos,
+                });
+
+                pushActivity(
+                  ok ? 'Test Print OK' : 'Test Print FAIL',
+                  ok ? 'ESC/POS text terkirim' : 'Provider gagal',
+                );
+              } catch (err) {
+                pushActivity('Test Print FAIL', err instanceof Error ? err.message : 'Error');
               }
             })();
             break;
@@ -881,7 +873,7 @@ export const PhotoboothSession = ({
       void clearCommand(deviceId);
     });
     return unsubscribe;
-  }, [allSettings.printer.printer, event.printerSettings, pushActivity]);
+  }, [allSettings.printer.printer, event.printerSettings, pushActivity, version]);
 
   const handleLogoClick = useCallback(() => {
     logoClickCount.current += 1;
@@ -969,7 +961,6 @@ export const PhotoboothSession = ({
   }, [resetSession, allSettings.googleDrive, event.id]);
 
   const handleSelectFrame = useCallback((index: number) => {
-    // 🔧 UPDATE v1.1.0: v1.1.0 menggunakan IG Gate
     if (version === 'v1.0.0' || version === 'v1.1.0') {
       const gateEnabled = allSettings.system.igGateEnabled !== false;
       if (gateEnabled) {
@@ -1231,7 +1222,6 @@ export const PhotoboothSession = ({
       } catch { /* ignore */ }
 
       pushActivity('Session Saved', `${slotPhotosColor.length} foto · ${uploadSuccessCount} upload`);
-
       setSaved(true);
     } catch { /* ignore */ } finally {
       setSaving(false);
@@ -1280,24 +1270,39 @@ export const PhotoboothSession = ({
     } catch { setDriveQrError(true); }
   }, [currentGuest]);
 
+  // 🔧 FIX: Handle Print khusus menyesuaikan versi B&W (v1.1.0/v2.1.0)
   const handlePrint = useCallback(async () => {
     if (!compositeUrl || printing) return;
     setPrinting(true);
     try {
       const ps = event.printerSettings;
       const copies = Math.max(1, Math.min(5, ps.copies || 1));
-      await printResult({
+
+      // Pastikan yang dicetak adalah compositeUrl (di Receipt mode ini sudah B&W)
+      const printImageUrl = compositeUrl;
+
+      const ok = await printResult({
         copies,
         paperSize: ps.paperSize || '4 × 6 in',
         layout: ps.layout || 'POTRAIT',
-        dataUrl: compositeUrl, 
+        dataUrl: printImageUrl, 
         printerName: allSettings.printer.printer || ps.printer,
       });
-      setPrinted(true);
-      pushActivity('Print OK', `${copies} copy`);
-    } catch { /* ignore */ }
+
+      if (ok) {
+        setPrinted(true);
+        pushActivity(
+          'Print OK', 
+          `${copies} copy · ${isReceiptMode ? 'Hitam Putih' : 'Warna Biasa'}`
+        );
+      } else {
+        pushActivity('Print FAIL', 'Provider gagal');
+      }
+    } catch (err) {
+      pushActivity('Print FAIL', err instanceof Error ? err.message : 'Gagal mencetak');
+    }
     setPrinting(false);
-  }, [compositeUrl, printing, event.printerSettings, allSettings.printer, pushActivity]);
+  }, [compositeUrl, printing, event.printerSettings, allSettings.printer, isReceiptMode, pushActivity]);
 
   const handleBackToFrameSelect = useCallback(() => {
     resetSession();
@@ -1499,7 +1504,7 @@ export const PhotoboothSession = ({
     };
   }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached, isReceiptMode]);
 
-  // ⚡ Phase 1: Overlays (Maintenance + Lock) — rendered di semua screen
+  // ⚡ Phase 1: Overlays (Maintenance + Lock)
   const overlayJSX = (
     <>
       {maintenanceMode ? (
@@ -1951,7 +1956,7 @@ export const PhotoboothSession = ({
               {/* 🔧 TOMBOL PRINT BERDASARKAN SETTINGAN GLOBAL SAJA */}
               {allSettings.display.showPrintButton !== false ? (
                 <button className="result-print" onClick={handlePrint} disabled={!saved || saving || printing || printed} type="button" style={{ padding: '15px 20px', width: '100%', fontSize: '14px' }}>
-                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK' : 'PRINT')}
+                  <Printer size={18} /> {printing ? 'PRINTING...' : printed ? 'PRINTED' : (isReceiptMode ? 'CETAK STRUK (B&W)' : 'PRINT FOTO')}
                 </button>
               ) : null}
               
