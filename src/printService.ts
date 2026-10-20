@@ -30,6 +30,7 @@ function isNativePlatform(): boolean {
   return !!w.Capacitor?.isNativePlatform?.();
 }
 
+// Helper: String ke Base64 yang aman untuk karakter kontrol (ESC/POS)
 function safeBase64Encode(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
@@ -85,12 +86,11 @@ const RAWBT_PROVIDER: PrintProvider = {
       const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
       const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
       
-      // ⚡ GAMBAR WAJIB PAKAI INTENT SCHEME AGAR DIKONVERSI KE BITMAP
+      // ⚡ GAMBAR WAJIB PAKAI INTENT SCHEME
+      // window.location.href akan ditangkap oleh Capacitor WebView
       const intentUrl = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
       
-      // Gunakan AppLauncher via dynamic import (Anti-Block WebView)
-      const { AppLauncher } = await import('@capacitor/app-launcher');
-      await AppLauncher.openUrl({ url: intentUrl });
+      window.location.href = intentUrl;
       
       // Tunggu user selesai print di aplikasi RawBT
       await new Promise((r) => setTimeout(r, 3000));
@@ -114,7 +114,7 @@ const NETWORK_PROVIDER: PrintProvider = {
 
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
-  isAvailable: async () => true, // Fallback untuk Web
+  isAvailable: async () => true,
   print: async (opts) => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
