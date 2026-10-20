@@ -40,14 +40,59 @@ function safeBase64Encode(str: string): string {
   return btoa(binary);
 }
 
+// ⚡ FUNGSI KRUSIAL: Resize gambar agar tidak kena limit memori / kepotong
+function resizeImageForThermal(dataUrl: string, paperSize: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const targetWidth = paperSize.includes('58') ? 384 : 576; // 58mm = 384px, 80mm = 576px
+      const scale = targetWidth / img.width;
+      canvas.width = targetWidth;
+      canvas.height = img.height * scale;
+      
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      
+      // Kualitas 0.7 cukup tajam untuk thermal & ukurannya kecil
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 /* ============ NETWORK (LAN/IP) ============ */
 const NETWORK_PROVIDER: PrintProvider = {
   name: 'network',
   isAvailable: async (opts) => !!opts.printerName?.startsWith('LAN:'),
-  print: async () => {
-    console.warn('[Print] LAN print belum diimplementasi sempurna');
-    return false;
-  },
+  print: async (opts) => {
+    const ip = opts.printerName?.replace('LAN:', '').trim();
+    if (!ip) return false;
+
+    try {
+      console.log(`[Print] Mengirim gambar ke IP ${ip} (Port 9100)...`);
+      const res = await fetch(opts.dataUrl);
+      const blob = await res.blob();
+      
+      const response = await fetch(`http://${ip}:9100/print`, {
+        method: 'POST',
+        body: blob,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+
+      if (response.ok) {
+        console.log(`[Print] ✅ Network Print Berhasil`);
+        return true;
+      }
+      throw new Error(`Printer IP HTTP Status: ${response.status}`);
+    } catch (err) {
+      console.error(`[Print] ❌ Gagal Network Print:`, err);
+      return false;
+    }
+  }
 };
 
 /* ============ RAWTBT (BT Classic via RawBT app) ============ */
@@ -60,40 +105,35 @@ const RAWBT_PROVIDER: PrintProvider = {
     try {
       console.log(`[Print] RawBT → mode=${opts.mode || 'image'}`);
 
-      let url = '';
-
-      // === MODE TEXT (Test Print) ===
       if (opts.mode === 'text' && opts.textPayload) {
+        // Mode Text (Test Print ESC/POS)
         const base64Data = safeBase64Encode(opts.textPayload);
-        url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
-      } 
-      // === MODE IMAGE (Cetak Foto / Struk) ===
-      else {
+        window.location.href = `rawbt:base64,${base64Data}`;
+      } else {
+        // Mode Image (Foto / Struk)
         if (!opts.dataUrl) return false;
-        const base64Data = opts.dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-        url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+        
+        console.log('[Print] Resizing image for thermal...');
+        const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
+        const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+        
+        // ⚡ MENGGUNAKAN SKEMA YANG BERHASIL DI HP KAMU
+        window.location.href = `rawbt:base64,${base64Data}`;
       }
-
-      // ⚡ FIX VERCEL: Gunakan dynamic import agar Web build tidak error
-      const { AppLauncher } = await import('@capacitor/app-launcher');
-      const result = await AppLauncher.openUrl({ url });
       
-      console.log('[Print] AppLauncher result:', result);
-      
-      // Beri jeda sebentar agar RawBT sempat loading
-      await new Promise((r) => setTimeout(r, 2000));
-      return result.completed; 
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      return true;
     } catch (err) {
-      console.error(`[Print] ❌ Gagal membuka RawBT:`, err);
+      console.error(`[Print] ❌ Gagal RawBT:`, err);
       return false;
     }
-  },
+  }
 };
 
-/* ============ BROWSER (Fallback untuk Web/Desktop) ============ */
+/* ============ BROWSER (Fallback) ============ */
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
-  isAvailable: async (opts) => !opts.printerName,
+  isAvailable: async (opts) => !opts.printerName || !isNativePlatform(),
   print: async (opts): Promise<boolean> => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
@@ -104,12 +144,8 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
         doc.open();
         doc.write(`
           <html>
-            <head><title>R3A Booth Print</title>
-              <style>
-                @page { size: auto; margin: 0; }
-                body { margin:0; padding:0; display:flex; align-items:center; justify-content:center; height:100vh; overflow:hidden; }
-                img { max-width:100%; max-height:100%; object-fit:contain; }
-              </style>
+            <head><title>Print</title>
+              <style>@page { size: auto; margin: 0; } body { margin:0; padding:0; text-align:center; }</style>
             </head>
             <body><img src="${opts.dataUrl}" /></body>
           </html>
@@ -131,7 +167,6 @@ registerProvider(NETWORK_PROVIDER);
 registerProvider(RAWBT_PROVIDER);
 registerProvider(BROWSER_PRINT_PROVIDER);
 
-/* ============ PUBLIC API ============ */
 export async function printResult(opts: PrintOptions): Promise<boolean> {
   let selectedProvider: PrintProvider | null = null;
 
@@ -147,18 +182,21 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
     return false;
   }
 
-  console.log(`[Print] Provider: ${selectedProvider.name} (Target: ${opts.printerName || 'default'})`);
+  console.log(`[Print] Menggunakan provider: ${selectedProvider.name} (Target: ${opts.printerName})`);
 
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
   for (let i = 0; i < copies; i++) {
-    console.log(`[Print] Copy ${i + 1}/${copies}...`);
+    console.log(`[Print] Mencetak copy ke-${i + 1} dari ${copies}...`);
     const ok = await selectedProvider.print(opts);
     if (!ok) success = false;
-    if (i < copies - 1) await new Promise((r) => setTimeout(r, 1500));
+    
+    if (i < copies - 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+    }
   }
-
+  
   return success;
 }
 
@@ -176,7 +214,7 @@ export function buildEscPosTestPrint(opts: {
 
   const line = '-'.repeat(W);
   const center = (t: string) => {
-    const cleanT = t.substring(0, W);
+    const cleanT = t.substring(0, W); 
     const pad = Math.max(0, Math.floor((W - cleanT.length) / 2));
     return ' '.repeat(pad) + cleanT;
   };
