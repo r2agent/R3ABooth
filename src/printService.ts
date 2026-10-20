@@ -30,7 +30,6 @@ function isNativePlatform(): boolean {
   return !!w.Capacitor?.isNativePlatform?.();
 }
 
-// Helper: String ke Base64 yang aman untuk karakter kontrol (ESC/POS)
 function safeBase64Encode(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
@@ -40,13 +39,13 @@ function safeBase64Encode(str: string): string {
   return btoa(binary);
 }
 
-// ⚡ FUNGSI KRUSIAL: Resize gambar agar tidak kena limit memori / kepotong
+// Resize gambar agar tidak crash (limit memori Android Intent)
 function resizeImageForThermal(dataUrl: string, paperSize: string): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      const targetWidth = paperSize.includes('58') ? 384 : 576; // 58mm = 384px, 80mm = 576px
+      const targetWidth = paperSize.includes('58') ? 384 : 576;
       const scale = targetWidth / img.width;
       canvas.width = targetWidth;
       canvas.height = img.height * scale;
@@ -56,7 +55,6 @@ function resizeImageForThermal(dataUrl: string, paperSize: string): Promise<stri
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       
-      // Kualitas 0.7 cukup tajam untuk thermal & ukurannya kecil
       resolve(canvas.toDataURL('image/jpeg', 0.7));
     };
     img.onerror = () => resolve(dataUrl);
@@ -64,38 +62,7 @@ function resizeImageForThermal(dataUrl: string, paperSize: string): Promise<stri
   });
 }
 
-/* ============ NETWORK (LAN/IP) ============ */
-const NETWORK_PROVIDER: PrintProvider = {
-  name: 'network',
-  isAvailable: async (opts) => !!opts.printerName?.startsWith('LAN:'),
-  print: async (opts) => {
-    const ip = opts.printerName?.replace('LAN:', '').trim();
-    if (!ip) return false;
-
-    try {
-      console.log(`[Print] Mengirim gambar ke IP ${ip} (Port 9100)...`);
-      const res = await fetch(opts.dataUrl);
-      const blob = await res.blob();
-      
-      const response = await fetch(`http://${ip}:9100/print`, {
-        method: 'POST',
-        body: blob,
-        headers: { 'Content-Type': 'application/octet-stream' },
-      });
-
-      if (response.ok) {
-        console.log(`[Print] ✅ Network Print Berhasil`);
-        return true;
-      }
-      throw new Error(`Printer IP HTTP Status: ${response.status}`);
-    } catch (err) {
-      console.error(`[Print] ❌ Gagal Network Print:`, err);
-      return false;
-    }
-  }
-};
-
-/* ============ RAWTBT (BT Classic via RawBT app) ============ */
+/* ============ RAWTBT ============ */
 const RAWBT_PROVIDER: PrintProvider = {
   name: 'rawbt',
   isAvailable: async (opts) => {
@@ -103,25 +70,30 @@ const RAWBT_PROVIDER: PrintProvider = {
   },
   print: async (opts) => {
     try {
-      console.log(`[Print] RawBT → mode=${opts.mode || 'image'}`);
-
       if (opts.mode === 'text' && opts.textPayload) {
-        // Mode Text (Test Print ESC/POS)
+        // === MODE TEXT (Test Print ESC/POS) ===
         const base64Data = safeBase64Encode(opts.textPayload);
+        // Teks pakai skema rawbt:
         window.location.href = `rawbt:base64,${base64Data}`;
-      } else {
-        // Mode Image (Foto / Struk)
-        if (!opts.dataUrl) return false;
-        
-        console.log('[Print] Resizing image for thermal...');
-        const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
-        const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-        
-        // ⚡ MENGGUNAKAN SKEMA YANG BERHASIL DI HP KAMU
-        window.location.href = `rawbt:base64,${base64Data}`;
-      }
+        await new Promise((r) => setTimeout(r, 2000));
+        return true;
+      } 
       
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // === MODE IMAGE (Foto / Struk) ===
+      if (!opts.dataUrl) return false;
+      
+      const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
+      const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+      
+      // ⚡ GAMBAR WAJIB PAKAI INTENT SCHEME AGAR DIKONVERSI KE BITMAP
+      const intentUrl = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+      
+      // Gunakan AppLauncher via dynamic import (Anti-Block WebView)
+      const { AppLauncher } = await import('@capacitor/app-launcher');
+      await AppLauncher.openUrl({ url: intentUrl });
+      
+      // Tunggu user selesai print di aplikasi RawBT
+      await new Promise((r) => setTimeout(r, 3000));
       return true;
     } catch (err) {
       console.error(`[Print] ❌ Gagal RawBT:`, err);
@@ -130,11 +102,20 @@ const RAWBT_PROVIDER: PrintProvider = {
   }
 };
 
-/* ============ BROWSER (Fallback) ============ */
+/* ============ NETWORK & BROWSER ============ */
+const NETWORK_PROVIDER: PrintProvider = {
+  name: 'network',
+  isAvailable: async (opts) => !!opts.printerName?.startsWith('LAN:'),
+  print: async () => {
+    console.warn('[Print] LAN belum diimplementasi');
+    return false;
+  },
+};
+
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
-  isAvailable: async (opts) => !opts.printerName || !isNativePlatform(),
-  print: async (opts): Promise<boolean> => {
+  isAvailable: async () => true, // Fallback untuk Web
+  print: async (opts) => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
@@ -177,30 +158,19 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
     }
   }
 
-  if (!selectedProvider) {
-    console.warn('[Print] Tidak ada provider yang tersedia untuk printer ini.');
-    return false;
-  }
-
-  console.log(`[Print] Menggunakan provider: ${selectedProvider.name} (Target: ${opts.printerName})`);
+  if (!selectedProvider) return false;
 
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
   for (let i = 0; i < copies; i++) {
-    console.log(`[Print] Mencetak copy ke-${i + 1} dari ${copies}...`);
     const ok = await selectedProvider.print(opts);
     if (!ok) success = false;
-    
-    if (i < copies - 1) {
-      await new Promise((r) => setTimeout(r, 1500));
-    }
+    if (i < copies - 1) await new Promise((r) => setTimeout(r, 1500));
   }
-  
   return success;
 }
 
-/* ============ ESC/POS TEXT BUILDER (MURNI ASCII) ============ */
 export function buildEscPosTestPrint(opts: {
   deviceId: string;
   version: string;
@@ -209,7 +179,6 @@ export function buildEscPosTestPrint(opts: {
 }): string {
   const { deviceId, version, paperSize, appName = 'R3A BOOTH' } = opts;
   const now = new Date().toLocaleString('id-ID');
-  
   const W = paperSize === '58mm' ? 32 : 48; 
 
   const line = '-'.repeat(W);
@@ -220,23 +189,16 @@ export function buildEscPosTestPrint(opts: {
   };
 
   return [
-    '\x1B\x40',                 
-    '\x1B\x61\x01',             
-    '\x1B\x21\x11',             
+    '\x1B\x40', '\x1B\x61\x01', '\x1B\x21\x11',
     center('TEST PRINT') + '\n',
-    '\x1B\x21\x00',             
-    center(appName) + '\n',
-    '\x1B\x61\x00',             
-    line + '\n',
+    '\x1B\x21\x00', center(appName) + '\n',
+    '\x1B\x61\x00', line + '\n',
     `Device  : ${deviceId.slice(-8)}\n`,
     `Time    : ${now}\n`,
     `Paper   : ${paperSize}\n`,
     `Version : ${version}\n`,
-    line + '\n',
-    '\x1B\x61\x01',             
-    'PRINTER OK\n',
-    'siap beroperasi\n',
-    '\n\n\n',                   
-    '\x1D\x56\x00',             
+    line + '\n', '\x1B\x61\x01',
+    'PRINTER OK\n', 'siap beroperasi\n',
+    '\n\n\n', '\x1D\x56\x00',
   ].join('');
 }
