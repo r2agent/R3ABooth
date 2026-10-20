@@ -1,5 +1,5 @@
 /* ============================================================
-   PRINT SERVICE — NATIVE BLUETOOTH + RAWBT FALLBACK
+   PRINT SERVICE — NATIVE BLUETOOTH (FIXED DELAY & NO CUT)
    ============================================================ */
 
 import { BluetoothSerial } from '@awesome-cordova-plugins/bluetooth-serial';
@@ -41,15 +41,8 @@ function safeBase64Encode(str: string): string {
   return btoa(binary);
 }
 
-// =========================================================================
-// FUNGSI 1: KONVERSI TEKS KE ESC/POS (Untuk Test Print)
-// =========================================================================
-function buildEscPosTestPrint(opts: {
-  deviceId: string;
-  version: string;
-  paperSize: '58mm' | '80mm';
-  appName?: string;
-}): string {
+// Fungsi Test Print Teks
+function buildEscPosTestPrint(opts: any): string {
   const { deviceId, version, paperSize, appName = 'R3A BOOTH' } = opts;
   const now = new Date().toLocaleString('id-ID');
   const W = paperSize === '58mm' ? 32 : 48; 
@@ -77,14 +70,12 @@ function buildEscPosTestPrint(opts: {
     '\x1B\x61\x01',             
     'PRINTER OK\n',
     'siap beroperasi\n',
-    '\n\n\n',                   
-    '\x1D\x56\x00',             
+    '\n\n\n',
+    // ⚡ PERINTAH CUT DIHAPUS DULU BIAR GAK HANG
   ].join('');
 }
 
-// =========================================================================
-// FUNGSI 2: KONVERSI GAMBAR JPG KE ESC/POS BITMAP
-// =========================================================================
+// Fungsi Konversi Gambar
 async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number = 576): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -125,14 +116,13 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
           command += String.fromCharCode(byte);
         }
       }
-      command += '\n\n\n\x1D\x56\x00'; 
+      command += '\n\n\n'; 
       resolve(command);
     };
     img.src = dataUrl;
   });
 }
 
-/* ============ NATIVE BLUETOOTH PROVIDER ============ */
 const NATIVE_BT_PROVIDER: PrintProvider = {
   name: 'native-bt',
   isAvailable: async (opts) => {
@@ -142,32 +132,24 @@ const NATIVE_BT_PROVIDER: PrintProvider = {
     try {
       if (!BluetoothSerial) throw new Error('Plugin Bluetooth tidak terdeteksi.');
 
-      // 1. Nyalakan BT jika mati
       const isEnabled = await BluetoothSerial.isEnabled();
       if (!isEnabled) {
         await BluetoothSerial.enable();
         await new Promise(r => setTimeout(r, 1000)); 
       }
 
-      // 2. Cari MAC Address dari Printer yang sudah di-pair
       const printerId = opts.printerName?.replace('BT:', '').trim() || '';
-      console.log(`[Print] Mencari printer: ${printerId}`);
-      
       const devices = await BluetoothSerial.list();
+      
       const target = devices.find(d => 
         (d.name && d.name.toLowerCase().includes(printerId.toLowerCase())) || 
         d.address === printerId
       );
 
-      if (!target) {
-        throw new Error(`Printer "${printerId}" tidak ditemukan di daftar Bluetooth HP. Pastikan sudah di-Pair.`);
-      }
+      if (!target) throw new Error(`Printer "${printerId}" tidak ditemukan.`);
 
-      // 3. Connect pakai MAC Address (bukan nama)
-      console.log(`[Print] Menghubungkan ke ${target.name} (${target.address})...`);
       await BluetoothSerial.connect(target.address);
       
-      // 4. Siapkan Data
       let dataToWrite = '';
       if (opts.mode === 'text' && opts.textPayload) {
         dataToWrite = opts.textPayload;
@@ -177,24 +159,21 @@ const NATIVE_BT_PROVIDER: PrintProvider = {
         dataToWrite = await convertImageToEscPosBitmap(opts.dataUrl, targetW);
       }
 
-      // 5. Kirim Data
-      console.log('[Print] Mengirim data...');
       await BluetoothSerial.write(dataToWrite);
-
-      // 6. Disconnect
-      await new Promise(r => setTimeout(r, 1000));
-      await BluetoothSerial.disconnect();
       
-      console.log('[Print] ✅ Sukses!');
+      // ⚡ FIX: Kasih waktu printer buat mikir dan mencetak (3 detik)
+      console.log('[Print] Menunggu printer mencetak...');
+      await new Promise(r => setTimeout(r, 3000)); 
+      
+      await BluetoothSerial.disconnect();
       return true;
     } catch (err) {
       console.error(`[Print] ❌ Error Native BT:`, err);
-      throw err; // Lempar error agar ditangkap UI
+      throw err; 
     }
   }
 };
 
-// (Fallback RawBT)
 const RAWBT_PROVIDER: PrintProvider = {
   name: 'rawbt',
   isAvailable: async (opts) => isNativePlatform() && !!opts.printerName?.startsWith('BT:'),
@@ -215,12 +194,10 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
   print: async () => false,
 };
 
-// DAFTARKAN PROVIDER
 registerProvider(NATIVE_BT_PROVIDER);
 registerProvider(RAWBT_PROVIDER);
 registerProvider(BROWSER_PRINT_PROVIDER);
 
-/* ============ PUBLIC API ============ */
 export async function printResult(opts: PrintOptions): Promise<boolean> {
   let selectedProvider: PrintProvider | null = null;
 
