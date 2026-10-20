@@ -551,8 +551,6 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <button type="button">{settings.printer.printerOn ? (settings.printer.printer ? 'READY' : 'OFFLINE') : 'OFF'}<b>▼</b></button>
               </div>
               
-              {/* 🔧 PAPER SIZE DIHAPUS DARI GLOBAL SETTINGS KARENA PINDAH KE EDIT EVENT */}
-              
               <div className="photobooth-camera-status" style={{ marginBottom: 12 }}><CameraStatusBadge status={cameraHook.status} error={cameraHook.error} /></div>
               <div className="test-buttons">
                 <button type="button" onClick={() => setShowTest(true)}>TEST CAMERA</button>
@@ -1096,8 +1094,9 @@ function App() {
   useEffect(() => {
     const onHash = () => {
       const h = window.location.hash;
-      if (h === '#operator' && window.location.pathname !== '/') {
-        window.history.replaceState({}, '', `/#operator`);
+      // ⚡ Phase 2: Support #operator dan #operator/DEVICE_ID
+      if (h.startsWith('#operator') && window.location.pathname !== '/') {
+        window.history.replaceState({}, '', `/${h}`);
         setUrlSlug('');
         setCloudEvent(null);
         setActiveEvent(null);
@@ -1200,7 +1199,7 @@ function App() {
     screensaverTimerRef.current = setInterval(() => {
       const now = Date.now();
       if (now - lastActivityRef.current < timeoutMs) return;
-      if (typeof window !== 'undefined' && window.location.hash === '#operator') return;
+      if (typeof window !== 'undefined' && window.location.hash.startsWith('#operator')) return;
       if (screenRef.current === 'photobooth-session') {
         if (photoboothPhaseRef.current !== 'frame-select') return;
       }
@@ -1258,10 +1257,14 @@ function App() {
     },
   };
 
-  if (hash === '#operator') {
+  // ⚡ Phase 2: Support #operator DAN #operator/DEVICE_ID (Secondary Admin Link)
+  if (hash.startsWith('#operator')) {
+    const focusDeviceId =
+      hash.replace(/^#operator\/?/, '').split('/')[0] || undefined;
     return (
       <OperatorDashboard
         allSettings={settings}
+        focusDeviceId={focusDeviceId}
         onClose={() => {
           window.history.pushState({}, '', '/');
           setUrlSlug('');

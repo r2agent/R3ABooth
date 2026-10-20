@@ -14,6 +14,23 @@ import {
 import { getFirebaseDb, isFirebaseConfigured } from './firebaseConfig';
 import { getDeviceInfo } from './deviceInfo';
 
+/* ---------- ACTIVITY & ALERT TYPES (BARU) ---------- */
+export type AlertLevel = 'info' | 'warn' | 'error';
+
+export type AlertItem = {
+  id: string;
+  level: AlertLevel;
+  message: string;
+  time: number;
+};
+
+export type ActivityItem = {
+  id: string;
+  action: string;
+  detail?: string;
+  time: number;
+};
+
 /* ---------- TYPE ---------- */
 export type TabletStatus = {
   deviceId: string;
@@ -41,7 +58,17 @@ export type TabletStatus = {
   failedCount: number;
   todaySessionCount: number;
   todayPhotoCount: number;
-  qrHistory?: { id: string; url: string; type: string; time: number }[]; // ⚡ BARU
+  qrHistory?: { id: string; url: string; type: string; time: number }[];
+  // ⚡ BARU — Phase 1-3
+  batteryLevel?: number;       // 0-100
+  batteryCharging?: boolean;
+  storageUsage?: number;       // bytes
+  storageQuota?: number;       // bytes
+  maintenanceMode?: boolean;
+  locked?: boolean;
+  appVersion?: string;
+  alerts?: AlertItem[];
+  activityLog?: ActivityItem[];
 };
 
 /* ---------- COMMAND TYPE ---------- */
@@ -55,13 +82,41 @@ export type CommandType =
   | 'reconnect-drive'
   | 'force-fullscreen'
   | 'refresh-token'
-  | 'rename-device';
+  | 'rename-device'
+  // ⚡ BARU — Phase 1-3
+  | 'maintenance-on'
+  | 'maintenance-off'
+  | 'force-reset'
+  | 'lock-screen'
+  | 'unlock-screen'
+  | 'test-print'
+  | 'remote-frame-update'
+  | 'switch-version';
 
 export type DeviceCommand = {
   type: CommandType;
   issuedAt: number;
   payload?: string;
 };
+
+/* ---------- ACTIVITY & ALERT HELPERS (BARU) ---------- */
+export function makeActivity(action: string, detail?: string): ActivityItem {
+  return {
+    id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    action,
+    detail,
+    time: Date.now(),
+  };
+}
+
+export function makeAlert(level: AlertLevel, message: string): AlertItem {
+  return {
+    id: `alert-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    level,
+    message,
+    time: Date.now(),
+  };
+}
 
 /* ---------- DEVICE ID ---------- */
 export function getDeviceId(): string {
@@ -140,6 +195,16 @@ export async function writeStatus(partial: Partial<TabletStatus>): Promise<void>
       todaySessionCount: partial.todaySessionCount ?? 0,
       todayPhotoCount: partial.todayPhotoCount ?? 0,
       qrHistory: partial.qrHistory ?? [],
+      // ⚡ BARU
+      batteryLevel: partial.batteryLevel ?? 0,
+      batteryCharging: partial.batteryCharging ?? false,
+      storageUsage: partial.storageUsage ?? 0,
+      storageQuota: partial.storageQuota ?? 0,
+      maintenanceMode: partial.maintenanceMode ?? false,
+      locked: partial.locked ?? false,
+      appVersion: partial.appVersion ?? '',
+      alerts: partial.alerts ?? [],
+      activityLog: partial.activityLog ?? [],
     };
 
     await set(ref(db, statusPath(deviceId)), status);
@@ -180,7 +245,16 @@ export function markOfflineOnDisconnect(): void {
       failedCount: 0,
       todaySessionCount: 0,
       todayPhotoCount: 0,
-      qrHistory: [], // Biarkan kosong saat offline
+      qrHistory: [],
+      batteryLevel: 0,
+      batteryCharging: false,
+      storageUsage: 0,
+      storageQuota: 0,
+      maintenanceMode: false,
+      locked: false,
+      appVersion: '',
+      alerts: [],
+      activityLog: [],
     });
   } catch { /* silent fail */ }
 }
@@ -214,7 +288,7 @@ export async function clearStatus(): Promise<void> {
   } catch { /* silent fail */ }
 }
 
-/* ---------- DELETE DEVICE (Khusus Operator) ---------- */
+/* ---------- DELETE DEVICE ---------- */
 export async function deleteDevice(deviceId: string): Promise<boolean> {
   if (!isFirebaseConfigured()) return false;
   try {
@@ -287,13 +361,11 @@ export async function getDriveQuota(): Promise<{ usage: number; limit: number }>
   try {
     const token = await getValidTokenCached();
     if (!token) return { usage: 0, limit: 0 };
-
     const res = await fetch(
       'https://www.googleapis.com/drive/v3/about?fields=storageQuota',
       { headers: { Authorization: `Bearer ${token}` } },
     );
     if (!res.ok) return { usage: 0, limit: 0 };
-
     const data = await res.json() as {
       storageQuota?: { usage?: string; limit?: string };
     };
@@ -320,9 +392,8 @@ async function getValidTokenCached(): Promise<string | null> {
 export function getServerTimestamp() {
   if (!isFirebaseConfigured()) return null;
   try {
-    const db = getFirebaseDb();
+    getFirebaseDb();
     return serverTimestamp();
-    void db;
   } catch {
     return null;
   }

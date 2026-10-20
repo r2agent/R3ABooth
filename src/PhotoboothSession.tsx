@@ -1,6 +1,6 @@
 import { QRISGate } from './QRISGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key, Eye } from 'lucide-react';
+import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key, Eye, Lock, Wrench } from 'lucide-react';
 import { useCamera } from './useCamera';
 import { CameraPreview, CameraStatusBadge, errorMessages } from './cameraUi';
 import { getAspectRatioValue } from './cameraStore';
@@ -22,12 +22,17 @@ import {
   clearCommand,
   getDriveQuota,
   setDeviceName,
+  makeActivity,
+  makeAlert,
+  type AlertItem,
+  type ActivityItem,
+  type AlertLevel,
 } from './statusSync';
 import type { CameraSettings } from './cameraStore';
 import type { Frame, R3aEvent, Slot } from './eventStore';
 import type { AllSettings } from './settingsStore';
 import { IGFollowGate } from './IGFollowGate';
-import { loadAppVersion } from './versionStore';
+import { loadAppVersion, saveAppVersion, type AppVersion } from './versionStore';
 import { saveFileFromDataUrl } from './fileSaver';
 
 const igGateImage = '/ig-gate.jpg';
@@ -398,8 +403,36 @@ export const PhotoboothSession = ({
   const [idleWarning, setIdleWarning] = useState(0);
   const [showQRISGate, setShowQRISGate] = useState(false);
 
+  // ⚡ Phase 1-3: maintenance, lock, health
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [batteryLevel, setBatteryLevel] = useState(100);
+  const [batteryCharging, setBatteryCharging] = useState(false);
+  const [storageUsage, setStorageUsage] = useState(0);
+  const [storageQuota, setStorageQuota] = useState(0);
+  const activityLogRef = useRef<ActivityItem[]>([]);
+  const alertsRef = useRef<AlertItem[]>([]);
+  const [healthTick, setHealthTick] = useState(0);
+
   const version = loadAppVersion();
-  
+
+  const pushActivity = useCallback((action: string, detail?: string) => {
+    activityLogRef.current = [
+      makeActivity(action, detail),
+      ...activityLogRef.current,
+    ].slice(0, 30);
+    setHealthTick((t) => t + 1);
+  }, []);
+
+  const pushAlert = useCallback((level: AlertLevel, message: string) => {
+    if (alertsRef.current.some((a) => a.message === message)) return;
+    alertsRef.current = [
+      makeAlert(level, message),
+      ...alertsRef.current,
+    ].slice(0, 15);
+    setHealthTick((t) => t + 1);
+  }, []);
+
   // 🔧 UPDATE v1.1.0: v1.1.0 juga termasuk Receipt Mode
   const isReceiptMode = version === 'v2.1.0' || version === 'v1.1.0';
 
@@ -457,61 +490,61 @@ export const PhotoboothSession = ({
       host.remove();
     };
   }, [pendingFullscreen]);
-  
-useEffect(() => {
-  if (phase !== 'frame-select') return;
-  const el = frameGridRef.current;
-  if (!el) return;
 
-  const handleWheel = (e: WheelEvent) => {
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+  useEffect(() => {
+    if (phase !== 'frame-select') return;
+    const el = frameGridRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+
+    let isDown = false;
+    let startX = 0;
+    let scrollStart = 0;
+
+    const handleMouseDown = (e: MouseEvent) => {
+      isDown = true;
+      el.style.cursor = 'grabbing';
+      startX = e.pageX - el.offsetLeft;
+      scrollStart = el.scrollLeft;
+    };
+    const handleMouseUp = () => {
+      isDown = false;
+      el.style.cursor = 'grab';
+    };
+    const handleMouseLeave = () => {
+      isDown = false;
+      el.style.cursor = 'grab';
+    };
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDown) return;
       e.preventDefault();
-      el.scrollLeft += e.deltaY;
-    }
-  };
+      const x = e.pageX - el.offsetLeft;
+      const walk = (x - startX) * 1.2;
+      el.scrollLeft = scrollStart - walk;
+    };
 
-  let isDown = false;
-  let startX = 0;
-  let scrollStart = 0;
-
-  const handleMouseDown = (e: MouseEvent) => {
-    isDown = true;
-    el.style.cursor = 'grabbing';
-    startX = e.pageX - el.offsetLeft;
-    scrollStart = el.scrollLeft;
-  };
-  const handleMouseUp = () => {
-    isDown = false;
     el.style.cursor = 'grab';
-  };
-  const handleMouseLeave = () => {
-    isDown = false;
-    el.style.cursor = 'grab';
-  };
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isDown) return;
-    e.preventDefault();
-    const x = e.pageX - el.offsetLeft;
-    const walk = (x - startX) * 1.2;
-    el.scrollLeft = scrollStart - walk;
-  };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    el.addEventListener('mousedown', handleMouseDown);
+    el.addEventListener('mouseup', handleMouseUp);
+    el.addEventListener('mouseleave', handleMouseLeave);
+    el.addEventListener('mousemove', handleMouseMove);
 
-  el.style.cursor = 'grab';
-  el.addEventListener('wheel', handleWheel, { passive: false });
-  el.addEventListener('mousedown', handleMouseDown);
-  el.addEventListener('mouseup', handleMouseUp);
-  el.addEventListener('mouseleave', handleMouseLeave);
-  el.addEventListener('mousemove', handleMouseMove);
-
-  return () => {
-    el.style.cursor = '';
-    el.removeEventListener('wheel', handleWheel);
-    el.removeEventListener('mousedown', handleMouseDown);
-    el.removeEventListener('mouseup', handleMouseUp);
-    el.removeEventListener('mouseleave', handleMouseLeave);
-    el.removeEventListener('mousemove', handleMouseMove);
-  };
-}, [phase]);
+    return () => {
+      el.style.cursor = '';
+      el.removeEventListener('wheel', handleWheel);
+      el.removeEventListener('mousedown', handleMouseDown);
+      el.removeEventListener('mouseup', handleMouseUp);
+      el.removeEventListener('mouseleave', handleMouseLeave);
+      el.removeEventListener('mousemove', handleMouseMove);
+    };
+  }, [phase]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -602,6 +635,16 @@ useEffect(() => {
           todaySessionCount: todayStats.sessionCount,
           todayPhotoCount: todayStats.photoCount,
           qrHistory: qrHistory,
+          // ⚡ Phase 1-3
+          batteryLevel,
+          batteryCharging,
+          storageUsage,
+          storageQuota,
+          maintenanceMode,
+          locked,
+          appVersion: version,
+          alerts: alertsRef.current,
+          activityLog: activityLogRef.current,
         });
       } finally {
         isPushingRef.current = false;
@@ -615,12 +658,93 @@ useEffect(() => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [phase, captures.length, totalCapturesNeeded, event?.slug, event?.eventName, screensaverActive]);
+  }, [
+    phase,
+    captures.length,
+    totalCapturesNeeded,
+    event?.slug,
+    event?.eventName,
+    screensaverActive,
+    qrHistory,
+    batteryLevel,
+    batteryCharging,
+    storageUsage,
+    storageQuota,
+    maintenanceMode,
+    locked,
+    healthTick,
+    version,
+  ]);
 
   useEffect(() => {
     markOfflineOnDisconnect();
     return () => { void clearStatus(); };
   }, []);
+
+  // ⚡ Phase 3: Battery monitor
+  useEffect(() => {
+    type BatteryManager = {
+      level: number;
+      charging: boolean;
+      addEventListener: (ev: string, cb: () => void) => void;
+      removeEventListener: (ev: string, cb: () => void) => void;
+    };
+    const nav = navigator as unknown as { getBattery?: () => Promise<BatteryManager> };
+    if (typeof nav.getBattery !== 'function') return;
+    let battery: BatteryManager | null = null;
+    let cancelled = false;
+    const update = () => {
+      if (!battery) return;
+      setBatteryLevel(Math.round(battery.level * 100));
+      setBatteryCharging(battery.charging);
+    };
+    nav.getBattery().then((b) => {
+      if (cancelled) return;
+      battery = b;
+      update();
+      b.addEventListener('levelchange', update);
+      b.addEventListener('chargingchange', update);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (battery) {
+        battery.removeEventListener('levelchange', update);
+        battery.removeEventListener('chargingchange', update);
+      }
+    };
+  }, []);
+
+  // ⚡ Phase 3: Storage monitor
+  useEffect(() => {
+    const update = async () => {
+      try {
+        if (navigator.storage?.estimate) {
+          const est = await navigator.storage.estimate();
+          setStorageUsage(est.usage || 0);
+          setStorageQuota(est.quota || 0);
+        }
+      } catch { /* ignore */ }
+    };
+    void update();
+    const id = setInterval(update, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ⚡ Phase 3: Auto-alerts — battery low
+  useEffect(() => {
+    if (batteryLevel > 0 && batteryLevel < 20 && !batteryCharging) {
+      pushAlert('warn', `Baterai rendah (${batteryLevel}%)`);
+    }
+  }, [batteryLevel, batteryCharging, pushAlert]);
+
+  // ⚡ Phase 3: Auto-alerts — storage
+  useEffect(() => {
+    if (storageQuota > 0) {
+      const pct = (storageUsage / storageQuota) * 100;
+      if (pct > 90) pushAlert('error', `Storage hampir penuh (${pct.toFixed(0)}%)`);
+      else if (pct > 75) pushAlert('warn', `Storage terpakai ${pct.toFixed(0)}%`);
+    }
+  }, [storageUsage, storageQuota, pushAlert]);
 
   useEffect(() => {
     const check = () => {
@@ -673,13 +797,91 @@ useEffect(() => {
             }
             break;
           }
+          // ⚡ Phase 1: Maintenance
+          case 'maintenance-on':
+            setMaintenanceMode(true);
+            pushActivity('Maintenance ON', 'Diaktifkan dari operator');
+            break;
+          case 'maintenance-off':
+            setMaintenanceMode(false);
+            pushActivity('Maintenance OFF', 'Dimatikan dari operator');
+            break;
+          // ⚡ Phase 1: Lock Screen
+          case 'lock-screen':
+            setLocked(true);
+            pushActivity('Lock Screen', 'Dikunci dari operator');
+            break;
+          case 'unlock-screen':
+            setLocked(false);
+            pushActivity('Unlock Screen', 'Dibuka dari operator');
+            break;
+          // ⚡ Phase 1: Force Reset
+          case 'force-reset':
+            pushActivity('Force Reset', 'Session di-reset dari operator');
+            resetSession();
+            setPhase('frame-select');
+            break;
+          // ⚡ Phase 1: Test Print
+          case 'test-print': {
+            pushActivity('Test Print', 'Mencetak halaman test');
+            void (async () => {
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1200;
+                canvas.height = 1800;
+                const ctx = canvas.getContext('2d')!;
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#ef3f25';
+                ctx.font = 'bold 100px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('TEST PRINT', canvas.width / 2, 300);
+                ctx.fillStyle = '#000';
+                ctx.font = '48px sans-serif';
+                ctx.fillText('R3A BOOTH', canvas.width / 2, 500);
+                ctx.font = '36px sans-serif';
+                ctx.fillText(new Date().toLocaleString('id-ID'), canvas.width / 2, 600);
+                ctx.font = '28px monospace';
+                ctx.fillText(`Device: ${getDeviceId().slice(-8)}`, canvas.width / 2, 700);
+                ctx.font = '22px monospace';
+                ctx.fillText('Printer OK — siap beroperasi', canvas.width / 2, 900);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+                const ps = event.printerSettings;
+                await printResult({
+                  copies: 1,
+                  paperSize: ps.paperSize || '4 × 6 in',
+                  layout: ps.layout || 'POTRAIT',
+                  dataUrl,
+                  printerName: allSettings.printer.printer || ps.printer,
+                });
+                pushActivity('Test Print OK', 'Cetak test berhasil');
+              } catch {
+                pushActivity('Test Print FAIL', 'Gagal cetak test');
+              }
+            })();
+            break;
+          }
+          // ⚡ Phase 2: Remote Frame Update
+          case 'remote-frame-update':
+            pushActivity('Remote Frame Update', 'Reload untuk fetch frame terbaru');
+            setTimeout(() => window.location.reload(), 600);
+            break;
+          // ⚡ Phase 2: Switch Version
+          case 'switch-version':
+            if (typeof cmd.payload === 'string' && cmd.payload.trim()) {
+              const target = cmd.payload.trim();
+              pushActivity('Switch Version', `Ganti ke ${target}`);
+              saveAppVersion(target as AppVersion);
+              setTimeout(() => window.location.reload(), 600);
+            }
+            break;
         }
       } catch { /* ignore */ }
 
       void clearCommand(deviceId);
     });
     return unsubscribe;
-  }, []);
+  }, [allSettings.printer.printer, event.printerSettings, pushActivity]);
 
   const handleLogoClick = useCallback(() => {
     logoClickCount.current += 1;
@@ -1028,11 +1230,13 @@ useEffect(() => {
         recordSession({ id, eventId: event.id, startedAt, finishedAt: Date.now(), photoCount: slotPhotosColor.length, uploadSuccess: uploadSuccessCount, uploadFail: uploadFailCount });
       } catch { /* ignore */ }
 
+      pushActivity('Session Saved', `${slotPhotosColor.length} foto · ${uploadSuccessCount} upload`);
+
       setSaved(true);
     } catch { /* ignore */ } finally {
       setSaving(false);
     }
-  }, [compositeUrl, compositeColorUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving, isReceiptMode]);
+  }, [compositeUrl, compositeColorUrl, activeFrame, event.id, allSettings, allSlots, captures, captureFilters, currentGuest, saving, isReceiptMode, pushActivity]);
   
   const handleShowQr = useCallback(async () => {
     if (!currentGuest) return;
@@ -1090,9 +1294,10 @@ useEffect(() => {
         printerName: allSettings.printer.printer || ps.printer,
       });
       setPrinted(true);
+      pushActivity('Print OK', `${copies} copy`);
     } catch { /* ignore */ }
     setPrinting(false);
-  }, [compositeUrl, printing, event.printerSettings, allSettings.printer]);
+  }, [compositeUrl, printing, event.printerSettings, allSettings.printer, pushActivity]);
 
   const handleBackToFrameSelect = useCallback(() => {
     resetSession();
@@ -1294,6 +1499,60 @@ useEffect(() => {
     };
   }, [phase, activeFrame, allSlots, captureMap, captureFilters, frameAspect, ensureImagesCached, isReceiptMode]);
 
+  // ⚡ Phase 1: Overlays (Maintenance + Lock) — rendered di semua screen
+  const overlayJSX = (
+    <>
+      {maintenanceMode ? (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 999997,
+          background: 'rgba(0,0,0,0.94)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          gap: 24, color: '#fff', textAlign: 'center',
+          padding: 32, fontFamily: "'DM Sans', sans-serif",
+        }}>
+          <Wrench size={80} strokeWidth={1.5} />
+          <h2 style={{ margin: 0, fontSize: 44, fontWeight: 800, letterSpacing: '.12em' }}>MAINTENANCE</h2>
+          <p style={{ margin: 0, fontSize: 18, opacity: 0.7 }}>Booth sedang diperbaiki. Mohon tunggu.</p>
+          <p style={{ margin: '16px 0 0', fontSize: 12, opacity: 0.4 }}>Device: {getDeviceId().slice(-8)}</p>
+        </div>
+      ) : null}
+
+      {locked && !maintenanceMode ? (
+        <div
+          onClick={() => {
+            const pin = allSettings.security?.adminPin;
+            if (!pin) {
+              setLocked(false);
+              pushActivity('Unlocked', 'Tidak ada PIN');
+              return;
+            }
+            const input = window.prompt('Masukkan PIN untuk unlock:');
+            if (input === pin) {
+              setLocked(false);
+              pushActivity('Unlocked', 'PIN benar');
+            } else if (input !== null) {
+              window.alert('PIN salah');
+            }
+          }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 999998,
+            background: 'rgba(0,0,0,0.94)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 24, color: '#fff', textAlign: 'center',
+            padding: 32, cursor: 'pointer',
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          <Lock size={80} strokeWidth={1.5} />
+          <h2 style={{ margin: 0, fontSize: 44, fontWeight: 800, letterSpacing: '.12em' }}>LOCKED</h2>
+          <p style={{ margin: 0, fontSize: 18, opacity: 0.7 }}>Tap di mana saja untuk unlock</p>
+        </div>
+      ) : null}
+    </>
+  );
+
   const LoadingOverlay = saving ? (
     <div style={{ position: 'fixed', inset: 0, zIndex: 999999, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, color: '#fff', backdropFilter: 'blur(4px)' }}>
       <div className="compositing-spinner" style={{ width: 72, height: 72, borderWidth: 5 }} />
@@ -1304,6 +1563,7 @@ useEffect(() => {
   if (!event || !event.frames) {
     return (
       <main className="photobooth-screen photobooth-kiosk" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+        {overlayJSX}
         <AlertCircle size={48} strokeWidth={1} />
         <h2 style={{ fontSize: 24, margin: 0 }}>Event not found</h2>
         <p style={{ color: 'rgba(255,255,255,.5)', margin: 0 }}>The event data is missing or malformed.</p>
@@ -1315,6 +1575,7 @@ useEffect(() => {
   if (!framesReady) {
     return (
       <main className="photobooth-screen photobooth-kiosk" style={{ display: 'grid', placeItems: 'center' }}>
+        {overlayJSX}
         <div className="compositing-spinner" />
         <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 14, fontWeight: 600, letterSpacing: '.1em' }}>LOADING EVENT...</span>
       </main>
@@ -1324,6 +1585,7 @@ useEffect(() => {
   if (phase === 'frame-select') {
     return (
       <main className="photobooth-screen photobooth-kiosk">
+        {overlayJSX}
         {LoadingOverlay}
         {showIGGate ? (
           <IGFollowGate imageSrc={igGateImage} onDismiss={handleIGGateDismiss} />
@@ -1393,6 +1655,7 @@ useEffect(() => {
   if (phase === 'ready') {
     return (
       <main className="photobooth-screen photobooth-kiosk">
+        {overlayJSX}
         {LoadingOverlay}
         <div className="photobooth-kiosk-header">
           <div className="photobooth-project" onClick={handleLogoClick}><span>R3A BOOTH</span><strong>{event.eventName || 'Untitled Event'}</strong></div>
@@ -1428,6 +1691,7 @@ useEffect(() => {
 
   return (
     <main className={`photobooth-screen ${phase === 'live' || phase === 'countdown' ? '' : 'photobooth-kiosk'}`}>
+      {overlayJSX}
       {LoadingOverlay}
       {flash ? <div className="capture-flash" /> : null}
 

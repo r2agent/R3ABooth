@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   RefreshCw,
   X,
@@ -26,6 +26,17 @@ import {
   ExternalLink,
   ShieldAlert,
   FileSpreadsheet,
+  Wrench,
+  Lock,
+  Unlock,
+  Printer,
+  Bell,
+  Activity,
+  Battery,
+  BatteryCharging,
+  Database,
+  Link2,
+  Copy,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -106,6 +117,15 @@ function getGraphData(value: number): string {
   return generateSparklinePoints(data);
 }
 
+function timeAgo(ts: number): string {
+  if (!ts) return '—';
+  const diff = Date.now() - ts;
+  if (diff < 60000) return `${Math.floor(diff / 1000)}s lalu`;
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m lalu`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}j lalu`;
+  return `${Math.floor(diff / 86400000)}h lalu`;
+}
+
 const THEME_KEY = 'r3a-op-theme';
 
 /* ---------- COMPONENT ---------- */
@@ -114,11 +134,13 @@ export const OperatorDashboard = ({
   eventSlug,
   onClose,
   onBackToPhotobooth,
+  focusDeviceId,
 }: {
   allSettings: AllSettings;
   eventSlug?: string;
   onClose: () => void;
   onBackToPhotobooth?: () => void;
+  focusDeviceId?: string;
 }) => {
   const [, setTick] = useState(0);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -135,6 +157,7 @@ export const OperatorDashboard = ({
   const [renameInput, setRenameInput] = useState<string>('');
   const [renaming, setRenaming] = useState(false);
   const [deviceFilter, setDeviceFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const focusAppliedRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = subscribeAllTablets((newTablets) => {
@@ -142,6 +165,17 @@ export const OperatorDashboard = ({
     });
     return unsubscribe;
   }, []);
+
+  // ⚡ Auto-select device dari #operator/DEVICE_ID
+  useEffect(() => {
+    if (focusAppliedRef.current) return;
+    if (!focusDeviceId) return;
+    const found = tablets.find((t) => t.deviceId === focusDeviceId);
+    if (found) {
+      setSelectedDeviceId(focusDeviceId);
+      focusAppliedRef.current = true;
+    }
+  }, [focusDeviceId, tablets]);
 
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 1000);
@@ -181,12 +215,14 @@ export const OperatorDashboard = ({
   const aggregatedStats = useMemo(() => {
     let totalSessions = 0, totalPhotos = 0, totalUploaded = 0, totalPending = 0, totalFailed = 0;
     let driveUsed = 0, driveLimit = 0, driveConnectedCount = 0;
+    let totalAlerts = 0;
     for (const t of eventFiltered) {
       totalSessions += t.todaySessionCount ?? 0;
       totalPhotos += t.todayPhotoCount ?? 0;
       totalUploaded += t.uploadedCount ?? 0;
       totalPending += t.pendingCount ?? 0;
       totalFailed += t.failedCount ?? 0;
+      totalAlerts += (t.alerts ?? []).length;
       if (t.driveConnected && t.driveLimit > 0) {
         driveConnectedCount++;
         driveUsed += t.driveUsage ?? 0;
@@ -198,7 +234,7 @@ export const OperatorDashboard = ({
 
     return {
       totalSessions, totalPhotos, totalUploaded, totalPending, totalFailed,
-      driveUsed, driveLimit, driveConnectedCount, totalRevenue
+      driveUsed, driveLimit, driveConnectedCount, totalRevenue, totalAlerts,
     };
   }, [eventFiltered, allSettings.payment?.price]);
 
@@ -238,6 +274,16 @@ export const OperatorDashboard = ({
       return;
     }
     const ok = await sendCommand(selectedDevice.deviceId, type);
+    if (ok) setActionMessage(`✅ Perintah "${label}" dikirim ke ${selectedDevice.browser}.`);
+    else setActionMessage(`❌ Gagal kirim perintah.`);
+  }, [selectedDevice]);
+
+  const handleCommandWithPayload = useCallback(async (type: CommandType, payload: string, label: string) => {
+    if (!selectedDevice) {
+      setActionMessage('Pilih device dulu.');
+      return;
+    }
+    const ok = await sendCommand(selectedDevice.deviceId, type, payload);
     if (ok) setActionMessage(`✅ Perintah "${label}" dikirim ke ${selectedDevice.browser}.`);
     else setActionMessage(`❌ Gagal kirim perintah.`);
   }, [selectedDevice]);
@@ -283,6 +329,17 @@ export const OperatorDashboard = ({
     }
   }, []);
 
+  const handleCopyAdminLink = useCallback(async () => {
+    if (!selectedDevice) return;
+    const url = `${window.location.origin}/#operator/${selectedDevice.deviceId}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setActionMessage(`✅ Link admin dikopi:\n${url}`);
+    } catch {
+      setActionMessage(`Link: ${url}`);
+    }
+  }, [selectedDevice]);
+
   const handleExportCSV = useCallback(() => {
     const headers = ['Metric', 'Value'];
     const rows = [
@@ -290,6 +347,7 @@ export const OperatorDashboard = ({
       ['Total Foto Hari Ini', displayStats.totalPhotos],
       ['Total Pendapatan', displayStats.totalRevenue],
       ['Failed Uploads', displayStats.totalFailed],
+      ['Total Alerts', aggregatedStats.totalAlerts],
       ['Time Exported', new Date().toISOString()]
     ];
 
@@ -302,7 +360,7 @@ export const OperatorDashboard = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [displayStats]);
+  }, [displayStats, aggregatedStats.totalAlerts]);
 
   const drivePercent = aggregatedStats.driveLimit > 0
     ? (aggregatedStats.driveUsed / aggregatedStats.driveLimit) * 100
@@ -315,6 +373,13 @@ export const OperatorDashboard = ({
   const previousQrs = selectedDevice?.qrHistory && selectedDevice.qrHistory.length > 1
     ? selectedDevice.qrHistory.slice(0, -1).reverse()
     : [];
+
+  const deviceAlerts = selectedDevice?.alerts ?? [];
+  const deviceActivity = selectedDevice?.activityLog ?? [];
+  const batteryPct = selectedDevice?.batteryLevel ?? 0;
+  const storagePct = selectedDevice && selectedDevice.storageQuota > 0
+    ? ((selectedDevice.storageUsage ?? 0) / selectedDevice.storageQuota) * 100
+    : 0;
 
   return (
     <>
@@ -456,6 +521,10 @@ export const OperatorDashboard = ({
           background: var(--op-ok); display: block;
           box-shadow: 0 0 0 3px rgba(52,211,153,.18);
         }
+        .op-pill--alert i {
+          background: var(--op-warn);
+          box-shadow: 0 0 0 3px rgba(245,165,36,.18);
+        }
 
         .op-icon-btn {
           width: 42px; height: 42px; border-radius: 12px;
@@ -492,6 +561,7 @@ export const OperatorDashboard = ({
           border: 1px solid rgba(239,63,37,.4);
           font-size: 13px; word-break: break-word;
           color: var(--op-text);
+          white-space: pre-wrap;
           animation: op-fade-up .4s var(--op-ease-out) both;
         }
 
@@ -865,6 +935,26 @@ export const OperatorDashboard = ({
           border-color: var(--op-accent);
           color: var(--op-accent);
         }
+        .op-btn--ghost:disabled {
+          opacity: .45;
+          cursor: not-allowed;
+        }
+        .op-btn--ok {
+          background: rgba(52,211,153,.15);
+          color: var(--op-ok);
+          border: 1px solid rgba(52,211,153,.35);
+        }
+        .op-btn--ok:hover:not(:disabled) {
+          background: rgba(52,211,153,.25);
+        }
+        .op-btn--danger {
+          background: rgba(239,63,37,.1);
+          color: var(--op-accent);
+          border: 1px solid rgba(239,63,37,.3);
+        }
+        .op-btn--danger:hover:not(:disabled) {
+          background: rgba(239,63,37,.2);
+        }
 
         /* bar */
         .op-bar {
@@ -899,6 +989,12 @@ export const OperatorDashboard = ({
           font-size: 12.5px; font-weight: 700;
           font-variant-numeric: tabular-nums;
         }
+        .op-row--stack {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 4px;
+        }
+        .op-row--stack .op-row__label { overflow: visible; white-space: normal; }
 
         /* quick actions */
         .op-qa-grid {
@@ -963,6 +1059,68 @@ export const OperatorDashboard = ({
           transition:
             background-color var(--op-theme-dur) var(--op-ease-std),
             border-color var(--op-theme-dur) var(--op-ease-std);
+        }
+
+        /* health grid */
+        .op-health-block {
+          padding: 10px 0;
+          border-bottom: 1px solid var(--op-border);
+        }
+        .op-health-block:last-child { border-bottom: 0; padding-bottom: 0; }
+        .op-health-block:first-child { padding-top: 0; }
+        .op-health-head {
+          display: flex; justify-content: space-between; align-items: center;
+          font-size: 12px; margin-bottom: 8px; gap: 8px;
+        }
+        .op-health-head__left {
+          display: inline-flex; align-items: center; gap: 5px;
+          color: var(--op-text); font-weight: 600;
+        }
+        .op-health-head__right {
+          font-weight: 700; font-variant-numeric: tabular-nums;
+        }
+
+        /* activity row */
+        .op-activity-row {
+          display: flex; gap: 8px;
+          padding: 8px 0;
+          border-bottom: 1px dashed var(--op-border);
+          font-size: 12px;
+          align-items: flex-start;
+        }
+        .op-activity-row:last-child { border-bottom: 0; padding-bottom: 0; }
+        .op-activity-row:first-child { padding-top: 0; }
+        .op-activity-row__time {
+          font-size: 10.5px; color: var(--op-muted);
+          font-variant-numeric: tabular-nums;
+          flex-shrink: 0; min-width: 52px;
+        }
+        .op-activity-row__body {
+          flex: 1; min-width: 0;
+          word-break: break-word;
+        }
+        .op-activity-row__action {
+          font-weight: 700; color: var(--op-text);
+        }
+        .op-activity-row__detail {
+          font-size: 11px; color: var(--op-muted); margin-top: 2px;
+        }
+
+        /* alerts row */
+        .op-alert-row {
+          display: flex; gap: 8px;
+          padding: 8px 0;
+          border-bottom: 1px solid var(--op-border);
+          align-items: flex-start;
+          font-size: 12px;
+        }
+        .op-alert-row:last-child { border-bottom: 0; padding-bottom: 0; }
+        .op-alert-row:first-child { padding-top: 0; }
+        .op-alert-row__body {
+          flex: 1; min-width: 0; word-break: break-word;
+        }
+        .op-alert-row__meta {
+          font-size: 10.5px; color: var(--op-muted); margin-top: 2px;
         }
 
         /* empty */
@@ -1057,6 +1215,7 @@ export const OperatorDashboard = ({
                 <span>R3A Booth</span>
                 <small>
                   Operator{eventSlug ? ` · ${eventSlug}` : ''}
+                  {focusDeviceId ? ` · Focus` : ''}
                 </small>
               </div>
             </div>
@@ -1071,6 +1230,11 @@ export const OperatorDashboard = ({
               <span className="op-pill">
                 {onlineCount} / {eventFiltered.length}
               </span>
+              {aggregatedStats.totalAlerts > 0 ? (
+                <span className="op-pill op-pill--alert" title="Total alerts">
+                  <i /> {aggregatedStats.totalAlerts}
+                </span>
+              ) : null}
             </div>
 
             <div className="op-nav__actions">
@@ -1185,6 +1349,16 @@ export const OperatorDashboard = ({
                           {selectedDevice.browser} · {formatDeviceType(selectedDevice.deviceType || 'unknown')} · {selectedDevice.os}
                         </div>
                       </div>
+                      {selectedDevice.maintenanceMode ? (
+                        <span className="op-badge op-badge--warn">
+                          <Wrench size={11} /> MAINT
+                        </span>
+                      ) : null}
+                      {selectedDevice.locked ? (
+                        <span className="op-badge op-badge--err">
+                          <Lock size={11} /> LOCKED
+                        </span>
+                      ) : null}
                       {isDeviceOnline(selectedDevice) ? (
                         <span className="op-badge op-badge--ok">Online</span>
                       ) : (
@@ -1193,6 +1367,24 @@ export const OperatorDashboard = ({
                     </div>
 
                     <div className="op-detail">
+                      {/* SECONDARY ADMIN LINK */}
+                      <div className="op-rename-box" style={{ background: 'rgba(96,165,250,.08)', borderColor: 'rgba(96,165,250,.3)' }}>
+                        <div className="op-rename-box__head" style={{ color: 'var(--op-info)' }}>
+                          <Link2 size={13} /> SECONDARY ADMIN LINK
+                        </div>
+                        <p style={{ margin: '0 0 10px', fontSize: 11.5, color: 'var(--op-muted)', lineHeight: 1.5 }}>
+                          Salin link ini untuk buka dashboard operator khusus device ini di layar lain (HP/tablet/laptop).
+                        </p>
+                        <button
+                          type="button"
+                          className="op-btn op-btn--ghost"
+                          style={{ width: '100%', justifyContent: 'center' }}
+                          onClick={handleCopyAdminLink}
+                        >
+                          <Copy size={14} /> COPY LINK ADMIN
+                        </button>
+                      </div>
+
                       {/* RENAME */}
                       <div className="op-rename-box">
                         <div className="op-rename-box__head">
@@ -1232,6 +1424,57 @@ export const OperatorDashboard = ({
                           <InfoCard icon={<Globe size={12} />} label="BROWSER" value={selectedDevice.browser || '—'} />
                           <InfoCard icon={<Monitor size={12} />} label="OS" value={selectedDevice.os || '—'} />
                           <InfoCard icon={<Monitor size={12} />} label="SCREEN" value={selectedDevice.screenSize || '—'} />
+                          <InfoCard icon={<Activity size={12} />} label="APP VERSION" value={selectedDevice.appVersion || '—'} />
+                        </div>
+                      </div>
+
+                      {/* BATTERY & STORAGE — device-specific */}
+                      <div>
+                        <h4 className="op-section-title">Battery & Storage Health</h4>
+                        <div className="op-info-card">
+                          {/* Battery */}
+                          <div className="op-health-block">
+                            <div className="op-health-head">
+                              <span className="op-health-head__left">
+                                {selectedDevice.batteryCharging ? <BatteryCharging size={13} /> : <Battery size={13} />}
+                                Baterai
+                              </span>
+                              <span className="op-health-head__right">
+                                {batteryPct}%{selectedDevice.batteryCharging ? ' ⚡' : ''}
+                              </span>
+                            </div>
+                            <div className="op-bar">
+                              <div
+                                className={`op-bar__fill ${batteryPct < 20 ? 'op-bar__fill--err' : batteryPct < 50 ? 'op-bar__fill--warn' : 'op-bar__fill--ok'}`}
+                                style={{ width: `${Math.min(100, batteryPct)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Storage */}
+                          <div className="op-health-block">
+                            <div className="op-health-head">
+                              <span className="op-health-head__left">
+                                <Database size={13} /> Storage Lokal
+                              </span>
+                              <span className="op-health-head__right">
+                                {selectedDevice.storageQuota > 0
+                                  ? `${formatBytes(selectedDevice.storageUsage ?? 0)} / ${formatBytes(selectedDevice.storageQuota)}`
+                                  : '—'}
+                              </span>
+                            </div>
+                            <div className="op-bar">
+                              <div
+                                className={`op-bar__fill ${storagePct > 90 ? 'op-bar__fill--err' : storagePct > 75 ? 'op-bar__fill--warn' : 'op-bar__fill--ok'}`}
+                                style={{ width: `${Math.min(100, storagePct)}%` }}
+                              />
+                            </div>
+                            {selectedDevice.storageQuota > 0 ? (
+                              <p style={{ margin: '6px 0 0', fontSize: 10.5, color: 'var(--op-muted)' }}>
+                                {storagePct.toFixed(1)}% terpakai
+                              </p>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 
@@ -1315,7 +1558,7 @@ export const OperatorDashboard = ({
                         </div>
                       ) : null}
 
-                      {/* ⚡ SECTION QR HISTORY (DIPERBARUI) ⚡ */}
+                      {/* QR HISTORY */}
                       <div>
                         <h4 className="op-section-title">
                           <QrCode size={12} style={{ display: 'inline', marginRight: 6, verticalAlign: 'middle' }} />
@@ -1392,7 +1635,7 @@ export const OperatorDashboard = ({
                         )}
                       </div>
 
-                      {/* ⚡ TOMBOL HAPUS DEVICE ⚡ */}
+                      {/* DELETE DEVICE */}
                       <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--op-border)' }}>
                         <button
                           type="button"
@@ -1470,6 +1713,7 @@ export const OperatorDashboard = ({
                           const isOnline = t.online && !isStale;
                           const openDuration = t.eventOpenedAt > 0 ? Date.now() - t.eventOpenedAt : 0;
                           const hasCustomName = !!(t.deviceName && t.deviceName.trim());
+                          const hasAlerts = (t.alerts ?? []).length > 0;
 
                           return (
                             <div
@@ -1494,6 +1738,26 @@ export const OperatorDashboard = ({
                               ) : null}
 
                               <div className="op-device__id">ID: {t.deviceId.slice(-8)}</div>
+
+                              {t.maintenanceMode || t.locked || hasAlerts ? (
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                  {t.maintenanceMode ? (
+                                    <span className="op-badge op-badge--warn op-badge--plain" style={{ fontSize: 9 }}>
+                                      <Wrench size={9} /> MAINT
+                                    </span>
+                                  ) : null}
+                                  {t.locked ? (
+                                    <span className="op-badge op-badge--err op-badge--plain" style={{ fontSize: 9 }}>
+                                      <Lock size={9} /> LOCK
+                                    </span>
+                                  ) : null}
+                                  {hasAlerts ? (
+                                    <span className="op-badge op-badge--info op-badge--plain" style={{ fontSize: 9 }}>
+                                      <Bell size={9} /> {(t.alerts ?? []).length}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
 
                               {t.currentEventName ? (
                                 <div className="op-device__event">📸 {t.currentEventName}</div>
@@ -1620,7 +1884,98 @@ export const OperatorDashboard = ({
                 </div>
               </div>
 
-              {/* HARDWARE STATUS (MOCKUP) */}
+              {/* MAINTENANCE & LOCK — Phase 1 */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="op-card__title">
+                      <Wrench size={13} style={{ verticalAlign: 'middle', marginRight: 5, color: 'var(--op-warn)' }} />
+                      Maintenance & Lock
+                    </div>
+                    <div className="op-card__sub">
+                      {selectedDevice ? '→ Kontrol device terpilih' : 'Pilih device dulu'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="op-row">
+                  <span className="op-row__label">
+                    <Wrench size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                    Maintenance Mode
+                  </span>
+                  {selectedDevice?.maintenanceMode ? (
+                    <button
+                      type="button"
+                      className="op-btn op-btn--danger"
+                      style={{ padding: '6px 12px', fontSize: 11 }}
+                      onClick={() => handleCommand('maintenance-off', 'Matikan Maintenance')}
+                      disabled={!selectedDevice}
+                    >
+                      MATIKAN
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="op-btn op-btn--ghost"
+                      style={{ padding: '6px 12px', fontSize: 11 }}
+                      onClick={() => handleCommand('maintenance-on', 'Aktifkan Maintenance')}
+                      disabled={!selectedDevice}
+                    >
+                      AKTIFKAN
+                    </button>
+                  )}
+                </div>
+
+                <div className="op-row">
+                  <span className="op-row__label">
+                    <Lock size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                    Lock Screen
+                  </span>
+                  {selectedDevice?.locked ? (
+                    <button
+                      type="button"
+                      className="op-btn op-btn--ok"
+                      style={{ padding: '6px 12px', fontSize: 11 }}
+                      onClick={() => handleCommand('unlock-screen', 'Unlock Screen')}
+                      disabled={!selectedDevice}
+                    >
+                      <Unlock size={12} /> UNLOCK
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="op-btn op-btn--ghost"
+                      style={{ padding: '6px 12px', fontSize: 11 }}
+                      onClick={() => handleCommand('lock-screen', 'Lock Screen')}
+                      disabled={!selectedDevice}
+                    >
+                      <Lock size={12} /> LOCK
+                    </button>
+                  )}
+                </div>
+
+                <div className="op-row">
+                  <span className="op-row__label">
+                    <RotateCcw size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                    Force Reset
+                  </span>
+                  <button
+                    type="button"
+                    className="op-btn op-btn--danger"
+                    style={{ padding: '6px 12px', fontSize: 11 }}
+                    onClick={() => {
+                      if (window.confirm('Force reset akan reset session di device (kembali ke frame-select). Lanjutkan?')) {
+                        void handleCommand('force-reset', 'Force Reset');
+                      }
+                    }}
+                    disabled={!selectedDevice}
+                  >
+                    RESET SESSION
+                  </button>
+                </div>
+              </div>
+
+              {/* HARDWARE STATUS + TEST PRINT */}
               <div className="op-card">
                 <div className="op-card__head">
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1637,15 +1992,95 @@ export const OperatorDashboard = ({
                   <span className="op-badge op-badge--ok">Detected</span>
                 </div>
                 <div className="op-row">
-                  <span className="op-row__label">Aksi Cepat</span>
-                  <button 
-                    className="op-btn op-btn--ghost" 
-                    style={{ padding: '4px 10px', fontSize: 11 }}
-                    onClick={() => setActionMessage('✅ Perintah Test Print dikirim!')}
-                  >
+                  <span className="op-row__label">
+                    <Printer size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
                     Test Print
+                  </span>
+                  <button
+                    type="button"
+                    className="op-btn op-btn--ghost"
+                    style={{ padding: '6px 12px', fontSize: 11 }}
+                    onClick={() => handleCommand('test-print', 'Test Print')}
+                    disabled={!selectedDevice}
+                  >
+                    CETAK TEST
                   </button>
                 </div>
+              </div>
+
+              {/* SMART ALERTS — Phase 3 */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="op-card__title">
+                      <Bell size={13} style={{ verticalAlign: 'middle', marginRight: 5, color: 'var(--op-warn)' }} />
+                      Smart Alerts
+                      {deviceAlerts.length > 0 ? (
+                        <span style={{ color: 'var(--op-muted)', fontWeight: 500, marginLeft: 4 }}>
+                          ({deviceAlerts.length})
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="op-card__sub">
+                      {selectedDevice ? 'Dari device terpilih' : 'Pilih device dulu'}
+                    </div>
+                  </div>
+                </div>
+
+                {!selectedDevice ? (
+                  <div className="op-qa-hint">Pilih device untuk lihat alerts.</div>
+                ) : deviceAlerts.length === 0 ? (
+                  <div className="op-qa-hint" style={{ color: 'var(--op-ok)' }}>
+                    ✅ Tidak ada alert aktif
+                  </div>
+                ) : (
+                  deviceAlerts.slice(0, 6).map((alert) => (
+                    <div key={alert.id} className="op-alert-row">
+                      <span className={`op-badge op-badge--${alert.level === 'error' ? 'err' : alert.level === 'warn' ? 'warn' : 'info'}`}>
+                        {alert.level.toUpperCase()}
+                      </span>
+                      <div className="op-alert-row__body">
+                        <div>{alert.message}</div>
+                        <div className="op-alert-row__meta">{timeAgo(alert.time)}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* LIVE ACTIVITY FEED — Phase 3 */}
+              <div className="op-card">
+                <div className="op-card__head">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="op-card__title">
+                      <Activity size={13} style={{ verticalAlign: 'middle', marginRight: 5, color: 'var(--op-info)' }} />
+                      Live Activity Feed
+                    </div>
+                    <div className="op-card__sub">
+                      {selectedDevice ? 'Aktivitas device terpilih' : 'Pilih device dulu'}
+                    </div>
+                  </div>
+                </div>
+
+                {!selectedDevice ? (
+                  <div className="op-qa-hint">Pilih device untuk lihat aktivitas.</div>
+                ) : deviceActivity.length === 0 ? (
+                  <div className="op-qa-hint">Belum ada aktivitas.</div>
+                ) : (
+                  deviceActivity.slice(0, 10).map((act) => (
+                    <div key={act.id} className="op-activity-row">
+                      <span className="op-activity-row__time">
+                        {new Date(act.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                      <div className="op-activity-row__body">
+                        <div className="op-activity-row__action">{act.action}</div>
+                        {act.detail ? (
+                          <div className="op-activity-row__detail">{act.detail}</div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
               {/* HEALTH SUMMARY (AGREGAT) */}
@@ -1679,6 +2114,12 @@ export const OperatorDashboard = ({
                   <span className="op-row__label">Failed Upload</span>
                   <span className={`op-badge ${aggregatedStats.totalFailed > 0 ? 'op-badge--err' : 'op-badge--ok'}`}>
                     {aggregatedStats.totalFailed}
+                  </span>
+                </div>
+                <div className="op-row">
+                  <span className="op-row__label">Active Alerts</span>
+                  <span className={`op-badge ${aggregatedStats.totalAlerts > 0 ? 'op-badge--warn' : 'op-badge--ok'}`}>
+                    {aggregatedStats.totalAlerts}
                   </span>
                 </div>
               </div>
