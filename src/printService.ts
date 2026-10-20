@@ -2,6 +2,8 @@
    PRINT SERVICE — Modular Print Provider System (FINAL RAWBT)
    ============================================================ */
 
+import { Browser } from '@capacitor/browser';
+
 export type PrintOptions = {
   copies: number;
   paperSize: string;
@@ -73,24 +75,29 @@ const RAWBT_PROVIDER: PrintProvider = {
       console.log(`[Print] RawBT → mode=${opts.mode || 'image'}`);
 
       if (opts.mode === 'text' && opts.textPayload) {
-        // === MODE TEXT (Test Print Teks) ===
+        // === MODE TEXT (Test Print) ===
         const base64Data = safeBase64Encode(opts.textPayload);
-        // Gunakan location.href biasa untuk teks (terbukti berhasil)
+        // Teks tetap pakai location.href (sudah terbukti memunculkan pop up)
         window.location.href = `rawbt:base64,${base64Data}`;
         await new Promise((r) => setTimeout(r, 2000));
         return true;
       } 
       
-      // === MODE IMAGE (Foto / Struk / Test Frame) ===
+      // === MODE IMAGE (Foto / Struk) ===
       if (!opts.dataUrl) return false;
       
       const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
       const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
       
-      // ⚡ FIX UTAMA: Gunakan intent:base64 dan bypass WebView dengan window.open '_system'
       const intentUrl = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
       
-      window.open(intentUrl, '_system');
+      // ⚡ FIX: Gunakan Browser.open agar tidak diblokir WebView
+      try {
+        await Browser.open({ url: intentUrl, windowName: '_system' });
+      } catch {
+        // Fallback jika Browser plugin gagal
+        window.location.href = intentUrl;
+      }
       
       await new Promise((r) => setTimeout(r, 3000));
       return true;
