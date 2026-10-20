@@ -2,8 +2,6 @@
    PRINT SERVICE — Modular Print Provider System (FIXED RAWBT)
    ============================================================ */
 
-import { AppLauncher } from '@capacitor/app-launcher';
-
 export type PrintOptions = {
   copies: number;
   paperSize: string;
@@ -46,8 +44,7 @@ function safeBase64Encode(str: string): string {
 const NETWORK_PROVIDER: PrintProvider = {
   name: 'network',
   isAvailable: async (opts) => !!opts.printerName?.startsWith('LAN:'),
-  print: async (opts) => {
-    // Placeholder: LAN raw TCP (Port 9100) butuh plugin native.
+  print: async () => {
     console.warn('[Print] LAN print belum diimplementasi sempurna');
     return false;
   },
@@ -68,7 +65,6 @@ const RAWBT_PROVIDER: PrintProvider = {
       // === MODE TEXT (Test Print) ===
       if (opts.mode === 'text' && opts.textPayload) {
         const base64Data = safeBase64Encode(opts.textPayload);
-        // Format URI resmi RawBT untuk base64
         url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
       } 
       // === MODE IMAGE (Cetak Foto / Struk) ===
@@ -78,8 +74,8 @@ const RAWBT_PROVIDER: PrintProvider = {
         url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
       }
 
-      // ⚡ FIX UTAMA: Gunakan AppLauncher (bukan window.location.href)
-      // AppLauncher mem-bypass pemblokiran WebView Capacitor.
+      // ⚡ FIX VERCEL: Gunakan dynamic import agar Web build tidak error
+      const { AppLauncher } = await import('@capacitor/app-launcher');
       const result = await AppLauncher.openUrl({ url });
       
       console.log('[Print] AppLauncher result:', result);
@@ -176,34 +172,33 @@ export function buildEscPosTestPrint(opts: {
   const { deviceId, version, paperSize, appName = 'R3A BOOTH' } = opts;
   const now = new Date().toLocaleString('id-ID');
   
-  // Lebar printer: 58mm = 32 karakter, 80mm = 48 karakter
   const W = paperSize === '58mm' ? 32 : 48; 
 
   const line = '-'.repeat(W);
   const center = (t: string) => {
-    const cleanT = t.substring(0, W); // Potong kalau kepanjangan
+    const cleanT = t.substring(0, W);
     const pad = Math.max(0, Math.floor((W - cleanT.length) / 2));
     return ' '.repeat(pad) + cleanT;
   };
 
   return [
-    '\x1B\x40',                 // INIT (Reset printer)
-    '\x1B\x61\x01',             // CENTER (Tengah)
-    '\x1B\x21\x11',             // DOUBLE W+H (Huruf besar)
+    '\x1B\x40',                 
+    '\x1B\x61\x01',             
+    '\x1B\x21\x11',             
     center('TEST PRINT') + '\n',
-    '\x1B\x21\x00',             // NORMAL (Huruf normal)
+    '\x1B\x21\x00',             
     center(appName) + '\n',
-    '\x1B\x61\x00',             // LEFT (Kiri)
+    '\x1B\x61\x00',             
     line + '\n',
     `Device  : ${deviceId.slice(-8)}\n`,
     `Time    : ${now}\n`,
     `Paper   : ${paperSize}\n`,
     `Version : ${version}\n`,
     line + '\n',
-    '\x1B\x61\x01',             // CENTER
+    '\x1B\x61\x01',             
     'PRINTER OK\n',
     'siap beroperasi\n',
-    '\n\n\n',                   // Feed kertas
-    '\x1D\x56\x00',             // CUT (Potong kertas - kalau support)
+    '\n\n\n',                   
+    '\x1D\x56\x00',             
   ].join('');
 }
