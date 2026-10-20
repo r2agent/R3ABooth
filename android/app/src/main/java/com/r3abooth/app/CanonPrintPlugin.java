@@ -1,52 +1,72 @@
-import { registerPlugin, Capacitor } from '@capacitor/core';
+package com.r3abooth.app;
 
-export interface CanonPrintPlugin {
-  printPhoto(options: { imageBase64: string; paperSize?: string }): Promise<{ success: boolean }>;
-}
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.util.Base64;
+import androidx.print.PrintHelper;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
 
-const CanonPrint = registerPlugin<CanonPrintPlugin>('CanonPrint');
+@CapacitorPlugin(name = "CanonPrint")
+public class CanonPrintPlugin extends Plugin {
 
-export async function printWithCanonSDK(dataUrl: string, paperSize: string = '4 × 6 in'): Promise<boolean> {
-  try {
-    if (Capacitor.isNativePlatform()) {
-      // === JALUR APK ANDROID (Universal Print OS) ===
-      const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-      console.log(`[Print] Membuka dialog Print Android (Ukuran: ${paperSize})...`);
-      
-      const result = await CanonPrint.printPhoto({ imageBase64: base64Data, paperSize });
-      return result.success;
-      
-    } else {
-      // === JALUR WEB (VERCEL) ===
-      console.log('[Print] Mode Web, membuka Print Dialog Browser...');
-      return new Promise((resolve) => {
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
-        iframe.onload = () => {
-          const doc = iframe.contentWindow?.document;
-          if (!doc) { resolve(false); return; }
-          doc.open();
-          doc.write(`
-            <html>
-              <head><title>Print Photo</title>
-              <style>@page { size: auto; margin: 0; } body { margin:0; padding:0; text-align:center; }</style>
-            </head>
-            <body><img src="${dataUrl}" /></body>
-          </html>
-          `);
-          doc.close();
-          iframe.contentWindow?.focus();
-          setTimeout(() => {
-            try { iframe.contentWindow?.print(); } catch { /* ignore */ }
-            setTimeout(() => { iframe.remove(); resolve(true); }, 1000);
-          }, 500);
-        };
-        iframe.onerror = () => { iframe.remove(); resolve(false); };
-        document.body.appendChild(iframe);
-      });
+    @PluginMethod
+    public void printPhoto(PluginCall call) {
+        String imageBase64 = call.getString("imageBase64");
+        String orientation = call.getString("orientation", "portrait"); // "portrait" | "landscape"
+
+        if (imageBase64 == null || imageBase64.isEmpty()) {
+            call.reject("Gambar kosong!");
+            return;
+        }
+
+        // buang prefix data URL kalau ada
+        int comma = imageBase64.indexOf(",");
+        if (imageBase64.startsWith("data:") && comma != -1) {
+            imageBase64 = imageBase64.substring(comma + 1);
+        }
+
+        final Bitmap bitmap;
+        try {
+            byte[] decoded = Base64.decode(imageBase64, Base64.DEFAULT);
+            bitmap = BitmapFactory.decodeByteArray(decoded, 0, decoded.length);
+        } catch (Exception | OutOfMemoryError e) {
+            call.reject("Gagal decode gambar: " + e.getMessage());
+            return;
+        }
+
+        if (bitmap == null) {
+            call.reject("Gagal mengonversi gambar!");
+            return;
+        }
+
+        if (getActivity() == null) {
+            call.reject("Activity tidak tersedia");
+            return;
+        }
+
+        final boolean landscape = "landscape".equalsIgnoreCase(orientation);
+
+        getActivity().runOnUiThread(() -> {
+            try {
+                PrintHelper printHelper = new PrintHelper(getActivity());
+                printHelper.setScaleMode(PrintHelper.SCALE_MODE_FIT);
+                printHelper.setColorMode(PrintHelper.COLOR_MODE_COLOR);
+                printHelper.setOrientation(
+                    landscape ? PrintHelper.ORIENTATION_LANDSCAPE : PrintHelper.ORIENTATION_PORTRAIT
+                );
+                // memunculkan dialog Print bawaan Android
+                printHelper.printBitmap("R3A Booth Photo", bitmap);
+
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("Error print: " + e.getMessage());
+            }
+        });
     }
-  } catch (error) {
-    console.error('[Canon] Gagal ngeprint:', error);
-    return false;
-  }
 }
