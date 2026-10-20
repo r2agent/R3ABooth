@@ -12,6 +12,7 @@ import { enumerateCameras, type CameraDevice } from './cameraStore';
 import { CameraTestModal, CameraStatusBadge } from './cameraUi';
 import { useCamera } from './useCamera';
 import { PhotoboothSession } from './PhotoboothSession';
+import { printWithCanonSDK } from './canonPrintService'; // ⚡ TAMBAHKAN INI
 import { loadAllSettings, saveAllSettings, type AllSettings } from './settingsStore';
 import { OperatorDashboard } from './operator/OperatorDashboard';
 import { startAutoRefresh, stopAutoRefresh } from './pkceAuth';
@@ -249,6 +250,7 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
   const [showTest, setShowTest] = useState(false);
   const [saveFlash, setSaveFlash] = useState(false);
   const [testPrinterState, setTestPrinterState] = useState<TestState>({ status: 'idle', message: '' });
+  const [testPhotoPaperSize, setTestPhotoPaperSize] = useState('4 × 6 in');
   const [gdriveConnecting, setGdriveConnecting] = useState(false);
   const [gdriveTestState, setGdriveTestState] = useState<TestState>({ status: 'idle', message: '' });
   const [gdriveUploadTestState, setGdriveUploadTestState] = useState<TestState>({ status: 'idle', message: '' });
@@ -287,37 +289,62 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
     setTimeout(() => setSaveFlash(false), 2000);
   };
 
-  // ⚡ PRINT TEST DARI SETTINGS
-  const handleTestPrinter = async (paperSize: '58mm' | '80mm') => {
-    setTestPrinterState({ status: 'running', message: `Mengirim test ${paperSize}...` });
+  // ⚡ PRINT TEST DARI SETTINGS (SMART ROUTING)
+  const handleTestPrinter = async () => {
+    setTestPrinterState({ status: 'running', message: 'Mengirim test printer...' });
     try {
-      const printerName = settings.printer.printer;
-      if (!printerName) {
-        setTestPrinterState({ status: 'error', message: '❌ Pilih printer dulu di dropdown.' });
-        return;
-      }
+      const printerName = settings.printer.printer || 'BT:';
+      const isPhotoMode = appVersion === 'v1.0.0' || appVersion === 'v2.0.0';
 
-      const escpos = buildEscPosTestPrint({
-        deviceId: getDeviceId(),
-        version: appVersion,
-        paperSize,
-        appName: 'R3A BOOTH SETTINGS',
-      });
+      if (isPhotoMode) {
+        // === V1.0.0 / V2.0.0 : TEST PRINT FOTO ===
+        const canvas = document.createElement('canvas');
+        canvas.width = 1800;
+        canvas.height = 1200;
+        const ctx = canvas.getContext('2d')!;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 80px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('TEST PRINT FOTO', canvas.width / 2, canvas.height / 2 - 50);
+        ctx.font = '50px sans-serif';
+        ctx.fillText(`Ukuran: ${testPhotoPaperSize}`, canvas.width / 2, canvas.height / 2 + 50);
 
-      const ok = await printResult({
-        copies: 1,
-        paperSize,
-        layout: 'POTRAIT',
-        dataUrl: '',
-        printerName,
-        mode: 'text',
-        textPayload: escpos,
-      });
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        
+        const ok = await printWithCanonSDK(dataUrl, testPhotoPaperSize);
 
-      if (ok) {
-        setTestPrinterState({ status: 'success', message: `✅ Test Print ${paperSize} dikirim ke printer!` });
+        if (ok) {
+          setTestPrinterState({ status: 'success', message: `✅ Test Print Foto (${testPhotoPaperSize}) terkirim!` });
+        } else {
+          setTestPrinterState({ status: 'error', message: '❌ Gagal kirim ke Canon Printer.' });
+        }
       } else {
-        setTestPrinterState({ status: 'error', message: '❌ Gagal kirim perintah ke printer.' });
+        // === V1.1.0 / V2.1.0 : TEST PRINT THERMAL ===
+        const escpos = buildEscPosTestPrint({
+          deviceId: getDeviceId(),
+          version: appVersion,
+          paperSize: '80mm',
+          appName: 'R3A BOOTH SETTINGS',
+        });
+
+        const ok = await printResult({
+          copies: 1,
+          paperSize: '80mm',
+          layout: 'POTRAIT',
+          dataUrl: '',
+          printerName,
+          mode: 'text',
+          textPayload: escpos,
+        });
+
+        if (ok) {
+          setTestPrinterState({ status: 'success', message: '✅ Test Print Thermal terkirim!' });
+        } else {
+          setTestPrinterState({ status: 'error', message: '❌ Gagal kirim perintah ke printer.' });
+        }
       }
     } catch (err) {
       setTestPrinterState({ status: 'error', message: err instanceof Error ? err.message : 'Error' });
@@ -587,14 +614,30 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
               <div className="photobooth-camera-status" style={{ marginBottom: 12 }}><CameraStatusBadge status={cameraHook.status} error={cameraHook.error} /></div>
               
               {/* ⚡ TOMBOL TEST PRINT DARI SETTINGS */}
-              <div className="test-buttons" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <div className="test-buttons" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <button type="button" onClick={() => setShowTest(true)}>TEST CAMERA</button>
-                <button type="button" onClick={() => handleTestPrinter('58mm')} disabled={testPrinterState.status === 'running'}>
-                  TEST PRINT 58mm
-                </button>
-                <button type="button" onClick={() => handleTestPrinter('80mm')} disabled={testPrinterState.status === 'running'}>
-                  TEST PRINT 80mm
-                </button>
+                
+                {(appVersion === 'v1.0.0' || appVersion === 'v2.0.0') ? (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <select 
+                      value={testPhotoPaperSize} 
+                      onChange={(e) => setTestPhotoPaperSize(e.target.value)}
+                      style={{ padding: '8px', fontSize: '14px', flex: 1, color: '#342f2d' }}
+                    >
+                      <option value="4 × 6 in">4 × 6 in</option>
+                      <option value="2 × 6 in">2 × 6 in (strip)</option>
+                      <option value="5 × 7 in">5 × 7 in</option>
+                      <option value="A4">A4</option>
+                    </select>
+                    <button type="button" onClick={handleTestPrinter} disabled={testPrinterState.status === 'running'} style={{ flex: 1 }}>
+                      TEST PRINT FOTO
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={handleTestPrinter} disabled={testPrinterState.status === 'running'}>
+                    TEST PRINT THERMAL
+                  </button>
+                )}
               </div>
               {testPrinterState.status !== 'idle' ? (
                 <div className={`settings-test-result ${testPrinterState.status}`}>
