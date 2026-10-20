@@ -1,3 +1,4 @@
+import { printWithCanonSDK } from './canonPrintService';
 import { QRISGate } from './QRISGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, X, AlertCircle, RotateCcw, Check, Filter as FilterIcon, Image as ImageIcon, ChevronLeft, QrCode, Printer, RefreshCw, Maximize2, Key, Eye, Lock, Wrench } from 'lucide-react';
@@ -1277,33 +1278,49 @@ export const PhotoboothSession = ({
     try {
       const ps = event.printerSettings;
       const copies = Math.max(1, Math.min(5, ps.copies || 1));
+      
+      // Ambil gambar (di Receipt mode ambil yg B&W, di mode normal ambil yg Color)
+      const printImageUrl = isReceiptMode && compositeColorUrl ? compositeColorUrl : compositeUrl;
 
-      // Pastikan yang dicetak adalah compositeUrl (di Receipt mode ini sudah B&W)
-      const printImageUrl = isReceiptMode && compositeColorUrl 
-  ? compositeColorUrl 
-  : compositeUrl;
+      // ==========================================
+      // ⚡ LOGIKA ROUTING BERDASARKAN VERSI
+      // ==========================================
+      if (isReceiptMode) {
+        // --- V1.1.0 / V2.1.0 : THERMAL BLUETOOTH ---
+        pushActivity('Print Thermal', 'Mengirim ke printer struk...');
+        
+        const ok = await printResult({
+          copies,
+          paperSize: ps.paperSize || '58mm',
+          layout: ps.layout || 'POTRAIT',
+          dataUrl: printImageUrl, 
+          printerName: allSettings.printer.printer || 'BT:',
+        });
 
-      const ok = await printResult({
-        copies,
-        paperSize: ps.paperSize || '4 × 6 in',
-        layout: ps.layout || 'POTRAIT',
-        dataUrl: printImageUrl, 
-        printerName: allSettings.printer.printer || ps.printer,
-      });
-
-      if (ok) {
-        setPrinted(true);
-        pushActivity(
-          'Print OK', 
-          `${copies} copy · ${isReceiptMode ? 'Hitam Putih' : 'Warna Biasa'}`
-        );
+        if (ok) {
+          setPrinted(true);
+          pushActivity('Print OK', 'Thermal (Struk)');
+        } else {
+          pushActivity('Print FAIL', 'Gagal cetak Thermal');
+        }
       } else {
-        pushActivity('Print FAIL', 'Provider gagal');
+        // --- V1.0.0 / V2.0.0 : CANON SDK (FOTO) ---
+        pushActivity('Print Canon', 'Menghubungi printer foto...');
+        
+        const ok = await printWithCanonSDK(printImageUrl);
+        
+        if (ok) {
+          setPrinted(true);
+          pushActivity('Print OK', 'Canon SDK (Mock)');
+        } else {
+          pushActivity('Print FAIL', 'Gagal cetak Canon');
+        }
       }
     } catch (err) {
-      pushActivity('Print FAIL', err instanceof Error ? err.message : 'Gagal mencetak');
+      pushActivity('Print FAIL', err instanceof Error ? err.message : 'Gagal');
+    } finally {
+      setPrinting(false);
     }
-    setPrinting(false);
   }, [compositeUrl, printing, event.printerSettings, allSettings.printer, isReceiptMode, pushActivity]);
 
   const handleBackToFrameSelect = useCallback(() => {
