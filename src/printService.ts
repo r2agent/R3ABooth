@@ -73,22 +73,24 @@ const RAWBT_PROVIDER: PrintProvider = {
       console.log(`[Print] RawBT → mode=${opts.mode || 'image'}`);
 
       if (opts.mode === 'text' && opts.textPayload) {
-        // === MODE TEXT (Test Print) ===
+        // === MODE TEXT (Test Print Teks) ===
         const base64Data = safeBase64Encode(opts.textPayload);
-        // Skema rawbt: untuk teks
+        // Gunakan location.href biasa untuk teks (terbukti berhasil)
         window.location.href = `rawbt:base64,${base64Data}`;
         await new Promise((r) => setTimeout(r, 2000));
         return true;
       } 
       
-      // === MODE IMAGE (Foto / Struk) ===
+      // === MODE IMAGE (Foto / Struk / Test Frame) ===
       if (!opts.dataUrl) return false;
       
       const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
       const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
       
-      // ⚡ INI KUNCINYA: Gunakan rawbt:image/base64 (BUKAN intent, BUKAN rawbt biasa)
-      window.location.href = `rawbt:image/base64,${base64Data}`;
+      // ⚡ FIX UTAMA: Gunakan intent:base64 dan bypass WebView dengan window.open '_system'
+      const intentUrl = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+      
+      window.open(intentUrl, '_system');
       
       await new Promise((r) => setTimeout(r, 3000));
       return true;
@@ -99,17 +101,39 @@ const RAWBT_PROVIDER: PrintProvider = {
   }
 };
 
-/* ============ NETWORK & BROWSER (Placeholder) ============ */
+/* ============ NETWORK (LAN/IP) ============ */
 const NETWORK_PROVIDER: PrintProvider = {
   name: 'network',
   isAvailable: async (opts) => !!opts.printerName?.startsWith('LAN:'),
-  print: async () => false,
+  print: async (opts) => {
+    const ip = opts.printerName?.replace('LAN:', '').trim();
+    if (!ip) return false;
+
+    try {
+      console.log(`[Print] Mengirim gambar ke IP ${ip} (Port 9100)...`);
+      const res = await fetch(opts.dataUrl);
+      const blob = await res.blob();
+      
+      const response = await fetch(`http://${ip}:9100/print`, {
+        method: 'POST',
+        body: blob,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+
+      if (response.ok) return true;
+      throw new Error(`Printer IP HTTP Status: ${response.status}`);
+    } catch (err) {
+      console.error(`[Print] ❌ Gagal Network Print:`, err);
+      return false;
+    }
+  }
 };
 
+/* ============ BROWSER (Fallback untuk Web) ============ */
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
   isAvailable: async () => true,
-  print: async (opts) => {
+  print: async (opts): Promise<boolean> => {
     return new Promise((resolve) => {
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
@@ -142,6 +166,7 @@ registerProvider(NETWORK_PROVIDER);
 registerProvider(RAWBT_PROVIDER);
 registerProvider(BROWSER_PRINT_PROVIDER);
 
+/* ============ PUBLIC API ============ */
 export async function printResult(opts: PrintOptions): Promise<boolean> {
   let selectedProvider: PrintProvider | null = null;
 
@@ -153,21 +178,29 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
   }
 
   if (!selectedProvider) {
-    console.warn('[Print] Provider tidak tersedia.');
+    console.warn('[Print] Tidak ada provider yang tersedia.');
     return false;
   }
+
+  console.log(`[Print] Menggunakan provider: ${selectedProvider.name} (Target: ${opts.printerName})`);
 
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
   for (let i = 0; i < copies; i++) {
+    console.log(`[Print] Mencetak copy ke-${i + 1} dari ${copies}...`);
     const ok = await selectedProvider.print(opts);
     if (!ok) success = false;
-    if (i < copies - 1) await new Promise((r) => setTimeout(r, 1500));
+    
+    if (i < copies - 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+    }
   }
+  
   return success;
 }
 
+/* ============ ESC/POS TEXT BUILDER ============ */
 export function buildEscPosTestPrint(opts: {
   deviceId: string;
   version: string;
@@ -186,16 +219,23 @@ export function buildEscPosTestPrint(opts: {
   };
 
   return [
-    '\x1B\x40', '\x1B\x61\x01', '\x1B\x21\x11',
+    '\x1B\x40',                 
+    '\x1B\x61\x01',             
+    '\x1B\x21\x11',             
     center('TEST PRINT') + '\n',
-    '\x1B\x21\x00', center(appName) + '\n',
-    '\x1B\x61\x00', line + '\n',
+    '\x1B\x21\x00',             
+    center(appName) + '\n',
+    '\x1B\x61\x00',             
+    line + '\n',
     `Device  : ${deviceId.slice(-8)}\n`,
     `Time    : ${now}\n`,
     `Paper   : ${paperSize}\n`,
     `Version : ${version}\n`,
-    line + '\n', '\x1B\x61\x01',
-    'PRINTER OK\n', 'siap beroperasi\n',
-    '\n\n\n', '\x1D\x56\x00',
+    line + '\n',
+    '\x1B\x61\x01',             
+    'PRINTER OK\n',
+    'siap beroperasi\n',
+    '\n\n\n',                   
+    '\x1D\x56\x00',             
   ].join('');
 }
