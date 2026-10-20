@@ -11,12 +11,20 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    
+    <!-- BLUETOOTH PRINTER PERMISSIONS -->
+    <!-- Untuk Android 11 ke bawah -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <!-- Untuk Android 12 ke atas (Wajib untuk scan/pair) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <!-- FEATURES -->
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <!-- Hardware Bluetooth tidak wajib (supaya tetap bisa install di tablet tanpa bluetooth) -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -63,6 +71,7 @@
         </provider>
     </application>
 
+    <!-- QUERIES (Untuk Android 11+ agar bisa cek aplikasi RawBT) -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -72,5 +81,13 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="com.r3abooth.app" />
         </intent>
+        <!-- Query untuk RawBT (Silent Print) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="rawbt" />
+        </intent>
+        
+        <!-- ⚡ TAMBAHAN: Izin spesifik untuk mendeteksi package RawBT di Android 11+ -->
+        <package android:name="ru.a402d.rawbtprinter" />
     </queries>
 </manifest>

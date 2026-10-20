@@ -18,6 +18,8 @@ import { startAutoRefresh, stopAutoRefresh } from './pkceAuth';
 import { ReminderPopup } from './ReminderPopup';
 import { ScreensaverSlideshow } from './ScreensaverSlideshow';
 import { loadAppVersion, saveAppVersion, AVAILABLE_VERSIONS, type AppVersion } from './versionStore';
+import { printResult, buildEscPosTestPrint } from './printService';
+import { getDeviceId } from './statusSync';
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -285,10 +287,41 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
     setTimeout(() => setSaveFlash(false), 2000);
   };
 
-  const handleTestPrinter = async () => {
-    setTestPrinterState({ status: 'running', message: 'Testing...' });
-    const result = await testPrinter(settings.printer.printer);
-    setTestPrinterState({ status: result.success ? 'success' : 'error', message: result.message });
+  // ⚡ PRINT TEST DARI SETTINGS
+  const handleTestPrinter = async (paperSize: '58mm' | '80mm') => {
+    setTestPrinterState({ status: 'running', message: `Mengirim test ${paperSize}...` });
+    try {
+      const printerName = settings.printer.printer;
+      if (!printerName) {
+        setTestPrinterState({ status: 'error', message: '❌ Pilih printer dulu di dropdown.' });
+        return;
+      }
+
+      const escpos = buildEscPosTestPrint({
+        deviceId: getDeviceId(),
+        version: appVersion,
+        paperSize,
+        appName: 'R3A BOOTH SETTINGS',
+      });
+
+      const ok = await printResult({
+        copies: 1,
+        paperSize,
+        layout: 'POTRAIT',
+        dataUrl: '',
+        printerName,
+        mode: 'text',
+        textPayload: escpos,
+      });
+
+      if (ok) {
+        setTestPrinterState({ status: 'success', message: `✅ Test Print ${paperSize} dikirim ke printer!` });
+      } else {
+        setTestPrinterState({ status: 'error', message: '❌ Gagal kirim perintah ke printer.' });
+      }
+    } catch (err) {
+      setTestPrinterState({ status: 'error', message: err instanceof Error ? err.message : 'Error' });
+    }
   };
 
   const handleConnectGdrive = async () => {
@@ -552,9 +585,16 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
               </div>
               
               <div className="photobooth-camera-status" style={{ marginBottom: 12 }}><CameraStatusBadge status={cameraHook.status} error={cameraHook.error} /></div>
-              <div className="test-buttons">
+              
+              {/* ⚡ TOMBOL TEST PRINT DARI SETTINGS */}
+              <div className="test-buttons" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button type="button" onClick={() => setShowTest(true)}>TEST CAMERA</button>
-                <button type="button" onClick={handleTestPrinter} disabled={testPrinterState.status === 'running'}>TEST PRINTER</button>
+                <button type="button" onClick={() => handleTestPrinter('58mm')} disabled={testPrinterState.status === 'running'}>
+                  TEST PRINT 58mm
+                </button>
+                <button type="button" onClick={() => handleTestPrinter('80mm')} disabled={testPrinterState.status === 'running'}>
+                  TEST PRINT 80mm
+                </button>
               </div>
               {testPrinterState.status !== 'idle' ? (
                 <div className={`settings-test-result ${testPrinterState.status}`}>
@@ -1257,7 +1297,6 @@ function App() {
     },
   };
 
-  // ⚡ Phase 2: Support #operator DAN #operator/DEVICE_ID (Secondary Admin Link)
   if (hash.startsWith('#operator')) {
     const focusDeviceId =
       hash.replace(/^#operator\/?/, '').split('/')[0] || undefined;
