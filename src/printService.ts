@@ -1,5 +1,5 @@
 /* ============================================================
-   PRINT SERVICE — Modular Print Provider System (FIXED RAWBT)
+   PRINT SERVICE — Modular Print Provider System (FINAL RAWBT)
    ============================================================ */
 
 export type PrintOptions = {
@@ -30,7 +30,6 @@ function isNativePlatform(): boolean {
   return !!w.Capacitor?.isNativePlatform?.();
 }
 
-// Helper: String ke Base64 yang aman untuk karakter kontrol (ESC/POS)
 function safeBase64Encode(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
@@ -40,7 +39,7 @@ function safeBase64Encode(str: string): string {
   return btoa(binary);
 }
 
-// Resize gambar agar tidak crash (limit memori Android Intent)
+// Resize gambar agar tidak crash / memori penuh
 function resizeImageForThermal(dataUrl: string, paperSize: string): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -63,7 +62,7 @@ function resizeImageForThermal(dataUrl: string, paperSize: string): Promise<stri
   });
 }
 
-/* ============ RAWTBT ============ */
+/* ============ RAWTBT (BT Classic via RawBT app) ============ */
 const RAWBT_PROVIDER: PrintProvider = {
   name: 'rawbt',
   isAvailable: async (opts) => {
@@ -71,10 +70,12 @@ const RAWBT_PROVIDER: PrintProvider = {
   },
   print: async (opts) => {
     try {
+      console.log(`[Print] RawBT → mode=${opts.mode || 'image'}`);
+
       if (opts.mode === 'text' && opts.textPayload) {
-        // === MODE TEXT (Test Print ESC/POS) ===
+        // === MODE TEXT (Test Print) ===
         const base64Data = safeBase64Encode(opts.textPayload);
-        // Teks pakai skema rawbt:
+        // Skema rawbt: untuk teks
         window.location.href = `rawbt:base64,${base64Data}`;
         await new Promise((r) => setTimeout(r, 2000));
         return true;
@@ -86,13 +87,9 @@ const RAWBT_PROVIDER: PrintProvider = {
       const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
       const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
       
-      // ⚡ GAMBAR WAJIB PAKAI INTENT SCHEME
-      // window.location.href akan ditangkap oleh Capacitor WebView
-      const intentUrl = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+      // ⚡ INI KUNCINYA: Gunakan rawbt:image/base64 (BUKAN intent, BUKAN rawbt biasa)
+      window.location.href = `rawbt:image/base64,${base64Data}`;
       
-      window.location.href = intentUrl;
-      
-      // Tunggu user selesai print di aplikasi RawBT
       await new Promise((r) => setTimeout(r, 3000));
       return true;
     } catch (err) {
@@ -102,14 +99,11 @@ const RAWBT_PROVIDER: PrintProvider = {
   }
 };
 
-/* ============ NETWORK & BROWSER ============ */
+/* ============ NETWORK & BROWSER (Placeholder) ============ */
 const NETWORK_PROVIDER: PrintProvider = {
   name: 'network',
   isAvailable: async (opts) => !!opts.printerName?.startsWith('LAN:'),
-  print: async () => {
-    console.warn('[Print] LAN belum diimplementasi');
-    return false;
-  },
+  print: async () => false,
 };
 
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
@@ -158,7 +152,10 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
     }
   }
 
-  if (!selectedProvider) return false;
+  if (!selectedProvider) {
+    console.warn('[Print] Provider tidak tersedia.');
+    return false;
+  }
 
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));

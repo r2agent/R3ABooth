@@ -4,8 +4,95 @@ import { FrameEditor } from './FrameEditor';
 import { createFrame, createSlot, duplicateSlot, saveEvent } from './eventStore';
 import type { R3aEvent, Frame, Slot } from './eventStore';
 import { publishEventToCloud, buildEventUrl, generateSlug } from './cloudEventSync';
+import { printResult } from './printService';
 
 type EventFileTab = 'event' | 'frame' | 'printer' | 'status';
+
+// ⚡ FUNGSI UNTUK MENGGAMBAR "TEST PRINT" + FRAME 1 KE CANVAS
+async function generateEventTestPrint(event: R3aEvent): Promise<string> {
+  const frame = event.frames?.[0];
+  if (!frame) throw new Error('Belum ada frame yang dibuat. Tambahkan frame terlebih dahulu.');
+
+  const canvas = document.createElement('canvas');
+  const targetW = 576; // Standar kertas thermal 80mm (384 untuk 58mm)
+  const headerH = 120; // Tinggi area teks "TEST PRINT" di atas
+  
+  let img: HTMLImageElement | null = null;
+  if (frame.image) {
+    img = new Image();
+    img.src = frame.image;
+    await new Promise((resolve, reject) => {
+      img!.onload = resolve;
+      img!.onerror = reject;
+    });
+  }
+
+  // Hitung tinggi frame (proporsional)
+  const frameH = img ? (img.height / img.width) * targetW : 400;
+  canvas.width = targetW;
+  canvas.height = headerH + frameH;
+
+  const ctx = canvas.getContext('2d')!;
+  
+  // Background Putih
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // === 1. Gambar Teks Header ===
+  ctx.fillStyle = '#000';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText('TEST PRINT', targetW / 2, 45);
+  
+  ctx.font = '16px sans-serif';
+  ctx.fillText(event.eventName || 'Untitled Event', targetW / 2, 75);
+  
+  ctx.font = '14px sans-serif';
+  ctx.fillText(`Frame 1: ${frame.name || 'Default'} | ${new Date().toLocaleDateString('id-ID')}`, targetW / 2, 100);
+
+  // Garis pemisah
+  ctx.beginPath();
+  ctx.moveTo(20, 110);
+  ctx.lineTo(targetW - 20, 110);
+  ctx.stroke();
+
+  // === 2. Gambar Frame Utama ===
+  if (img) {
+    ctx.drawImage(img, 0, headerH, targetW, frameH);
+  } else {
+    // Kalau frame belum ada gambar, buat kotak abu-abu
+    ctx.fillStyle = '#eee';
+    ctx.fillRect(10, headerH + 10, targetW - 20, frameH - 20);
+    ctx.fillStyle = '#999';
+    ctx.font = '20px sans-serif';
+    ctx.fillText('FRAME BELUM ADA GAMBAR', targetW / 2, headerH + frameH / 2);
+  }
+
+  // === 3. Gambar Kotak-Kotak Slot Foto (Dummy) ===
+  if (frame.slots && frame.slots.length > 0) {
+    frame.slots.forEach((slot, i) => {
+      const sx = (slot.x / 100) * targetW;
+      const sy = headerH + (slot.y / 100) * frameH;
+      const sw = (slot.w / 100) * targetW;
+      const sh = (slot.h / 100) * frameH;
+
+      // Kotak warna abu-abu
+      ctx.fillStyle = 'rgba(200, 200, 200, 0.8)';
+      ctx.fillRect(sx, sy, sw, sh);
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx, sy, sw, sh);
+
+      // Teks "FOTO 1", "FOTO 2", dst
+      ctx.fillStyle = '#555';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`FOTO ${i + 1}`, sx + sw / 2, sy + sh / 2);
+    });
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
 
 export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved: (event: R3aEvent) => void; onHome: () => void }) => {
   const [activeTab, setActiveTab] = useState<EventFileTab>(
@@ -15,6 +102,10 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
   const [activeFrameIndex, setActiveFrameIndex] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // ⚡ State untuk Test Print
+  const [testingPrint, setTestingPrint] = useState(false);
+  const [testPrintMsg, setTestPrintMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   const [publishing, setPublishing] = useState(false);
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
@@ -28,6 +119,7 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     setPublishedSlug(event.slug || null);
     setPublishMessage(null);
     setPublishError(null);
+    setTestPrintMsg(null);
     setActiveTab(event.eventName ? 'status' : 'event');
   }, [event]);
 
@@ -128,6 +220,38 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
     } finally {
       clearTimeout(timeout);
       setSaving(false);
+    }
+  };
+
+  // ⚡ FUNGSI HANDLER TEST PRINT
+  const handleTestPrint = async () => {
+    setTestingPrint(true);
+    setTestPrintMsg(null);
+    try {
+      const dataUrl = await generateEventTestPrint(draft);
+      
+      const rawPaperSize = draft.printerSettings?.paperSize || '80mm Thermal';
+      const paperSize = rawPaperSize.includes('58') ? '58mm' : '80mm';
+      const printerName = draft.printerSettings?.printer || 'BT:';
+
+      const ok = await printResult({
+        copies: 1,
+        paperSize,
+        layout: 'POTRAIT',
+        dataUrl,
+        printerName,
+        mode: 'image',
+      });
+
+      if (ok) {
+        setTestPrintMsg({ type: 'success', text: '✅ Test print frame berhasil dikirim ke printer!' });
+      } else {
+        setTestPrintMsg({ type: 'error', text: '❌ Gagal mengirim test print. Pastikan printer sudah terhubung.' });
+      }
+    } catch (err) {
+      setTestPrintMsg({ type: 'error', text: `❌ ${err instanceof Error ? err.message : 'Error'}` });
+    } finally {
+      setTestingPrint(false);
     }
   };
 
@@ -415,13 +539,59 @@ export const EventFile = ({ event, onSaved, onHome }: { event: R3aEvent; onSaved
                 </button>
               </div>
 
+              {/* ⚡ TOMBOL TEST PRINT FRAME 1 */}
+              <div style={{ padding: '16px 20px', background: 'rgba(255,255,255,.05)', border: '1px dashed rgba(255,255,255,.2)', borderRadius: 8 }}>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>TEST PRINT FRAME 1</div>
+                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,.5)', marginTop: 4 }}>
+                    Cetak layout Frame 1 beserta teks "TEST PRINT" untuk mengecek ukuran kertas thermal.
+                  </div>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={handleTestPrint}
+                  disabled={testingPrint || draft.frames.length === 0}
+                  style={{
+                    padding: '10px 16px',
+                    background: testingPrint || draft.frames.length === 0 ? '#555' : '#ef3f25',
+                    color: '#fff',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    letterSpacing: '.06em',
+                    cursor: testingPrint || draft.frames.length === 0 ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <ImageIcon size={16} />
+                  {testingPrint ? 'MENGIRIM...' : '🖨️ TEST PRINT FRAME 1'}
+                </button>
+
+                {testPrintMsg && (
+                  <div style={{
+                    marginTop: 12,
+                    padding: '10px 14px',
+                    background: testPrintMsg.type === 'success' ? 'rgba(74,222,128,.15)' : 'rgba(239,63,37,.15)',
+                    border: `1px solid ${testPrintMsg.type === 'success' ? 'rgba(74,222,128,.4)' : 'rgba(239,63,37,.4)'}`,
+                    color: testPrintMsg.type === 'success' ? '#4ade80' : '#ff9f7a',
+                    fontSize: 13,
+                    display: 'flex', alignItems: 'center', gap: 8
+                  }}>
+                    {testPrintMsg.type === 'success' ? <Check size={16} /> : <AlertCircle size={16} />}
+                    {testPrintMsg.text}
+                  </div>
+                )}
+              </div>
+
               <div style={{
                 padding: '16px 20px', background: 'rgba(74,222,128,.08)',
                 border: '1px solid rgba(74,222,128,.3)', fontSize: 13,
                 color: 'rgba(255,255,255,.75)', lineHeight: 1.5,
               }}>
-                ℹ️ Print pakai <strong>dialog print OS</strong>. User klik PRINT → pilih printer → cetak.
-                Pastikan printer sudah ter-setup di device booth.
+                ℹ️ Print pakai <strong>RawBT</strong>. Pastikan printer BT sudah dipilih di Settings sebelum melakukan Test Print.
               </div>
             </div>
           </div>
