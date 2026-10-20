@@ -1279,7 +1279,9 @@ export const PhotoboothSession = ({
       const copies = Math.max(1, Math.min(5, ps.copies || 1));
 
       // Pastikan yang dicetak adalah compositeUrl (di Receipt mode ini sudah B&W)
-      const printImageUrl = compositeUrl;
+      const printImageUrl = isReceiptMode && compositeColorUrl 
+  ? compositeColorUrl 
+  : compositeUrl;
 
       const ok = await printResult({
         copies,

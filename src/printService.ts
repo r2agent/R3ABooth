@@ -203,6 +203,15 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
     gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
   }
 
+  // ✅ Brightness & contrast adjustment
+  const brightness = 40;
+  const contrast = 1.4;
+  for (let i = 0; i < gray.length; i++) {
+    let v = gray[i] + brightness;
+    v = (v - 128) * contrast + 128;
+    gray[i] = Math.max(0, Math.min(255, v));
+  }
+
   // Floyd-Steinberg dithering
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
