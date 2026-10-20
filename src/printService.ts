@@ -83,7 +83,7 @@ function buildEscPosTestPrint(opts: {
 }
 
 // =========================================================================
-// FUNGSI 2: KONVERSI GAMBAR JPG KE ESC/POS BITMAP (Bagian Paling Berat!)
+// FUNGSI 2: KONVERSI GAMBAR JPG KE ESC/POS BITMAP
 // =========================================================================
 async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number = 576): Promise<string> {
   return new Promise((resolve) => {
@@ -95,7 +95,6 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
       canvas.height = Math.floor(img.height * scale);
       
       const ctx = canvas.getContext('2d')!;
-      // Background putih biar transparan jadi putih
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -103,7 +102,6 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const { data, width, height } = imageData;
       
-      // ESC/POS Header untuk Gambar (GS v 0)
       const xL = width % 256;
       const xH = Math.floor(width / 256);
       const yL = height % 256;
@@ -111,7 +109,6 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
       
       let command = `\x1D\x76\x30\x00${String.fromCharCode(xL, xH, yL, yH)}`;
       
-      // Looping pixel per baris (8 pixel jadi 1 byte)
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x += 8) {
           let byte = 0;
@@ -121,20 +118,14 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
               const r = data[idx];
               const g = data[idx + 1];
               const b = data[idx + 2];
-              // Konversi ke Grayscale (Hitam/Putih)
               const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-              // Jika gelap, bit jadi 1 (hitam)
-              if (gray < 128) {
-                byte |= (1 << (7 - bit));
-              }
+              if (gray < 128) byte |= (1 << (7 - bit));
             }
           }
           command += String.fromCharCode(byte);
         }
       }
-      // Perintah potong kertas (optional)
       command += '\n\n\n\x1D\x56\x00'; 
-      
       resolve(command);
     };
     img.src = dataUrl;
@@ -145,57 +136,65 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
 const NATIVE_BT_PROVIDER: PrintProvider = {
   name: 'native-bt',
   isAvailable: async (opts) => {
-    // Cek apakah di APK dan punya printer name (format: BT: MAC_ADDRESS atau BT: Name)
     return isNativePlatform() && !!opts.printerName?.startsWith('BT:');
   },
   print: async (opts) => {
     try {
-      const printerId = opts.printerName?.replace('BT:', '').trim() || '';
-      console.log(`[Print] Native BT → Menghubungkan ke ${printerId}...`);
+      if (!BluetoothSerial) throw new Error('Plugin Bluetooth tidak terdeteksi.');
 
-      // 1. Coba Connect (Kalau gagal, coba scan nama)
-      try {
-        await BluetoothSerial.connect(printerId);
-      } catch (err) {
-        console.log('[Print] Connect langsung gagal, coba cari via list...', err);
-        const devices = await BluetoothSerial.list();
-        const target = devices.find(d => d.name === printerId || d.address === printerId);
-        if (!target) throw new Error('Printer tidak ditemukan di daftar BT.');
-        await BluetoothSerial.connect(target.address);
+      // 1. Nyalakan BT jika mati
+      const isEnabled = await BluetoothSerial.isEnabled();
+      if (!isEnabled) {
+        await BluetoothSerial.enable();
+        await new Promise(r => setTimeout(r, 1000)); 
       }
 
-      console.log('[Print] Bluetooth Terhubung!');
+      // 2. Cari MAC Address dari Printer yang sudah di-pair
+      const printerId = opts.printerName?.replace('BT:', '').trim() || '';
+      console.log(`[Print] Mencari printer: ${printerId}`);
+      
+      const devices = await BluetoothSerial.list();
+      const target = devices.find(d => 
+        (d.name && d.name.toLowerCase().includes(printerId.toLowerCase())) || 
+        d.address === printerId
+      );
 
-      // 2. Siapkan Data ESC/POS
+      if (!target) {
+        throw new Error(`Printer "${printerId}" tidak ditemukan di daftar Bluetooth HP. Pastikan sudah di-Pair.`);
+      }
+
+      // 3. Connect pakai MAC Address (bukan nama)
+      console.log(`[Print] Menghubungkan ke ${target.name} (${target.address})...`);
+      await BluetoothSerial.connect(target.address);
+      
+      // 4. Siapkan Data
       let dataToWrite = '';
-
       if (opts.mode === 'text' && opts.textPayload) {
         dataToWrite = opts.textPayload;
       } else {
-        if (!opts.dataUrl) throw new Error('Gambar tidak ada');
-        console.log('[Print] Mengonversi gambar ke Bitmap ESC/POS...');
+        if (!opts.dataUrl) throw new Error('Gambar kosong');
         const targetW = opts.paperSize.includes('58') ? 384 : 576;
         dataToWrite = await convertImageToEscPosBitmap(opts.dataUrl, targetW);
       }
 
-      // 3. Kirim Data ke Printer
-      console.log('[Print] Mengirim data ke printer...');
+      // 5. Kirim Data
+      console.log('[Print] Mengirim data...');
       await BluetoothSerial.write(dataToWrite);
 
-      // 4. Putuskan Koneksi
+      // 6. Disconnect
       await new Promise(r => setTimeout(r, 1000));
       await BluetoothSerial.disconnect();
       
-      console.log('[Print] ✅ Cetak Selesai!');
+      console.log('[Print] ✅ Sukses!');
       return true;
     } catch (err) {
-      console.error(`[Print] ❌ Native BT Error:`, err);
-      return false;
+      console.error(`[Print] ❌ Error Native BT:`, err);
+      throw err; // Lempar error agar ditangkap UI
     }
   }
 };
 
-// (Opsional) Bawa RawBT sebagai cadangan
+// (Fallback RawBT)
 const RAWBT_PROVIDER: PrintProvider = {
   name: 'rawbt',
   isAvailable: async (opts) => isNativePlatform() && !!opts.printerName?.startsWith('BT:'),
@@ -216,7 +215,7 @@ const BROWSER_PRINT_PROVIDER: PrintProvider = {
   print: async () => false,
 };
 
-// DAFTARKAN PROVIDER (Native di paling atas)
+// DAFTARKAN PROVIDER
 registerProvider(NATIVE_BT_PROVIDER);
 registerProvider(RAWBT_PROVIDER);
 registerProvider(BROWSER_PRINT_PROVIDER);
