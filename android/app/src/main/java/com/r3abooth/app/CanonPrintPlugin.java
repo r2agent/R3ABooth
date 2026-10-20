@@ -1,52 +1,52 @@
-package com.r3abooth.app;
+import { registerPlugin, Capacitor } from '@capacitor/core';
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.util.Base64;
-import androidx.print.PrintHelper;
-import com.getcapacitor.JSObject;
-import com.getcapacitor.Plugin;
-import com.getcapacitor.PluginCall;
-import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.CapacitorPlugin;
+export interface CanonPrintPlugin {
+  printPhoto(options: { imageBase64: string; paperSize?: string }): Promise<{ success: boolean }>;
+}
 
-@CapacitorPlugin(name = "CanonPrint")
-public class CanonPrintPlugin extends Plugin {
+const CanonPrint = registerPlugin<CanonPrintPlugin>('CanonPrint');
 
-    @PluginMethod
-    public void printPhoto(PluginCall call) {
-        String imageBase64 = call.getString("imageBase64");
-
-        if (imageBase64 == null) {
-            call.reject("Gambar kosong!");
-            return;
-        }
-
-        try {
-            // 1. Ubah Base64 dari React menjadi Bitmap Java
-            byte[] decodedString = Base64.decode(imageBase64, Base64.DEFAULT);
-            Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-
-            if (decodedByte == null) {
-                call.reject("Gagal mengonversi gambar!");
-                return;
-            }
-
-            // 2. Panggil Dialog Print bawaan Android
-            getActivity().runOnUiThread(() -> {
-                PrintHelper printHelper = new PrintHelper(getActivity());
-                printHelper.setScaleMode(PrintHelper.SCALE_MODE_FIT);
-                // Ini akan memunculkan pop-up Print di layar tablet
-                printHelper.printBitmap("R3A Booth Photo", decodedByte);
-            });
-
-            // Anggap sukses (karena dialog sedang terbuka)
-            JSObject ret = new JSObject();
-            ret.put("success", true);
-            call.resolve(ret);
-            
-        } catch (Exception e) {
-            call.reject("Error: " + e.getMessage());
-        }
+export async function printWithCanonSDK(dataUrl: string, paperSize: string = '4 × 6 in'): Promise<boolean> {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      // === JALUR APK ANDROID (Universal Print OS) ===
+      const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+      console.log(`[Print] Membuka dialog Print Android (Ukuran: ${paperSize})...`);
+      
+      const result = await CanonPrint.printPhoto({ imageBase64: base64Data, paperSize });
+      return result.success;
+      
+    } else {
+      // === JALUR WEB (VERCEL) ===
+      console.log('[Print] Mode Web, membuka Print Dialog Browser...');
+      return new Promise((resolve) => {
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+        iframe.onload = () => {
+          const doc = iframe.contentWindow?.document;
+          if (!doc) { resolve(false); return; }
+          doc.open();
+          doc.write(`
+            <html>
+              <head><title>Print Photo</title>
+              <style>@page { size: auto; margin: 0; } body { margin:0; padding:0; text-align:center; }</style>
+            </head>
+            <body><img src="${dataUrl}" /></body>
+          </html>
+          `);
+          doc.close();
+          iframe.contentWindow?.focus();
+          setTimeout(() => {
+            try { iframe.contentWindow?.print(); } catch { /* ignore */ }
+            setTimeout(() => { iframe.remove(); resolve(true); }, 1000);
+          }, 500);
+        };
+        iframe.onerror = () => { iframe.remove(); resolve(false); };
+        document.body.appendChild(iframe);
+      });
     }
+  } catch (error) {
+    console.error('[Canon] Gagal ngeprint:', error);
+    return false;
+  }
 }
