@@ -203,28 +203,65 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
     gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
   }
 
-  // ✅ Brightness & contrast adjustment
-  const brightness = 40;
-  const contrast = 1.4;
+  // ✅ 1. Brightness & Contrast adjustment
+  const brightness = 20; // Diturunkan sedikit karena Sharpen akan menambah kontras
+  const contrast = 1.1;  
   for (let i = 0; i < gray.length; i++) {
     let v = gray[i] + brightness;
     v = (v - 128) * contrast + 128;
     gray[i] = Math.max(0, Math.min(255, v));
   }
 
-  // Floyd-Steinberg dithering
+  // ⚡ 2. SHARPEN FILTER (Penajaman Tepi / Edge Enhancement)
+  const sharpenKernel = [
+     0, -1,  0,
+    -1,  5, -1,
+     0, -1,  0
+  ];
+  const sharpenedGray = new Float32Array(gray.length);
+  
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      let sum = 0;
+      let k = 0;
+      for (let ky = -1; ky <= 1; ky++) {
+        for (let kx = -1; kx <= 1; kx++) {
+          const pixel = gray[(y + ky) * width + (x + kx)];
+          sum += pixel * sharpenKernel[k];
+          k++;
+        }
+      }
+      sharpenedGray[y * width + x] = Math.max(0, Math.min(255, sum));
+    }
+  }
+  
+  // Copy hasil sharpen kembali ke array gray (kecuali pinggiran gambar)
+  for (let i = 0; i < gray.length; i++) {
+    const x = i % width;
+    const y = Math.floor(i / width);
+    if (x > 0 && x < width - 1 && y > 0 && y < height - 1) {
+      gray[i] = sharpenedGray[i];
+    }
+  }
+
+  // ⚡ 3. ATKINSON DITHERING
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
       const old = gray[i];
       const nw = old < 128 ? 0 : 255;
-      const err = old - nw;
+      const err = (old - nw) / 8;
       gray[i] = nw;
-      if (x + 1 < width) gray[i + 1] += (err * 7) / 16;
+
+      if (x + 1 < width) gray[i + 1] += err;
+      if (x + 2 < width) gray[i + 2] += err;
       if (y + 1 < height) {
-        if (x > 0) gray[i + width - 1] += (err * 3) / 16;
-        gray[i + width] += (err * 5) / 16;
-        if (x + 1 < width) gray[i + width + 1] += err / 16;
+        if (x > 0) gray[i + width - 1] += err;
+        gray[i + width] += err;
+        if (x + 1 < width) gray[i + width + 1] += err;
+      }
+      if (y + 2 < height) {
+        gray[i + width * 2] += err;
       }
     }
   }
