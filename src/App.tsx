@@ -571,42 +571,126 @@ const Settings = ({ onHome, appVersion, onVersionChange }: {
                 <button className={`settings-switch ${settings.printer.printerOn ? 'on' : ''}`} type="button" onClick={() => update('printer', { printerOn: !settings.printer.printerOn })}>{settings.printer.printerOn ? 'ON' : 'OFF'}</button>
               </div>
 
-              <div className="setting-control">
-                <span>DETECTED BLUETOOTH</span>
-                <select value={settings.printer.printer} onChange={(e) => {
-                  const val = e.target.value;
-                  if (val.startsWith('BT:')) update('printer', { printer: val, printerBluetooth: val.replace('BT:', '').trim() });
-                  else update('printer', { printer: val });
-                }}>
-                  <option value="">-- Pilih Perangkat BT --</option>
-                  {printers.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-                <em>{printers.length > 0 ? `${printers.length} DEVICE FOUND` : 'NO DEVICE FOUND'}</em>
+              {/* ⚡ BYPASS TOGGLE */}
+              <div className="setting-control" style={{ background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.2)', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#ffd94e', fontWeight: 800 }}>PRINTER BYPASS (DUAL MODE)</span>
+                  <button 
+                    type="button"
+                    className={`toggle-row ${(settings.printer as any).bypassEnabled ? 'is-on' : ''}`} 
+                    onClick={() => update('printer', { bypassEnabled: !(settings.printer as any).bypassEnabled })}
+                  >
+                    <i />{(settings.printer as any).bypassEnabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <em style={{ fontSize: 11, opacity: 0.7, marginTop: 4, display: 'block' }}>Izinkan Bluetooth & WiFi/LAN menyala secara bersamaan.</em>
               </div>
 
-              <div className="setting-control">
-                <span>PRINTER IP (LAN / WIFI)</span>
-                <input 
-                  type="text" 
-                  value={settings.printer.printerIp || ''} 
-                  onChange={(e) => update('printer', { printerIp: e.target.value, printer: `LAN: ${e.target.value}` })} 
-                  placeholder="192.168.1.100" 
-                  style={{ padding: 8, fontSize: 14, color: '#342f2d', background: '#fffdf9', border: '1px solid rgba(0,0,0,.1)' }}
-                />
+              {/* ⚡ SECTION 1: BLUETOOTH */}
+              <div className="setting-control" style={{ borderLeft: '4px solid #60a5fa', paddingLeft: '12px', marginTop: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>BLUETOOTH (THERMAL)</span>
+                  <button 
+                    type="button"
+                    className={`toggle-row ${settings.printer.printerBluetooth ? 'is-on' : ''}`} 
+                    onClick={() => {
+                      const isOn = !!settings.printer.printerBluetooth;
+                      if (!isOn) {
+                        update('printer', { 
+                          printerBluetooth: 'RPP02N', 
+                          printer: 'BT: RPP02N',
+                          ...(!(settings.printer as any).bypassEnabled ? { printerIp: '' } : {}) 
+                        });
+                      } else {
+                        update('printer', { printerBluetooth: '', printer: '' });
+                      }
+                    }}
+                  >
+                    <i />{settings.printer.printerBluetooth ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                
+                {settings.printer.printerBluetooth !== undefined && settings.printer.printerBluetooth !== '' && (
+                  <>
+                    <select 
+                      value={settings.printer.printer} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.startsWith('BT:')) update('printer', { printer: val, printerBluetooth: val.replace('BT:', '').trim() });
+                        else update('printer', { printer: val });
+                      }}
+                      style={{ marginTop: '8px' }}
+                    >
+                      <option value="">-- Pilih Perangkat BT --</option>
+                      {printers.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <em style={{ fontSize: 11, opacity: 0.6, marginTop: '4px', display: 'block' }}>{printers.length > 0 ? `${printers.length} DEVICE FOUND` : 'NO DEVICE FOUND'}</em>
+                    
+                    <input 
+                      type="text" 
+                      value={settings.printer.printerBluetooth || ''} 
+                      onChange={(e) => update('printer', { printerBluetooth: e.target.value, printer: `BT: ${e.target.value}` })} 
+                      placeholder="Nama BT Manual (RPP02N)" 
+                      style={{ marginTop: '8px', padding: 8, fontSize: 12, color: '#342f2d', background: '#fffdf9' }}
+                    />
+                  </>
+                )}
               </div>
 
-              <div className="setting-control">
-                <span>BLUETOOTH NAME (MANUAL)</span>
-                <input 
-                  type="text" 
-                  value={settings.printer.printerBluetooth || ''} 
-                  onChange={(e) => update('printer', { printerBluetooth: e.target.value, printer: `BT: ${e.target.value}` })} 
-                  placeholder="RPP02N" 
-                  style={{ padding: 8, fontSize: 14, color: '#342f2d', background: '#fffdf9', border: '1px solid rgba(0,0,0,.1)' }}
-                />
+              {/* ⚡ SECTION 2: WIFI / LAN */}
+              <div className="setting-control" style={{ borderLeft: '4px solid #4ade80', paddingLeft: '12px', marginTop: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>WIFI / LAN</span>
+                  <button 
+                    type="button"
+                    className={`toggle-row ${settings.printer.printerIp ? 'is-on' : ''}`} 
+                    onClick={() => {
+                      const isOn = !!settings.printer.printerIp;
+                      if (!isOn) {
+                        update('printer', { 
+                          printerIp: '192.168.1.100', 
+                          printer: 'LAN: 192.168.1.100',
+                          ...(!(settings.printer as any).bypassEnabled ? { printerBluetooth: '' } : {}) 
+                        });
+                      } else {
+                        update('printer', { printerIp: '', printer: '' });
+                      }
+                    }}
+                  >
+                    <i />{settings.printer.printerIp ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {settings.printer.printerIp !== undefined && settings.printer.printerIp !== '' && (
+                  <>
+                    <input 
+                      type="text" 
+                      value={settings.printer.printerIp || ''} 
+                      onChange={(e) => update('printer', { printerIp: e.target.value, printer: `LAN: ${e.target.value}` })} 
+                      placeholder="192.168.1.100" 
+                      style={{ marginTop: '8px', padding: 8, fontSize: 12, color: '#342f2d', background: '#fffdf9' }}
+                    />
+                    <em style={{ fontSize: 11, opacity: 0.6, marginTop: '4px', display: 'block' }}>Pastikan IP printer WiFi/LAN benar.</em>
+                  </>
+                )}
               </div>
 
-              <div className="setting-control">
+              {/* ⚡ JIKA BYPASS NYALA & DUA-DUANYA AKTIF: PILIH PRINTER AKTIF */}
+              {(settings.printer as any).bypassEnabled && settings.printer.printerBluetooth && settings.printer.printerIp && (
+                <div className="setting-control" style={{ background: 'rgba(239, 63, 37, 0.1)', border: '1px solid rgba(239, 63, 37, 0.3)', padding: '10px', borderRadius: '8px', marginTop: '8px' }}>
+                  <span style={{ color: '#ef3f25', fontWeight: 700 }}>PILIH PRINTER AKTIF</span>
+                  <select 
+                    value={settings.printer.printer} 
+                    onChange={(e) => update('printer', { printer: e.target.value })}
+                    style={{ marginTop: '4px', border: '1px solid #ef3f25' }}
+                  >
+                    <option value={`BT: ${settings.printer.printerBluetooth}`}>Bluetooth ({settings.printer.printerBluetooth})</option>
+                    <option value={`LAN: ${settings.printer.printerIp}`}>LAN ({settings.printer.printerIp})</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="setting-control" style={{ marginTop: '8px' }}>
                 <span>PRINTER STATUS</span>
                 <button type="button">{settings.printer.printerOn ? (settings.printer.printer ? 'READY' : 'OFFLINE') : 'OFF'}<b>▼</b></button>
               </div>
