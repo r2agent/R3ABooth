@@ -2,8 +2,6 @@
    PRINT SERVICE — Modular Print Provider System (FINAL RAWBT)
    ============================================================ */
 
-import { Browser } from '@capacitor/browser';
-
 export type PrintOptions = {
   copies: number;
   paperSize: string;
@@ -77,7 +75,7 @@ const RAWBT_PROVIDER: PrintProvider = {
       if (opts.mode === 'text' && opts.textPayload) {
         // === MODE TEXT (Test Print) ===
         const base64Data = safeBase64Encode(opts.textPayload);
-        // Teks tetap pakai location.href (sudah terbukti memunculkan pop up)
+        // Teks pakai location.href (terbukti memunculkan pop-up)
         window.location.href = `rawbt:base64,${base64Data}`;
         await new Promise((r) => setTimeout(r, 2000));
         return true;
@@ -88,14 +86,14 @@ const RAWBT_PROVIDER: PrintProvider = {
       
       const resizedUrl = await resizeImageForThermal(opts.dataUrl, opts.paperSize);
       const base64Data = resizedUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-      
       const intentUrl = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
       
-      // ⚡ FIX: Gunakan Browser.open agar tidak diblokir WebView
+      // ⚡ FIX: Pakai AppLauncher via dynamic import (Aman untuk Vercel & anti-hang)
       try {
-        await Browser.open({ url: intentUrl, windowName: '_system' });
-      } catch {
-        // Fallback jika Browser plugin gagal
+        const { AppLauncher } = await import('@capacitor/app-launcher');
+        await AppLauncher.openUrl({ url: intentUrl });
+      } catch (err) {
+        console.warn('[Print] AppLauncher gagal, fallback ke location.href', err);
         window.location.href = intentUrl;
       }
       
@@ -115,22 +113,16 @@ const NETWORK_PROVIDER: PrintProvider = {
   print: async (opts) => {
     const ip = opts.printerName?.replace('LAN:', '').trim();
     if (!ip) return false;
-
     try {
-      console.log(`[Print] Mengirim gambar ke IP ${ip} (Port 9100)...`);
       const res = await fetch(opts.dataUrl);
       const blob = await res.blob();
-      
       const response = await fetch(`http://${ip}:9100/print`, {
         method: 'POST',
         body: blob,
         headers: { 'Content-Type': 'application/octet-stream' },
       });
-
-      if (response.ok) return true;
-      throw new Error(`Printer IP HTTP Status: ${response.status}`);
-    } catch (err) {
-      console.error(`[Print] ❌ Gagal Network Print:`, err);
+      return response.ok;
+    } catch {
       return false;
     }
   }
@@ -140,33 +132,7 @@ const NETWORK_PROVIDER: PrintProvider = {
 const BROWSER_PRINT_PROVIDER: PrintProvider = {
   name: 'browser',
   isAvailable: async () => true,
-  print: async (opts): Promise<boolean> => {
-    return new Promise((resolve) => {
-      const iframe = document.createElement('iframe');
-      iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
-      iframe.onload = () => {
-        const doc = iframe.contentWindow?.document;
-        if (!doc) { resolve(false); return; }
-        doc.open();
-        doc.write(`
-          <html>
-            <head><title>Print</title>
-              <style>@page { size: auto; margin: 0; } body { margin:0; padding:0; text-align:center; }</style>
-            </head>
-            <body><img src="${opts.dataUrl}" /></body>
-          </html>
-        `);
-        doc.close();
-        iframe.contentWindow?.focus();
-        setTimeout(() => {
-          try { iframe.contentWindow?.print(); } catch { /* ignore */ }
-          setTimeout(() => { iframe.remove(); resolve(true); }, 1000);
-        }, 500);
-      };
-      iframe.onerror = () => { iframe.remove(); resolve(false); };
-      document.body.appendChild(iframe);
-    });
-  },
+  print: async () => false,
 };
 
 registerProvider(NETWORK_PROVIDER);
@@ -184,24 +150,15 @@ export async function printResult(opts: PrintOptions): Promise<boolean> {
     }
   }
 
-  if (!selectedProvider) {
-    console.warn('[Print] Tidak ada provider yang tersedia.');
-    return false;
-  }
-
-  console.log(`[Print] Menggunakan provider: ${selectedProvider.name} (Target: ${opts.printerName})`);
+  if (!selectedProvider) return false;
 
   let success = true;
   const copies = Math.max(1, Math.min(5, opts.copies || 1));
 
   for (let i = 0; i < copies; i++) {
-    console.log(`[Print] Mencetak copy ke-${i + 1} dari ${copies}...`);
     const ok = await selectedProvider.print(opts);
     if (!ok) success = false;
-    
-    if (i < copies - 1) {
-      await new Promise((r) => setTimeout(r, 1500));
-    }
+    if (i < copies - 1) await new Promise((r) => setTimeout(r, 1500));
   }
   
   return success;
@@ -226,23 +183,16 @@ export function buildEscPosTestPrint(opts: {
   };
 
   return [
-    '\x1B\x40',                 
-    '\x1B\x61\x01',             
-    '\x1B\x21\x11',             
+    '\x1B\x40', '\x1B\x61\x01', '\x1B\x21\x11',
     center('TEST PRINT') + '\n',
-    '\x1B\x21\x00',             
-    center(appName) + '\n',
-    '\x1B\x61\x00',             
-    line + '\n',
+    '\x1B\x21\x00', center(appName) + '\n',
+    '\x1B\x61\x00', line + '\n',
     `Device  : ${deviceId.slice(-8)}\n`,
     `Time    : ${now}\n`,
     `Paper   : ${paperSize}\n`,
     `Version : ${version}\n`,
-    line + '\n',
-    '\x1B\x61\x01',             
-    'PRINTER OK\n',
-    'siap beroperasi\n',
-    '\n\n\n',                   
-    '\x1D\x56\x00',             
+    line + '\n', '\x1B\x61\x01',
+    'PRINTER OK\n', 'siap beroperasi\n',
+    '\n\n\n', '\x1D\x56\x00',
   ].join('');
 }
