@@ -2,6 +2,8 @@
    PRINT SERVICE — Modular Print Provider System (FIXED RAWBT)
    ============================================================ */
 
+import { AppLauncher } from '@capacitor/app-launcher';
+
 export type PrintOptions = {
   copies: number;
   paperSize: string;
@@ -61,28 +63,32 @@ const RAWBT_PROVIDER: PrintProvider = {
     try {
       console.log(`[Print] RawBT → mode=${opts.mode || 'image'}`);
 
+      let url = '';
+
       // === MODE TEXT (Test Print) ===
       if (opts.mode === 'text' && opts.textPayload) {
         const base64Data = safeBase64Encode(opts.textPayload);
-        
         // Format URI resmi RawBT untuk base64
-        const url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
-        
-        window.location.href = url;
-        await new Promise((r) => setTimeout(r, 2500));
-        return true;
+        url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+      } 
+      // === MODE IMAGE (Cetak Foto / Struk) ===
+      else {
+        if (!opts.dataUrl) return false;
+        const base64Data = opts.dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+        url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
       }
 
-      // === MODE IMAGE (Cetak Foto / Struk) ===
-      if (!opts.dataUrl) return false;
-      const base64Data = opts.dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-      const url = `intent:base64,${base64Data}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
+      // ⚡ FIX UTAMA: Gunakan AppLauncher (bukan window.location.href)
+      // AppLauncher mem-bypass pemblokiran WebView Capacitor.
+      const result = await AppLauncher.openUrl({ url });
       
-      window.location.href = url;
-      await new Promise((r) => setTimeout(r, 2500));
-      return true;
+      console.log('[Print] AppLauncher result:', result);
+      
+      // Beri jeda sebentar agar RawBT sempat loading
+      await new Promise((r) => setTimeout(r, 2000));
+      return result.completed; 
     } catch (err) {
-      console.error(`[Print] ❌ Gagal RawBT:`, err);
+      console.error(`[Print] ❌ Gagal membuka RawBT:`, err);
       return false;
     }
   },
