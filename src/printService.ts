@@ -203,18 +203,12 @@ async function convertImageToEscPosBitmap(dataUrl: string, targetWidth: number =
     gray[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
   }
 
-  // ✅ 1. Brightness, Contrast & Thresholding (Bersihkan background)
+  // ✅ 1. Brightness & Contrast adjustment (Natural)
   const brightness = 20; 
   const contrast = 1.1;  
   for (let i = 0; i < gray.length; i++) {
     let v = gray[i] + brightness;
     v = (v - 128) * contrast + 128;
-    
-    // ⚡ THRESHOLDING: Paksa area terang jadi putih bersih
-    if (v > 180) {
-      v = 255;
-    }
-    
     gray[i] = Math.max(0, Math.min(255, v));
   }
 
