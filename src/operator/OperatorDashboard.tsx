@@ -157,6 +157,7 @@ export const OperatorDashboard = ({
   const [renameInput, setRenameInput] = useState<string>('');
   const [renaming, setRenaming] = useState(false);
   const [deviceFilter, setDeviceFilter] = useState<'all' | 'online' | 'offline'>('all');
+  const isSecondaryAdmin = !!focusDeviceId;
   const focusAppliedRef = useRef(false);
 
   useEffect(() => {
@@ -1279,7 +1280,7 @@ export const OperatorDashboard = ({
           {actionMessage ? <div className="op-toast">{actionMessage}</div> : null}
 
           {/* STAT CARDS */}
-          <section className="op-stats">
+          <section className="op-stats" style={{ gridTemplateColumns: isSecondaryAdmin ? 'repeat(3, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))' }}>
             <StatCard
               label="Sesi"
               shortLabel="SESI"
@@ -1298,16 +1299,18 @@ export const OperatorDashboard = ({
               deltaTone="up"
               subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
             />
-            <StatCard
-              label="Pendapatan"
-              shortLabel="OMZET"
-              value={`Rp ${(displayStats.totalRevenue).toLocaleString('id-ID')}`}
-              numericValue={displayStats.totalRevenue}
-              delta="Est."
-              deltaTone="flat"
-              tone="info"
-              subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
-            />
+            {!isSecondaryAdmin && (
+              <StatCard
+                label="Pendapatan"
+                shortLabel="OMZET"
+                value={`Rp ${(displayStats.totalRevenue).toLocaleString('id-ID')}`}
+                numericValue={displayStats.totalRevenue}
+                delta="Est."
+                deltaTone="flat"
+                tone="info"
+                subtitle={selectedDevice ? (selectedDevice.deviceName || 'Device') : 'Semua Device'}
+              />
+            )}
             <StatCard
               label="Failed"
               shortLabel="FAIL"
@@ -1368,22 +1371,24 @@ export const OperatorDashboard = ({
 
                     <div className="op-detail">
                       {/* SECONDARY ADMIN LINK */}
-                      <div className="op-rename-box" style={{ background: 'rgba(96,165,250,.08)', borderColor: 'rgba(96,165,250,.3)' }}>
-                        <div className="op-rename-box__head" style={{ color: 'var(--op-info)' }}>
-                          <Link2 size={13} /> SECONDARY ADMIN LINK
+                      {!isSecondaryAdmin && (
+                        <div className="op-rename-box" style={{ background: 'rgba(96,165,250,.08)', borderColor: 'rgba(96,165,250,.3)' }}>
+                          <div className="op-rename-box__head" style={{ color: 'var(--op-info)' }}>
+                            <Link2 size={13} /> SECONDARY ADMIN LINK
+                          </div>
+                          <p style={{ margin: '0 0 10px', fontSize: 11.5, color: 'var(--op-muted)', lineHeight: 1.5 }}>
+                            Salin link ini untuk buka dashboard operator khusus device ini di layar lain (HP/tablet/laptop).
+                          </p>
+                          <button
+                            type="button"
+                            className="op-btn op-btn--ghost"
+                            style={{ width: '100%', justifyContent: 'center' }}
+                            onClick={handleCopyAdminLink}
+                          >
+                            <Copy size={14} /> COPY LINK ADMIN
+                          </button>
                         </div>
-                        <p style={{ margin: '0 0 10px', fontSize: 11.5, color: 'var(--op-muted)', lineHeight: 1.5 }}>
-                          Salin link ini untuk buka dashboard operator khusus device ini di layar lain (HP/tablet/laptop).
-                        </p>
-                        <button
-                          type="button"
-                          className="op-btn op-btn--ghost"
-                          style={{ width: '100%', justifyContent: 'center' }}
-                          onClick={handleCopyAdminLink}
-                        >
-                          <Copy size={14} /> COPY LINK ADMIN
-                        </button>
-                      </div>
+                      )}
 
                       {/* RENAME */}
                       <div className="op-rename-box">
@@ -2084,45 +2089,47 @@ export const OperatorDashboard = ({
               </div>
 
               {/* HEALTH SUMMARY (AGREGAT) */}
-              <div className="op-card">
-                <div className="op-card__head">
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="op-card__title">Ringkasan Health</div>
-                    <div className="op-card__sub">{eventFiltered.length} device terdeteksi</div>
+              {!isSecondaryAdmin && (
+                <div className="op-card">
+                  <div className="op-card__head">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="op-card__title">Ringkasan Health</div>
+                      <div className="op-card__sub">{eventFiltered.length} device terdeteksi</div>
+                    </div>
+                  </div>
+
+                  <div className="op-row">
+                    <span className="op-row__label">Online</span>
+                    <span className="op-badge op-badge--ok">{onlineCount}</span>
+                  </div>
+                  <div className="op-row">
+                    <span className="op-row__label">Offline</span>
+                    <span className="op-badge op-badge--muted">{offlineCount}</span>
+                  </div>
+                  <div className="op-row">
+                    <span className="op-row__label">Drive Connected</span>
+                    <span className="op-badge op-badge--info">{aggregatedStats.driveConnectedCount}</span>
+                  </div>
+                  <div className="op-row">
+                    <span className="op-row__label">Pending Upload</span>
+                    <span className={`op-badge ${aggregatedStats.totalPending > 0 ? 'op-badge--warn' : 'op-badge--ok'}`}>
+                      {aggregatedStats.totalPending}
+                    </span>
+                  </div>
+                  <div className="op-row">
+                    <span className="op-row__label">Failed Upload</span>
+                    <span className={`op-badge ${aggregatedStats.totalFailed > 0 ? 'op-badge--err' : 'op-badge--ok'}`}>
+                      {aggregatedStats.totalFailed}
+                    </span>
+                  </div>
+                  <div className="op-row">
+                    <span className="op-row__label">Active Alerts</span>
+                    <span className={`op-badge ${aggregatedStats.totalAlerts > 0 ? 'op-badge--warn' : 'op-badge--ok'}`}>
+                      {aggregatedStats.totalAlerts}
+                    </span>
                   </div>
                 </div>
-
-                <div className="op-row">
-                  <span className="op-row__label">Online</span>
-                  <span className="op-badge op-badge--ok">{onlineCount}</span>
-                </div>
-                <div className="op-row">
-                  <span className="op-row__label">Offline</span>
-                  <span className="op-badge op-badge--muted">{offlineCount}</span>
-                </div>
-                <div className="op-row">
-                  <span className="op-row__label">Drive Connected</span>
-                  <span className="op-badge op-badge--info">{aggregatedStats.driveConnectedCount}</span>
-                </div>
-                <div className="op-row">
-                  <span className="op-row__label">Pending Upload</span>
-                  <span className={`op-badge ${aggregatedStats.totalPending > 0 ? 'op-badge--warn' : 'op-badge--ok'}`}>
-                    {aggregatedStats.totalPending}
-                  </span>
-                </div>
-                <div className="op-row">
-                  <span className="op-row__label">Failed Upload</span>
-                  <span className={`op-badge ${aggregatedStats.totalFailed > 0 ? 'op-badge--err' : 'op-badge--ok'}`}>
-                    {aggregatedStats.totalFailed}
-                  </span>
-                </div>
-                <div className="op-row">
-                  <span className="op-row__label">Active Alerts</span>
-                  <span className={`op-badge ${aggregatedStats.totalAlerts > 0 ? 'op-badge--warn' : 'op-badge--ok'}`}>
-                    {aggregatedStats.totalAlerts}
-                  </span>
-                </div>
-              </div>
+              )}
 
               {/* STORAGE SUMMARY (AGREGAT) */}
               <div className="op-card">
@@ -2156,17 +2163,19 @@ export const OperatorDashboard = ({
               </div>
 
               {/* EXPORT CSV */}
-              <div className="op-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div className="op-card__head" style={{ marginBottom: 0 }}>
-                  <div style={{ flex: 1 }}>
-                    <div className="op-card__title">Export Laporan</div>
-                    <div className="op-card__sub">Unduh data statistik ke CSV</div>
+              {!isSecondaryAdmin && (
+                <div className="op-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="op-card__head" style={{ marginBottom: 0 }}>
+                    <div style={{ flex: 1 }}>
+                      <div className="op-card__title">Export Laporan</div>
+                      <div className="op-card__sub">Unduh data statistik ke CSV</div>
+                    </div>
                   </div>
+                  <button className="op-btn op-btn--accent" onClick={handleExportCSV} style={{ width: '100%', justifyContent: 'center' }}>
+                    <FileSpreadsheet size={16} /> DOWNLOAD DATA
+                  </button>
                 </div>
-                <button className="op-btn op-btn--accent" onClick={handleExportCSV} style={{ width: '100%', justifyContent: 'center' }}>
-                  <FileSpreadsheet size={16} /> DOWNLOAD DATA
-                </button>
-              </div>
+              )}
 
             </div>
           </div>
