@@ -37,6 +37,8 @@ import {
   Database,
   Link2,
   Copy,
+  User,
+  LogOut,
 } from 'lucide-react';
 import type { AllSettings } from '../settingsStore';
 import {
@@ -144,6 +146,17 @@ export const OperatorDashboard = ({
 }) => {
   const [, setTick] = useState(0);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  // ⚡ STATE UNTUK LOGIN ADMIN
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return sessionStorage.getItem('r3a_admin_auth') === 'true';
+  });
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [loginError, setLoginError] = useState('');
+  
+  // ⚡ STATE UNTUK MODAL LINK SECONDARY ADMIN
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [generatedPasscode, setGeneratedPasscode] = useState('');
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const saved = localStorage.getItem(THEME_KEY);
@@ -269,6 +282,42 @@ export const OperatorDashboard = ({
     return () => clearTimeout(t);
   }, [actionMessage]);
 
+  // ⚡ FUNGSI LOGIN & LOGOUT
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // ⚡ LOGIN SECONDARY ADMIN (Wajib pakai passcode yang di-generate, TIDAK BOLEH pakai master pass)
+    if (focusDeviceId) {
+      const savedPass = localStorage.getItem(`r3a_secondary_pass_${focusDeviceId}`);
+      
+      // Hanya berhasil jika passcode sudah di-generate DAN cocok
+      if (savedPass && loginPass === savedPass) {
+        setIsAuthenticated(true);
+        sessionStorage.setItem('r3a_admin_auth', 'true');
+        setLoginError('');
+      } else {
+        setLoginError('❌ Passcode salah atau belum di-generate oleh Master Admin!');
+      }
+      return;
+    }
+
+    // ⚡ LOGIN MASTER ADMIN (Hanya jalan di #operator tanpa DEVICE_ID)
+    if (loginUser === 'R3Agent' && loginPass === '110106') {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('r3a_admin_auth', 'true');
+      setLoginError('');
+    } else {
+      setLoginError('❌ Username atau Passcode Master salah!');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem('r3a_admin_auth');
+    setLoginUser('');
+    setLoginPass('');
+  };
+
   const handleCommand = useCallback(async (type: CommandType, label: string) => {
     if (!selectedDevice) {
       setActionMessage('Pilih device dulu.');
@@ -330,16 +379,23 @@ export const OperatorDashboard = ({
     }
   }, []);
 
-  const handleCopyAdminLink = useCallback(async () => {
+  const handleGenerateAdminLink = useCallback(() => {
+    if (!selectedDevice) return;
+    // Generate 6 digit angka acak
+    const newPass = Math.floor(100000 + Math.random() * 900000).toString();
+    localStorage.setItem(`r3a_secondary_pass_${selectedDevice.deviceId}`, newPass);
+    setGeneratedPasscode(newPass);
+    setShowLinkModal(true);
+  }, [selectedDevice]);
+
+  const handleCopyAll = () => {
     if (!selectedDevice) return;
     const url = `${window.location.origin}/#operator/${selectedDevice.deviceId}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setActionMessage(`✅ Link admin dikopi:\n${url}`);
-    } catch {
-      setActionMessage(`Link: ${url}`);
-    }
-  }, [selectedDevice]);
+    const text = `Link Admin: ${url}\nPasscode: ${generatedPasscode}`;
+    navigator.clipboard.writeText(text);
+    setActionMessage('✅ Link & Passcode berhasil dicopy!');
+    setShowLinkModal(false);
+  };
 
   const handleExportCSV = useCallback(() => {
     const headers = ['Metric', 'Value'];
@@ -381,6 +437,66 @@ export const OperatorDashboard = ({
   const storagePct = selectedDevice && selectedDevice.storageQuota > 0
     ? ((selectedDevice.storageUsage ?? 0) / selectedDevice.storageQuota) * 100
     : 0;
+
+  // ⚡ JIKA BELUM LOGIN, TAMPILKAN HALAMAN LOGIN
+  if (!isAuthenticated) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#0e0e10', color: '#f4f4f6', fontFamily: "'DM Sans', sans-serif",
+        padding: 20
+      }}>
+        <form onSubmit={handleLogin} style={{
+          background: '#17171a', padding: '32px', borderRadius: '16px',
+          border: '1px solid #2a2a31', width: '100%', maxWidth: '400px',
+          display: 'flex', flexDirection: 'column', gap: '20px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 10 }}>
+            <div style={{ background: '#ef3f25', width: 60, height: 60, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Lock size={30} color="#fff" />
+            </div>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>ADMIN GATE</h1>
+            <p style={{ margin: '8px 0 0', fontSize: 13, color: '#8a8a95' }}>Masukkan kredensial untuk mengakses Operator Dashboard.</p>
+          </div>
+
+          {loginError && (
+            <div style={{ background: 'rgba(239,63,37,0.1)', border: '1px solid #ef3f25', color: '#ff8574', padding: '10px', borderRadius: '8px', fontSize: 13, textAlign: 'center' }}>
+              {loginError}
+            </div>
+          )}
+
+          {!focusDeviceId && (
+            <div>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#8a8a95', marginBottom: 8 }}>USERNAME</label>
+              <input
+                type="text"
+                value={loginUser}
+                onChange={(e) => setLoginUser(e.target.value)}
+                placeholder="Masukkan username"
+                style={{ width: '100%', padding: '12px', background: '#1e1e23', border: '1px solid #2a2a31', borderRadius: '8px', color: '#fff', fontSize: 14, outline: 'none' }}
+              />
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: '#8a8a95', marginBottom: 8 }}>PASSCODE</label>
+            <input
+              type="text"
+              value={loginPass}
+              onChange={(e) => setLoginPass(e.target.value)}
+              placeholder={focusDeviceId ? "Masukkan 6 digit passcode" : "Masukkan passcode"}
+              style={{ width: '100%', padding: '12px', background: '#1e1e23', border: '1px solid #2a2a31', borderRadius: '8px', color: '#fff', fontSize: 14, outline: 'none' }}
+            />
+          </div>
+
+          <button type="submit" style={{ padding: '14px', background: '#ef3f25', color: '#fff', border: 'none', borderRadius: '8px', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 10 }}>
+            LOGIN
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1263,6 +1379,17 @@ export const OperatorDashboard = ({
                 </button>
               ) : null}
 
+              {/* ⚡ TOMBOL LOGOUT */}
+              <button
+                type="button"
+                className="op-icon-btn"
+                onClick={handleLogout}
+                title="Logout Admin"
+                aria-label="Logout Admin"
+                style={{ color: 'var(--op-accent)' }}
+              >
+                <LogOut size={18} />
+              </button>
               <button
                 type="button"
                 className="op-icon-btn"
@@ -1387,9 +1514,9 @@ export const OperatorDashboard = ({
                             type="button"
                             className="op-btn op-btn--ghost"
                             style={{ width: '100%', justifyContent: 'center' }}
-                            onClick={handleCopyAdminLink}
+                            onClick={handleGenerateAdminLink}
                           >
-                            <Copy size={14} /> COPY LINK ADMIN
+                            <Copy size={14} /> GENERATE LINK & PASSCODE
                           </button>
                         </div>
                       )}
@@ -2189,6 +2316,44 @@ export const OperatorDashboard = ({
           </div>
         </div>
       </main>
+
+      {/* ⚡ MODAL GENERATE LINK */}
+      {showLinkModal && selectedDevice && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--op-surface)', border: '1px solid var(--op-border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 18, textAlign: 'center' }}>Secondary Admin Access</h3>
+            
+            <div style={{ background: 'var(--op-surface-2)', padding: 16, borderRadius: 8, marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--op-muted)', marginBottom: 4 }}>LINK:</div>
+              <div style={{ fontSize: 12, wordBreak: 'break-all', marginBottom: 12, fontFamily: 'monospace' }}>
+                {window.location.origin}/#operator/{selectedDevice.deviceId}
+              </div>
+              
+              <div style={{ fontSize: 11, color: 'var(--op-muted)', marginBottom: 4 }}>PASSCODE:</div>
+              <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 4, color: 'var(--op-accent)', fontFamily: 'monospace' }}>
+                {generatedPasscode}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button 
+                onClick={() => setShowLinkModal(false)}
+                className="op-btn op-btn--ghost" 
+                style={{ flex: 1, justifyContent: 'center' }}
+              >
+                TUTUP
+              </button>
+              <button 
+                onClick={handleCopyAll}
+                className="op-btn op-btn--accent" 
+                style={{ flex: 1, justifyContent: 'center' }}
+              >
+                <Copy size={16} /> COPY ALL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
