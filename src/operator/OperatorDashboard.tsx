@@ -1228,9 +1228,11 @@ export const OperatorDashboard = ({
                 <i />
                 {onlineCount > 0 ? 'Online' : 'Idle'}
               </span>
-              <span className="op-pill">
-                {onlineCount} / {eventFiltered.length}
-              </span>
+              {!isSecondaryAdmin && (
+                <span className="op-pill">
+                  {onlineCount} / {eventFiltered.length}
+                </span>
+              )}
               {aggregatedStats.totalAlerts > 0 ? (
                 <span className="op-pill op-pill--alert" title="Total alerts">
                   <i /> {aggregatedStats.totalAlerts}
@@ -1334,15 +1336,17 @@ export const OperatorDashboard = ({
                 {selectedDevice ? (
                   <>
                     <div className="op-card__head">
-                      <button
-                        type="button"
-                        className="op-back-btn"
-                        onClick={() => setSelectedDeviceId(null)}
-                        title="Kembali ke daftar"
-                        aria-label="Kembali ke daftar device"
-                      >
-                        <ArrowLeft size={16} />
-                      </button>
+                      {!isSecondaryAdmin && (
+                        <button
+                          type="button"
+                          className="op-back-btn"
+                          onClick={() => setSelectedDeviceId(null)}
+                          title="Kembali ke daftar"
+                          aria-label="Kembali ke daftar device"
+                        >
+                          <ArrowLeft size={16} />
+                        </button>
+                      )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="op-card__title">
                           {selectedDevice.deviceName
@@ -1391,35 +1395,37 @@ export const OperatorDashboard = ({
                       )}
 
                       {/* RENAME */}
-                      <div className="op-rename-box">
-                        <div className="op-rename-box__head">
-                          <Edit3 size={13} /> GANTI NAMA
+                      {!isSecondaryAdmin && (
+                        <div className="op-rename-box">
+                          <div className="op-rename-box__head">
+                            <Edit3 size={13} /> GANTI NAMA
+                          </div>
+                          <div className="op-label">NAMA BARU</div>
+                          <div className="op-rename-row">
+                            <input
+                              type="text"
+                              className="op-input"
+                              value={renameInput}
+                              onChange={(e) => setRenameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && renameInput.trim()) void handleRename();
+                              }}
+                              placeholder="Contoh: Booth Utama…"
+                            />
+                            <button
+                              type="button"
+                              className="op-btn op-btn--accent"
+                              onClick={handleRename}
+                              disabled={renaming || !renameInput.trim()}
+                            >
+                              {renaming ? 'MENGIRIM…' : 'RENAME'}
+                            </button>
+                          </div>
+                          <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--op-muted)', lineHeight: 1.5 }}>
+                            💡 Diterapkan dalam ~5 detik setelah device online.
+                          </p>
                         </div>
-                        <div className="op-label">NAMA BARU</div>
-                        <div className="op-rename-row">
-                          <input
-                            type="text"
-                            className="op-input"
-                            value={renameInput}
-                            onChange={(e) => setRenameInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && renameInput.trim()) void handleRename();
-                            }}
-                            placeholder="Contoh: Booth Utama…"
-                          />
-                          <button
-                            type="button"
-                            className="op-btn op-btn--accent"
-                            onClick={handleRename}
-                            disabled={renaming || !renameInput.trim()}
-                          >
-                            {renaming ? 'MENGIRIM…' : 'RENAME'}
-                          </button>
-                        </div>
-                        <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--op-muted)', lineHeight: 1.5 }}>
-                          💡 Diterapkan dalam ~5 detik setelah device online.
-                        </p>
-                      </div>
+                      )}
 
                       {/* IDENTITY */}
                       <div>
@@ -1641,25 +1647,27 @@ export const OperatorDashboard = ({
                       </div>
 
                       {/* DELETE DEVICE */}
-                      <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--op-border)' }}>
-                        <button
-                          type="button"
-                          className="op-btn"
-                          style={{
-                            width: '100%',
-                            background: 'rgba(239,63,37,.1)',
-                            color: 'var(--op-accent)',
-                            border: '1px solid rgba(239,63,37,.3)',
-                            justifyContent: 'center'
-                          }}
-                          onClick={() => handleDeleteDevice(selectedDevice.deviceId)}
-                        >
-                          <ShieldAlert size={16} /> Hapus Device dari Daftar
-                        </button>
-                        <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--op-muted)', textAlign: 'center' }}>
-                          *Device akan muncul kembali secara otomatis jika masih terhubung ke internet.
-                        </p>
-                      </div>
+                      {!isSecondaryAdmin && (
+                        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--op-border)' }}>
+                          <button
+                            type="button"
+                            className="op-btn"
+                            style={{
+                              width: '100%',
+                              background: 'rgba(239,63,37,.1)',
+                              color: 'var(--op-accent)',
+                              border: '1px solid rgba(239,63,37,.3)',
+                              justifyContent: 'center'
+                            }}
+                            onClick={() => handleDeleteDevice(selectedDevice.deviceId)}
+                          >
+                            <ShieldAlert size={16} /> Hapus Device dari Daftar
+                          </button>
+                          <p style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--op-muted)', textAlign: 'center' }}>
+                            *Device akan muncul kembali secara otomatis jika masih terhubung ke internet.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (
