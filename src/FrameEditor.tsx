@@ -1,5 +1,5 @@
-import { useRef, useState, useCallback, useEffect, type CSSProperties } from 'react';
-import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check, Eye, EyeOff } from 'lucide-react';
+import { useRef, useState, useCallback, useEffect, useLayoutEffect, type CSSProperties } from 'react';
+import { Copy, Plus, Trash2, Upload, X, Lock, Unlock, RotateCcw, Check, Eye, EyeOff, ZoomIn, ZoomOut } from 'lucide-react';
 import { createSlot, duplicateSlot } from './eventStore';
 import { loadCameraSettings, getAspectRatioValue } from './cameraStore';
 import type { Frame, Slot } from './eventStore';
@@ -73,6 +73,124 @@ export const FrameEditor = ({
       photoScale: updates.photoScale ?? photoScale,
       photoRotation: updates.photoRotation ?? photoRotation,
     });
+  };
+
+  // ---- Zoom & pan canvas ----
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 5;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  const [fitSize, setFitSize] = useState<{ w: number; h: number } | null>(null);
+  const [spaceDown, setSpaceDown] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const zoomAnchor = useRef<{ fx: number; fy: number; cx: number; cy: number } | null>(null);
+  const panMoved = useRef(false);
+  const pointerInStage = useRef(false);
+
+  // Ukuran "fit" = canvas muat penuh di area yang tersedia (zoom 100%)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const calc = () => {
+      const cs = getComputedStyle(el);
+      const availW = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const availH = el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      if (availW <= 0 || availH <= 0) return;
+      const w = Math.floor(Math.min(availW, availH * frameAspect, 900));
+      setFitSize({ w, h: Math.floor(w / frameAspect) });
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [frameAspect]);
+
+  // Zoom mengarah ke titik kursor (atau tengah area kalau lewat tombol)
+  const applyZoom = useCallback((next: number, cx?: number, cy?: number) => {
+    const sc = scrollRef.current;
+    const cv = editorRef.current;
+    const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(next * 100) / 100));
+    if (sc && cv) {
+      const s = sc.getBoundingClientRect();
+      const c = cv.getBoundingClientRect();
+      const px = cx ?? s.left + sc.clientWidth / 2;
+      const py = cy ?? s.top + sc.clientHeight / 2;
+      zoomAnchor.current = { fx: (px - c.left) / c.width, fy: (py - c.top) / c.height, cx: px, cy: py };
+    }
+    setZoom(clamped);
+  }, []);
+
+  useLayoutEffect(() => {
+    const a = zoomAnchor.current;
+    zoomAnchor.current = null;
+    const sc = scrollRef.current;
+    const cv = editorRef.current;
+    if (!a || !sc || !cv) return;
+    const c = cv.getBoundingClientRect();
+    sc.scrollLeft += c.left + a.fx * c.width - a.cx;
+    sc.scrollTop += c.top + a.fy * c.height - a.cy;
+  }, [zoom]);
+
+  // Ctrl/Cmd + scroll = zoom
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      applyZoom(zoomRef.current * Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [applyZoom]);
+
+  // Tahan Space = mode geser (pan)
+  useEffect(() => {
+    const isTyping = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && pointerInStage.current && !isTyping(e.target)) { e.preventDefault(); setSpaceDown(true); }
+    };
+    const up = (e: KeyboardEvent) => { if (e.code === 'Space') setSpaceDown(false); };
+    const blur = () => setSpaceDown(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, []);
+
+  // Ganti frame -> kembali ke fit
+  useEffect(() => { setZoom(1); }, [frame.id]);
+
+  const handlePanStart = (e: React.MouseEvent) => {
+    if (!(e.button === 1 || (e.button === 0 && spaceDown))) return;
+    const sc = scrollRef.current;
+    if (!sc) return;
+    e.preventDefault();
+    e.stopPropagation();
+    panMoved.current = false;
+    setPanning(true);
+    const sx = e.clientX, sy = e.clientY, sl = sc.scrollLeft, st = sc.scrollTop;
+    const move = (ev: MouseEvent) => {
+      panMoved.current = true;
+      sc.scrollLeft = sl - (ev.clientX - sx);
+      sc.scrollTop = st - (ev.clientY - sy);
+    };
+    const up = () => {
+      setPanning(false);
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
   };
 
   const resetPhotoTransform = () => {
@@ -256,15 +374,33 @@ export const FrameEditor = ({
       </div>
 
       <div className="frame-editor-body">
-        <div className="frame-editor-scroll">
+        <div
+          className="frame-editor-stage"
+          onMouseEnter={() => { pointerInStage.current = true; }}
+          onMouseLeave={() => { pointerInStage.current = false; }}
+        >
+        <div className="frame-editor-zoom" title="Ctrl + scroll: zoom • Space + drag / klik tengah mouse: geser">
+          <button type="button" onClick={() => applyZoom(zoomRef.current / 1.25)} disabled={zoom <= MIN_ZOOM} title="Zoom out"><ZoomOut size={14} /></button>
+          <button type="button" className="frame-editor-zoom-value" onClick={() => applyZoom(1)} title="Reset ke ukuran fit">{Math.round(zoom * 100)}%</button>
+          <button type="button" onClick={() => applyZoom(zoomRef.current * 1.25)} disabled={zoom >= MAX_ZOOM} title="Zoom in"><ZoomIn size={14} /></button>
+          <button type="button" onClick={() => applyZoom(1)} disabled={zoom === 1} title="Fit ke layar">FIT</button>
+        </div>
+        <div
+          ref={scrollRef}
+          className={`frame-editor-scroll${spaceDown ? ' is-pan-ready' : ''}${panning ? ' is-panning' : ''}`}
+          onMouseDownCapture={handlePanStart}
+        >
           <div
             ref={editorRef}
             className="frame-editor-canvas"
-            style={{ aspectRatio: frameAspect }}
+            style={{
+              aspectRatio: frameAspect,
+              ...(fitSize ? { width: fitSize.w * zoom, height: fitSize.h * zoom, maxWidth: 'none', maxHeight: 'none', flex: 'none' } : {}),
+            }}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
-            onClick={() => setSelectedSlotId(null)}
+            onClick={() => { if (panMoved.current) { panMoved.current = false; return; } setSelectedSlotId(null); }}
           >
             {frame.image ? (
               <img src={frame.image} alt={frame.name} className="frame-editor-bg" draggable={false} />
@@ -284,6 +420,7 @@ export const FrameEditor = ({
               </div>
             ))}
           </div>
+        </div>
         </div>
 
         <div
